@@ -1,0 +1,37 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { createClient } from '../../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+// getUser() makes a network call to Supabase to validate the JWT.
+// Do not use getSession() here — it reads from cookies and is not authoritative.
+const { data: { user }, error: userError } = await supabase.auth.getUser()
+
+if (!user || userError) {
+  return Astro.redirect('/login?redirect=/admin')
+}
+
+// Confirm super_admin role via DB function.
+// has_role() is SECURITY DEFINER and bypasses RLS safely.
+// Parameter name confirmed from migration 002_auth_roles.sql.
+const { data: isSuperAdmin, error: roleError } = await supabase.rpc('has_role', {
+  role_code: 'super_admin',
+})
+
+if (roleError || !isSuperAdmin) {
+  return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+}
+---
+<BaseLayout title="Admin — DegreeWiki">
+  <main class="max-w-2xl mx-auto p-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold">Admin</h1>
+      <form method="post" action="/api/auth/logout">
+        <button type="submit" class="text-sm text-red-600 underline">Logout</button>
+      </form>
+    </div>
+    <p class="text-sm text-gray-500 mb-2">Signed in as <strong>{user.email}</strong></p>
+    <p class="text-green-700 font-medium">Access granted — super_admin confirmed.</p>
+  </main>
+</BaseLayout>

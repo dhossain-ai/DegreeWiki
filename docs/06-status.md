@@ -4,11 +4,35 @@ Last updated: 2026-06-15
 
 ## Current Phase
 
-Phase 02 — Supabase Cloud Dev Deployment and RLS Validation — COMPLETE.
+Phase 03 — App Foundation and Auth — COMPLETE.
 
-Cloud dev project provisioned in ap-south-1 / Mumbai. Migrations 001–015 pushed successfully. Remote migration list matches local. super_admin bootstrapped. Cloud grants verified. RLS REST/API smoke tests passed (2026-06-15).
+Astro v5 app scaffolded with Cloudflare SSR adapter. Supabase browser and server clients added. Login/logout implemented. /admin protected route confirmed: super_admin access granted, student account denied (403), anonymous visitor redirected to /login. npm run build passed. No service_role in src. No secrets committed (2026-06-15).
 
 ## Last Completed Work
+
+Phase 03 — App Foundation and Auth (complete):
+
+- Scaffolded Astro v5 app (no app existed before this phase).
+- Configured Cloudflare SSR adapter (output: server).
+- Added Tailwind v4 via @tailwindcss/vite Vite plugin (not deprecated @astrojs/tailwind).
+- Added src/styles/global.css with @import "tailwindcss".
+- Added Supabase browser client (src/lib/supabase/client.ts) using @supabase/ssr createBrowserClient.
+- Added Supabase server client (src/lib/supabase/server.ts) using @supabase/ssr createServerClient.
+  Cookie reading uses raw request header parsing — AstroCookies.getAll() does not exist in Astro v5.
+- Added src/middleware.ts for per-request session token refresh.
+- Added /login page with email+password form and open-redirect guard on the ?redirect= param.
+- Added POST /api/auth/logout endpoint — signs out and redirects to /login.
+- Added /auth/callback route for future magic link / OAuth code exchange.
+- Added /admin protected route: getUser() validates JWT server-side; has_role('super_admin')
+  RPC confirms role. Returns 403 for non-super_admin. Redirects anonymous visitors to /login.
+- Added .env.example committed with empty keys. .env.local is gitignored.
+- Added dist/ and .astro/ to .gitignore.
+- React not installed in Phase 03 — deferred until interactive islands are actually needed.
+- No service_role key anywhere in src/. No secrets committed.
+- npm run build: passed (Cloudflare output, 2.47s).
+- All auth tests passed: super_admin login to /admin, student denied (403),
+  anonymous /admin redirect to login, logout clears session.
+- Committed as 1ad037b on branch feature/phase-03-app-foundation-auth.
 
 Phase 02 — Supabase Cloud Dev Deployment and RLS Validation (complete):
 
@@ -78,7 +102,7 @@ Phase 01 — Database Schema v1 (complete):
 
 ## Active Branch
 
-feature/project-docs
+feature/phase-03-app-foundation-auth
 
 ## Migration Files Created
 
@@ -128,5 +152,6 @@ the admin dashboard server endpoints.
 
 ## Next Steps
 
-1. Load countries and subjects via import batch.
-2. Begin Phase 03: frontend / API layer (Astro.js, React islands, Supabase client).
+1. Merge feature/phase-03-app-foundation-auth to main.
+2. Load countries and subjects via import batch.
+3. Begin Phase 04: admin CRUD, public SEO pages, or React islands (TBD).

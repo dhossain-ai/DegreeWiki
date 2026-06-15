@@ -1732,3 +1732,145 @@ Files changed:
 Next:
 - Load countries and subjects via import batch.
 - Begin Phase 03: frontend / API layer (Astro.js, React islands, Supabase client).
+
+---
+
+## 2026-06-15 - Phase 03: App Foundation and Auth
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Scaffold Astro app, add Supabase browser/server clients, implement login/logout,
+add /admin protected by super_admin role check.
+
+Completed:
+
+Astro app scaffolded from scratch (no app existed before this phase).
+
+package.json:
+- astro ^5, @astrojs/cloudflare ^12, @supabase/supabase-js ^2, @supabase/ssr ^0.5
+- tailwindcss ^4, @tailwindcss/vite ^4
+- No React — deferred until interactive islands are actually needed.
+
+astro.config.mjs:
+- output: 'server' (full SSR — required for Cloudflare Pages and for cookie-based auth)
+- adapter: cloudflare()
+- vite.plugins: [tailwindcss()] via @tailwindcss/vite
+
+src/styles/global.css:
+- @import "tailwindcss" (Tailwind v4 CSS-first approach)
+
+src/layouts/BaseLayout.astro:
+- Minimal HTML shell, imports global.css, accepts title prop.
+
+src/lib/supabase/client.ts:
+- createBrowserClient() from @supabase/ssr using PUBLIC_ env vars.
+- For future React islands or browser-side code.
+
+src/lib/supabase/server.ts:
+- createServerClient() from @supabase/ssr.
+- Accepts (cookies: AstroCookies, request: Request).
+- Reads cookies from raw request header — AstroCookies.getAll() does not exist in Astro v5.
+- Writes outgoing cookies via cookies.set().
+
+src/middleware.ts:
+- Runs on every request.
+- Creates a server Supabase client and calls getUser() to refresh expired tokens.
+- Writes updated cookies back before the page renders.
+- Does not redirect — auth guard logic stays in individual pages.
+
+src/pages/index.astro:
+- Home page. Shows "Sign in" link when logged out; shows email + Admin/Logout when logged in.
+
+src/pages/login.astro:
+- Email + password form. Server-side POST handling via Astro.request.formData().
+- Redirects already-authenticated users to /admin on GET.
+- Open-redirect guard on ?redirect= param (only accepts same-origin paths starting with /).
+- Error message displayed inline on failed login.
+
+src/pages/auth/callback.astro:
+- Handles ?code= param from magic links / OAuth (infrastructure; not triggered in Phase 03).
+- Calls exchangeCodeForSession(code) and redirects to /.
+
+src/pages/api/auth/logout.ts:
+- POST endpoint. Calls supabase.auth.signOut(), redirects to /login.
+
+src/pages/admin/index.astro:
+- getUser() validates JWT with a live Supabase network call (not getSession() from cookies).
+- Unauthenticated: redirect to /login?redirect=/admin.
+- has_role() RPC called with { role_code: 'super_admin' } — parameter name confirmed
+  from migration 002_auth_roles.sql (SECURITY DEFINER function).
+- Non-super_admin: 403 response.
+- super_admin: renders admin page showing email and access confirmation.
+
+.env.example:
+- Committed with empty PUBLIC_SUPABASE_URL and PUBLIC_SUPABASE_ANON_KEY.
+- .env.local is gitignored — never committed.
+
+.gitignore:
+- Added dist/ and .astro/ (Astro build output and generated types).
+
+Technical note — AstroCookies.getAll() absent in Astro v5:
+  The @supabase/ssr cookie adapter requires a getAll() method. Astro v5 AstroCookies
+  only exposes get/has/set/delete. The fix: parse incoming cookies from the raw
+  request.headers.get('cookie') string in both middleware and the server client factory.
+  The setAll() callback continues to use cookies.set() normally.
+
+Test results:
+- npm install: 347 packages, no fatal errors.
+- npm run dev: Astro v5.18.2 ready in ~2.4s, no runtime errors.
+- GET /: 200, home page renders.
+- GET /login: 200, form renders.
+- GET /admin (unauthenticated): 302 → /login?redirect=/admin.
+- GET /auth/callback (no code): 302 → /.
+- POST /login (wrong credentials): 200 with "Invalid login credentials" inline.
+- super_admin login → /admin: PASS (manual).
+- Non-super_admin → /admin: 403 Forbidden (manual).
+- Logout: session cleared, redirected to /login (manual).
+- npm run build: Complete in 2.47s, Cloudflare adapter output.
+- grep service_role src/: zero matches.
+- .env.local not in git status.
+
+Important Decisions Made:
+- getUser() used for admin auth check, not getSession().
+  getSession() reads from cookies and is not authoritative for authorization.
+  getUser() makes a live network call to Supabase to validate the JWT.
+- React not installed in Phase 03. No @astrojs/react, react, react-dom.
+  Added when the first interactive island is actually needed.
+- @astrojs/tailwind not used — deprecated. Tailwind v4 via @tailwindcss/vite.
+- No SUPABASE_SERVICE_ROLE_KEY referenced anywhere in this phase.
+- output: 'server' — all routes are SSR by default. prerender = true added to
+  individual pages later when static rendering is appropriate.
+- Cloudflare adapter generates Cloudflare Pages/Workers-compatible output.
+  No Vercel-only services used.
+
+Files created:
+- .env.example
+- astro.config.mjs
+- package.json
+- package-lock.json
+- tsconfig.json
+- public/favicon.svg
+- src/layouts/BaseLayout.astro
+- src/lib/supabase/client.ts
+- src/lib/supabase/server.ts
+- src/middleware.ts
+- src/pages/index.astro
+- src/pages/login.astro
+- src/pages/auth/callback.astro
+- src/pages/api/auth/logout.ts
+- src/pages/admin/index.astro
+- src/styles/global.css
+
+Files updated:
+- .gitignore (added dist/, .astro/)
+- docs/06-status.md
+- docs/07-task-log.md
+
+Commit: 1ad037b on feature/phase-03-app-foundation-auth
+
+Next:
+- Merge feature/phase-03-app-foundation-auth to main.
+- Load countries and subjects via import batch.
+- Begin Phase 04: admin CRUD, public SEO pages, or React islands (TBD).

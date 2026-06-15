@@ -16,6 +16,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Astro build output and generated types
+dist/
+.astro/
+
 # IDE
 .vscode/
 .idea/
