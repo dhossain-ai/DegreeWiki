@@ -4,6 +4,135 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 06: Programs CRUD Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add safe admin create/edit forms for programs through server-side Astro form POST handling.
+No migrations, no service_role, no React, no client-side JS.
+
+Pre-implementation column verification:
+- programs: id, slug, title, university_id, campus_id, country_id, city_id, degree_level_id,
+  degree_award, primary_subject_id, duration_months, study_mode, delivery_mode,
+  language_of_instruction, tuition_min_amount, tuition_max_amount, tuition_currency,
+  tuition_period, tuition_notes, application_fee_amount, application_fee_currency,
+  application_fee_notes, application_url, official_url, admission_requirements,
+  english_requirements (jsonb), gpa_requirements, curriculum_summary, career_outcomes,
+  content_status, verification_status, indexing_status, data_completeness_score,
+  source_confidence_score, last_verified_at, next_review_due_at, og_image_id,
+  seo_title, seo_description, seo_h1, canonical_url, og_title, og_description,
+  created_at, updated_at (migration 006).
+  No overview column. No duration_text column. No official_program_url column.
+  No admission_requirements_text column. english_requirements is jsonb, not text.
+
+Plan name mismatches resolved:
+  duration_text → duration_months (integer); official_program_url → official_url;
+  admission_requirements_text → admission_requirements; english_requirements_text → jsonb, skipped.
+
+Completed:
+
+src/pages/admin/programs.astro DELETED.
+Reason: cannot have both programs.astro (file) and programs/ (folder) in the same directory.
+Same URL /admin/programs retained via programs/index.astro.
+
+src/pages/admin/programs/index.astro (migrated + enhanced):
+- List table: title, university name (from map), degree level code (from map),
+  content_status badge, created_at, Edit link.
+- Separate query + Map for university names (no join — per Approved Decision 9).
+- Separate query + Map for degree level codes (same pattern as Phase 04 flat page).
+- "+ New Program" button.
+
+src/pages/admin/programs/new.astro (create form):
+- 26 fields across 8 sections: Identity, Academic Details, Tuition, Application Fees,
+  URLs, Admissions, Content, Verification.
+- country_id and city_id NOT exposed as dropdowns. Derived server-side from the
+  universities array (already loaded for dropdown) on every POST by finding
+  universities.find(u => u.id === values.university_id).
+- Warning banner shown if universities list is empty.
+- POST-redirect-GET to /admin/programs on success.
+- 23505 → "A program with this slug already exists."
+
+src/pages/admin/programs/[id].astro (edit form):
+- Loads existing record with explicit select of all 26 form fields.
+- 404 if program not found.
+- Numeric columns converted to strings for form state prefill (String(record.X) or '').
+- Same validation and form structure as new.astro.
+- Uses .update().eq('id', id).
+- Page title: "Edit {record.title}".
+- Button text: "Save Changes".
+
+src/lib/admin/validate.ts (extended):
+- Added validateNumeric(value, label, { min? }): non-empty numeric check, optional min floor.
+- Added validateUrl(value, label): non-empty http/https URL check using new URL() constructor.
+
+Validation behavior:
+- Required: title, slug, university_id, degree_level_id, content_status, verification_status.
+- Slug auto-generated from title via toSlug() if blank on POST.
+- Slug format: ^[a-z0-9]+(?:-[a-z0-9]+)*$.
+- Enum fields validated with validateIn against DB CHECK constraint values.
+- Optional enum fields (study_mode, delivery_mode, tuition_period): only validated if non-empty.
+- duration_months: if non-empty, must be positive integer (isFinite, >=1, isInteger check).
+- tuition_min_amount, tuition_max_amount: validateNumeric(min:0). Cross-field: max >= min.
+- application_fee_amount: validateNumeric(min:0).
+- official_url, application_url: validateUrl (http/https only; empty = null = valid).
+- University existence check: universities.find() after university_id required check.
+- Form values preserved on validation failure.
+- Constraint errors (code 23505) surface as user-readable messages.
+
+Derived country/city behavior:
+- On every POST (create or edit), universities array is loaded before the handler runs.
+- After validation passes, university is found: const uni = universities.find(u => u.id === values.university_id)!
+- country_id = uni.country_id (NOT NULL in universities table).
+- city_id = uni.city_id ?? null (nullable in universities table).
+- Both written to programs row. Never exposed as form inputs.
+
+Fields intentionally skipped:
+- campus_id (no campus CRUD yet, nullable — programs insert fine without it)
+- english_requirements (jsonb — no plain-text fallback, deferred to future phase)
+- indexing_status (premature for manual data entry phase)
+- All SEO fields (seo_title, seo_h1, canonical_url, og_title, og_description)
+- og_image_id (no media upload)
+- data_completeness_score, source_confidence_score (server-set fields)
+- last_verified_at, next_review_due_at
+
+Build result:
+npm run build: PASS (Cloudflare output, 7.74s, zero errors)
+
+PowerShell service_role search:
+Get-ChildItem src -Recurse -File | Select-String -Pattern "service_role" → 0 matches
+
+Git status:
+- modified: src/lib/admin/validate.ts
+- modified: docs/06-status.md
+- modified: docs/07-task-log.md
+- deleted: src/pages/admin/programs.astro
+- untracked: src/pages/admin/programs/
+
+Files created:
+- src/pages/admin/programs/index.astro
+- src/pages/admin/programs/new.astro
+- src/pages/admin/programs/[id].astro
+
+Files modified:
+- src/lib/admin/validate.ts
+- docs/06-status.md
+- docs/07-task-log.md
+
+Files deleted:
+- src/pages/admin/programs.astro (replaced by programs/index.astro)
+
+Next:
+- Manually verify all three program routes: anonymous redirect, student 403, super_admin access.
+- Test program create: required field errors, slug auto-gen, duplicate slug, numeric errors,
+  tuition max < min error, invalid URL error, successful create.
+- Verify created program row has correct country_id and city_id from university.
+- Test program edit: prefill, save changes, 404 on nonexistent ID.
+- Merge feature/phase-06-programs-crud-foundation to main after manual verification.
+
+---
+
 ## 2026-06-16 - Phase 05: Admin CRUD Foundation for Core Content
 
 Tool:

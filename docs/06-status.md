@@ -4,14 +4,46 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 05 — Admin CRUD Foundation — implementation complete, pending manual verification.
+Phase 06 — Programs CRUD Foundation — implementation complete, pending manual verification.
 
-Countries, cities, universities (list/new/edit), degree levels (list/edit), and subjects
-(list/new/edit) built with server-side Astro form POST handling. All pages use the existing
-super_admin gate. No migrations, no service_role in src, no secrets committed.
-npm run build passed (Cloudflare output, 9.76s).
+Programs list/new/edit built with server-side Astro form POST handling. country_id and
+city_id derived from selected university on every save. 26 fields across 8 form sections.
+Two new validate.ts helpers (validateNumeric, validateUrl). No migrations, no service_role
+in src, no secrets committed. npm run build passed (Cloudflare output, 7.74s).
 
 ## Last Completed Work
+
+Phase 06 — Programs CRUD Foundation (implementation complete):
+
+- Deleted src/pages/admin/programs.astro (flat Phase 04 read-only list).
+  Replaced with programs/ folder to allow sub-routes (same URL /admin/programs, no breakage).
+- Added src/pages/admin/programs/index.astro — list: title, university (name via map),
+  degree level code, content_status badge, created_at, Edit link. "+ New Program" button.
+  Separate university and degree_level queries + Maps (no join, per Approved Decision 9).
+- Added src/pages/admin/programs/new.astro — create form with 8 sections and 26 fields.
+- Added src/pages/admin/programs/[id].astro — edit form; loads existing record, prefills
+  all fields (numeric columns converted to strings for form state).
+- Extended src/lib/admin/validate.ts with two new helpers:
+  validateNumeric(value, label, { min? }) — non-empty numeric check with optional floor.
+  validateUrl(value, label) — non-empty http/https URL check using new URL().
+- country_id and city_id: not exposed as form inputs. Derived server-side by looking up
+  the selected university in the already-loaded universities array on every POST.
+- AdminSidebar.astro: no change needed — Programs link already present at /admin/programs.
+- npm run build: PASS (Cloudflare output, 7.74s, zero errors).
+- PowerShell service_role search: 0 matches.
+
+Fields implemented (26):
+  title, slug, university_id, degree_level_id, degree_award, primary_subject_id,
+  duration_months, study_mode, delivery_mode, language_of_instruction,
+  tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period, tuition_notes,
+  application_fee_amount, application_fee_currency, application_fee_notes,
+  official_url, application_url, admission_requirements, gpa_requirements,
+  curriculum_summary, career_outcomes, content_status, verification_status.
+
+Fields intentionally skipped:
+  campus_id (no campus CRUD yet), english_requirements (jsonb — deferred),
+  indexing_status, all SEO fields, og_image_id, data_completeness_score,
+  source_confidence_score, last_verified_at, next_review_due_at.
 
 Phase 05 — Admin CRUD Foundation (implementation complete):
 
