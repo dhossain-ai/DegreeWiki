@@ -4,14 +4,39 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 06 — Programs CRUD Foundation — implementation complete, pending manual verification.
+Phase 07 — Scholarships CRUD Foundation — implementation complete, pending manual verification.
 
-Programs list/new/edit built with server-side Astro form POST handling. country_id and
-city_id derived from selected university on every save. 26 fields across 8 form sections.
-Two new validate.ts helpers (validateNumeric, validateUrl). No migrations, no service_role
-in src, no secrets committed. npm run build passed (Cloudflare output, 7.74s).
+Scholarships list/new/edit built with server-side Astro form POST handling. 20 fields across
+7 form sections. No new validate.ts helpers needed (all existing helpers reused). No migrations,
+no service_role in src, no secrets committed. npm run build passed (Cloudflare output, 2.75s).
 
 ## Last Completed Work
+
+Phase 07 — Scholarships CRUD Foundation (implementation complete):
+
+- Deleted src/pages/admin/scholarships.astro (flat Phase 04 read-only list).
+  Replaced with scholarships/ folder to allow sub-routes (same URL /admin/scholarships, no breakage).
+- Added src/pages/admin/scholarships/index.astro — list: name, slug, scholarship_type,
+  content_status badge, deadline, created_at, Edit link. "+ New Scholarship" button.
+- Added src/pages/admin/scholarships/new.astro — create form with 7 sections and 20 fields.
+- Added src/pages/admin/scholarships/[id].astro — edit form; loads existing record, prefills
+  all fields (numeric columns converted to strings for form state).
+- AdminSidebar.astro: no change needed — Scholarships link already present at /admin/scholarships.
+- No new validate.ts helpers needed — all existing helpers reused.
+- npm run build: PASS (Cloudflare output, 2.75s, zero errors).
+- PowerShell service_role search: 0 matches.
+
+Fields implemented (20):
+  name, slug, scholarship_type, provider_name, provider_type, funding_type, application_type,
+  amount_min, amount_max, currency, coverage_notes, deadline, deadline_text,
+  official_url, application_url, provider_url, overview, eligibility_summary,
+  content_status, verification_status.
+
+Fields intentionally skipped:
+  indexing_status, all SEO fields, og_image_id, data_completeness_score,
+  source_confidence_score, last_verified_at, next_review_due_at.
+  All junction tables (scholarship_countries, scholarship_universities, scholarship_programs,
+  scholarship_subjects, scholarship_degree_levels, scholarship_eligible_nationalities) — deferred.
 
 Phase 06 — Programs CRUD Foundation (implementation complete):
 
@@ -202,7 +227,7 @@ Phase 01 — Database Schema v1 (complete):
 
 ## Active Branch
 
-feature/phase-05-admin-crud-foundation
+feature/phase-07-scholarships-crud-foundation
 
 ## Migration Files Created
 
@@ -253,10 +278,10 @@ the admin dashboard server endpoints.
 
 ## Next Steps
 
-1. Manually verify all new admin routes: anonymous redirect, student 403, super_admin access.
-2. Test create/edit for countries, cities, universities, subjects.
-3. Test degree levels list and edit.
-4. Verify duplicate slug / required field validation shows inline errors.
-5. Merge feature/phase-05-admin-crud-foundation to main after manual verification.
-6. Load countries and subjects data through the new admin forms.
-7. Begin Phase 06: TBD (programs CRUD, public SEO pages, or articles).
+1. Manually verify all three scholarship routes: anonymous redirect, student 403, super_admin access.
+2. Test scholarship create: required field errors, slug auto-gen, duplicate slug, numeric errors,
+   amount_max < amount_min error, invalid URL error, invalid date, successful create.
+3. Verify created scholarship row has all fields saved correctly in Supabase.
+4. Test scholarship edit: prefill, save changes, 404 on nonexistent ID.
+5. Merge feature/phase-07-scholarships-crud-foundation to main after manual verification.
+6. Begin Phase 08: TBD (scholarship relationship editors, articles CRUD, or public SEO pages).

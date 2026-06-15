@@ -4,6 +4,130 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 07: Scholarships CRUD Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add safe admin create/edit forms for scholarships through server-side Astro form POST handling.
+No migrations, no service_role, no React, no client-side JS.
+
+Pre-implementation column verification:
+- scholarships: id, slug, name, scholarship_type, provider_name, provider_type, funding_type,
+  application_type, overview, eligibility_summary, amount_min, amount_max, currency,
+  coverage_notes, deadline, deadline_text, official_url, application_url, provider_url,
+  content_status, verification_status, indexing_status, data_completeness_score,
+  source_confidence_score, last_verified_at, next_review_due_at, og_image_id,
+  seo_title, seo_description, seo_h1, canonical_url, og_title, og_description,
+  created_at, updated_at (migration 007).
+  No funding_period, funding_percentage, or covers_* boolean columns exist.
+  eligibility_summary is the actual column (not eligibility_overview).
+  amount_min/amount_max/currency are actual column names (not funding_amount_min etc).
+
+Instruction field name mismatches resolved:
+  funding_amount_min → amount_min; funding_amount_max → amount_max;
+  funding_currency → currency; eligibility_overview → eligibility_summary.
+  funding_period, funding_percentage, covers_* → do not exist, omitted.
+
+Relationship tables: all six are many-to-many junction tables.
+  scholarship_countries, scholarship_universities, scholarship_programs,
+  scholarship_subjects, scholarship_degree_levels, scholarship_eligible_nationalities.
+  All deferred to Phase 08 — no direct FK on scholarships row, no simple editor possible.
+
+Completed:
+
+src/pages/admin/scholarships.astro DELETED.
+Reason: cannot have both scholarships.astro (file) and scholarships/ (folder) in the same directory.
+Same URL /admin/scholarships retained via scholarships/index.astro.
+
+src/pages/admin/scholarships/index.astro (migrated + enhanced):
+- List table: name, slug, scholarship_type, content_status badge, deadline, created_at, Edit link.
+- "+ New Scholarship" button.
+- Empty state with link to create first scholarship.
+
+src/pages/admin/scholarships/new.astro (create form):
+- 20 fields across 7 sections: Identity, Classification, Funding, Deadline, URLs, Content, Verification.
+- scholarship_type is required (per approved constraints).
+- provider_type, funding_type, application_type optional but validated against DB enum if provided.
+- amount_min, amount_max: optional non-negative numeric; cross-field max >= min check.
+- deadline: <input type="date">; server-side isNaN(new Date(value).getTime()) check.
+- deadline_text: free-text fallback for deadline.
+- official_url, application_url, provider_url: optional http/https URL validation.
+- coverage_notes: textarea.
+- currency: free-text input with placeholder "EUR, USD, GBP".
+- No dropdown dependencies — no related entity selects needed.
+- POST-redirect-GET to /admin/scholarships on success.
+- 23505 → "A scholarship with this slug already exists."
+
+src/pages/admin/scholarships/[id].astro (edit form):
+- Loads existing record with explicit select of all 20 form fields.
+- 404 if scholarship not found.
+- Numeric columns converted to strings for form state prefill (String(record.X) or '').
+- Same validation and form structure as new.astro.
+- Uses .update().eq('id', id).
+- Page title: "Edit {record.name}".
+- Button text: "Save Changes".
+
+src/lib/admin/validate.ts: NO CHANGES — all existing helpers sufficient.
+  validateRequired, validateSlug, validateIn, validateNumeric, validateUrl all reused.
+
+Validation behavior:
+- Required: name, slug, scholarship_type, content_status, verification_status.
+- Slug auto-generated from name via toSlug() if blank on POST.
+- Slug format: ^[a-z0-9]+(?:-[a-z0-9]+)*$.
+- scholarship_type: required + validateIn against 7 enum values.
+- provider_type, funding_type, application_type: optional; validateIn only if non-empty.
+- amount_min, amount_max: validateNumeric(min:0). Cross-field: max >= min.
+- deadline: if non-empty, isNaN(new Date(value).getTime()) check.
+- official_url, application_url, provider_url: validateUrl (http/https only; empty = null = valid).
+- content_status: required + validateIn against 5 enum values.
+- verification_status: required + validateIn against 6 enum values.
+- Form values preserved on validation failure.
+- Constraint errors (code 23505) surface as human-readable messages.
+
+Fields intentionally skipped:
+- indexing_status (premature for manual data entry phase)
+- All SEO fields (seo_title, seo_h1, canonical_url, og_title, og_description)
+- og_image_id (no media upload)
+- data_completeness_score, source_confidence_score (server-set fields)
+- last_verified_at, next_review_due_at
+- All six junction tables (deferred to Phase 08)
+
+Build result:
+npm run build: PASS (Cloudflare output, 2.75s, zero errors)
+
+PowerShell service_role search:
+Get-ChildItem src -Recurse -File | Select-String -Pattern "service_role" → 0 matches
+
+Git status:
+- deleted: src/pages/admin/scholarships.astro
+- untracked: src/pages/admin/scholarships/
+- modified: docs/06-status.md
+- modified: docs/07-task-log.md
+
+Files created:
+- src/pages/admin/scholarships/index.astro
+- src/pages/admin/scholarships/new.astro
+- src/pages/admin/scholarships/[id].astro
+
+Files modified:
+- docs/06-status.md
+- docs/07-task-log.md
+
+Files deleted:
+- src/pages/admin/scholarships.astro (replaced by scholarships/index.astro)
+
+Next:
+- Manually verify all three scholarship routes: anonymous redirect, student 403, super_admin access.
+- Test scholarship create: required field errors, slug auto-gen, duplicate slug, numeric errors,
+  amount_max < amount_min error, invalid URL error, invalid date, successful create.
+- Verify created scholarship row has correct field values in Supabase.
+- Test scholarship edit: prefill, save changes, 404 on nonexistent ID.
+- Merge feature/phase-07-scholarships-crud-foundation to main after manual verification.
+
+---
+
 ## 2026-06-16 - Phase 06: Programs CRUD Foundation
 
 Tool:
