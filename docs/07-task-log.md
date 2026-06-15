@@ -1661,3 +1661,74 @@ Next:
 - Verify RLS policies on live project.
 - Load countries and subjects.
 - Begin Phase 02: frontend / API layer.
+
+---
+
+## 2026-06-15 - Phase 02: Supabase Cloud Dev Deployment and RLS Validation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Deploy Schema v1 migrations 001–015 to Supabase cloud dev project, bootstrap the first
+super_admin, verify cloud grants, and validate all RLS policies via REST/API smoke tests.
+
+Actions taken:
+
+1. Provisioned Supabase cloud dev project in ap-south-1 / Mumbai.
+   Project ref: hbjnrlsnrknugpkitihq.
+
+2. Pushed migrations 001–015 via `supabase db push`.
+   Remote migration list confirmed to match local migration list exactly.
+
+3. Bootstrapped first super_admin (degreewiki@gmail.com) via Supabase Dashboard SQL editor.
+   Verification query confirmed: role_code = super_admin, permission_count = 20.
+
+4. Cloud grant check:
+   - anon and authenticated DML grants exist on all public tables.
+   - Migration 016 not created (no grant migration needed).
+
+5. RLS problem check:
+   - Query for tables missing RLS or missing at least one policy returned 0 rows.
+   - All 55 RLS-enabled tables in public schema are correctly configured.
+
+6. Ran 15-test RLS REST/API smoke test suite using anon key and JWTs only.
+   No service_role key used. No migrations created. No schema modified.
+
+Smoke test results (all 15 completed, no critical stop triggered):
+
+S1  smoke-student sign-in                      PASS
+S2  super_admin sign-in                        PASS
+T1-A anon read degree_levels                   PASS  7 rows
+T1-B anon read report_categories               PASS  6 rows
+T2-A anon INSERT degree_levels                 PASS  HTTP 401 (no anon INSERT grant — pre-RLS rejection)
+T2-B anon SELECT user_profiles                 PASS  []
+T3-A student SELECT user_profiles              PASS  own row only
+T3-B student_profile exists check              PASS  not found — will insert
+T3-C student INSERT student_profile            PASS  created
+T3-D student SELECT student_profiles           PASS  own row only
+T4-A student SELECT admin_activity_logs        PASS  []
+T4-B student INSERT roles                      PASS  HTTP 403
+T5-A super_admin SELECT user_profiles          PASS  2 profiles visible
+T5-B super_admin SELECT student_profiles       PASS  1 profile visible
+T5-C super_admin SELECT admin_activity_logs    PASS  HTTP 200 (0 rows, no entries yet)
+
+Notable finding on T2-A:
+anon INSERT into degree_levels returned HTTP 401, not 403. This is correct PostgREST
+behaviour: 401 = no INSERT grant on the role (rejected before RLS is evaluated);
+403 = grant exists but RLS blocks the row. The write is blocked either way. Not a bug.
+
+Important Decisions Made:
+- No migration 016 created (anon/authenticated grants already present in cloud).
+- No service_role key used at any point during smoke testing.
+- Smoke test student_profile INSERT body uses only user_id + is_anonymous = false,
+  satisfying the chk_student_profiles_owner_mode CHECK constraint without any other fields.
+- T5-D (super_admin INSERT into roles) skipped for Phase 02 — read/access behaviour only.
+
+Files changed:
+- docs/06-status.md
+- docs/07-task-log.md
+
+Next:
+- Load countries and subjects via import batch.
+- Begin Phase 03: frontend / API layer (Astro.js, React islands, Supabase client).

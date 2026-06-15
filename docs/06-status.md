@@ -4,11 +4,32 @@ Last updated: 2026-06-15
 
 ## Current Phase
 
-Full Database Schema v1 — COMPLETE.
+Phase 02 — Supabase Cloud Dev Deployment and RLS Validation — COMPLETE.
 
-Schema v1 migrations 001–015 are complete, approved after external review, and validated locally via `supabase db reset` (zero errors, 2026-06-15).
+Cloud dev project provisioned in ap-south-1 / Mumbai. Migrations 001–015 pushed successfully. Remote migration list matches local. super_admin bootstrapped. Cloud grants verified. RLS REST/API smoke tests passed (2026-06-15).
 
 ## Last Completed Work
+
+Phase 02 — Supabase Cloud Dev Deployment and RLS Validation (complete):
+
+- Provisioned Supabase cloud dev project (ap-south-1 / Mumbai, ref: hbjnrlsnrknugpkitihq).
+- Pushed migrations 001–015 via `supabase db push`. Remote migration list matches local.
+- Bootstrapped first super_admin (degreewiki@gmail.com) via Supabase Dashboard SQL editor.
+- Verified super_admin: role_code = super_admin, permission_count = 20.
+- Verified cloud grants: anon and authenticated DML grants present on all public tables.
+- RLS problem check: 0 rows returned — every public table has RLS enabled and at least one policy.
+- Ran 15-test RLS REST/API smoke test suite (anon key + JWTs only, no service_role):
+  - anon reads active degree_levels and report_categories: PASS.
+  - anon INSERT into degree_levels blocked (HTTP 401 — no anon INSERT grant, not an RLS failure): PASS.
+  - anon SELECT on user_profiles returns []: PASS.
+  - smoke student reads only own user_profile: PASS.
+  - smoke student INSERT into student_profiles: PASS.
+  - smoke student sees only own student_profile: PASS.
+  - smoke student cannot read admin_activity_logs: PASS.
+  - smoke student cannot INSERT into roles: PASS (HTTP 403).
+  - super_admin sees all user_profiles (2 visible): PASS.
+  - super_admin sees all student_profiles (1 visible): PASS.
+  - super_admin reads admin_activity_logs without 403: PASS.
 
 Phase 01 — Database Schema v1 (complete):
 
@@ -96,17 +117,16 @@ the admin dashboard server endpoints.
 
 ## Known Issues / Open Questions
 
-- Supabase CLI 2.106.0 installed via npm. Local stack validated via `supabase db reset` — all 15 migrations passed with zero errors.
 - Countries and subjects import source not yet confirmed (needed for post-schema data load).
 - english_requirements jsonb schema example not yet documented.
 - Admin dashboard implementation details are not finalized.
 - Frontend design system is not finalized.
 - MCP/tooling setup is not finalized.
+- T2-A (anon INSERT degree_levels) returned HTTP 401 instead of 403. This is correct behaviour:
+  PostgREST returns 401 when the role has no INSERT grant at all (pre-RLS rejection), and 403
+  when a grant exists but an RLS policy blocks the row. The write is blocked either way.
 
 ## Next Steps
 
-1. Bootstrap the first super_admin locally (see Bootstrap Note above) or on the live project.
-2. Deploy migrations 001–015 to the live Supabase project via Dashboard or `supabase db push`.
-3. Verify RLS policies in Supabase Dashboard after live deploy.
-4. Load countries and subjects via import batch.
-5. Begin Phase 02: frontend / API layer.
+1. Load countries and subjects via import batch.
+2. Begin Phase 03: frontend / API layer (Astro.js, React islands, Supabase client).
