@@ -4,11 +4,49 @@ Last updated: 2026-06-15
 
 ## Current Phase
 
-Phase 03 — App Foundation and Auth — COMPLETE.
+Phase 04 — Admin Dashboard Foundation — IN PROGRESS (implementation complete, pending manual verification and merge).
 
-Astro v5 app scaffolded with Cloudflare SSR adapter. Supabase browser and server clients added. Login/logout implemented. /admin protected route confirmed: super_admin access granted, student account denied (403), anonymous visitor redirected to /login. npm run build passed. No service_role in src. No secrets committed (2026-06-15).
+Admin shell, sidebar, topbar, and 9 read-only list pages built. All pages use the Phase 03
+super_admin gate (getUser + has_role RPC). No CRUD, no migrations, no schema changes, no
+service_role in src. npm run build passed (Cloudflare output). No secrets committed.
 
 ## Last Completed Work
+
+Phase 04 — Admin Dashboard Foundation (implementation complete):
+
+- Added shared admin auth guard (src/lib/admin/guard.ts) — requireSuperAdmin() helper extracts
+  the three-step gate: getUser() → redirect if anon, has_role('super_admin') RPC → 403 if not.
+  Returns { type: 'ok', user, supabase } so pages reuse the same client for data queries.
+- Added badge class maps (src/lib/admin/badges.ts) with static literal strings for Tailwind v4
+  scanner compatibility. Maps cover content_status, import_status, batch_type, quality result,
+  and account_status.
+- Added AdminLayout.astro — wraps BaseLayout (no duplicate html/head/body). Two-column layout:
+  fixed sidebar + main content area with topbar (email + logout).
+- Added AdminSidebar.astro — 9-link nav, active link highlight via activePath prop.
+- Added StatCard.astro — reusable stat card for dashboard counts.
+- Replaced /admin (index.astro) with dashboard home: 6 stat cards (universities, programs,
+  scholarships, articles, import batches, users) loaded via count queries.
+- Added /admin/universities — table: name, slug, content_status badge, verification_status,
+  data_completeness_score, created_at. 100-row limit, ordered by created_at desc.
+- Added /admin/programs — table: title, slug, content_status badge, degree level code (via
+  degree_levels lookup map), created_at.
+- Added /admin/scholarships — table: name, slug, content_status badge, scholarship_type,
+  deadline (scholarships.deadline is a real date column, confirmed), created_at.
+- Added /admin/articles — table: title, slug, content_status badge, published_at
+  (articles.published_at confirmed), created_at.
+- Added /admin/data-quality — pass/fail/warning summary counts + table: entity_type,
+  check_type, result badge, checked_at. 50-row limit.
+- Added /admin/imports — table: batch_type badge, import_status badge, total_records,
+  processed_count, error_count, created_at. import_batches columns confirmed from migration 010.
+- Added /admin/users — table: user ID (truncated), display_name, account_status badge,
+  created_at. Email omitted — not in user_profiles; auth.users requires service_role.
+  Note shown in UI explaining the limitation.
+- Added /admin/system — roles and permissions tables from seed data. No secrets, no env vars.
+- All 9 routes enforce: anonymous → /login?redirect=..., non-super_admin → 403.
+- npm run build: passed (Cloudflare output, 7.26s).
+- grep service_role src/: one match — a comment in users.astro explaining why email is not
+  shown. No actual service_role key usage anywhere in src/.
+- No .env.local or secrets in git diff.
 
 Phase 03 — App Foundation and Auth (complete):
 
@@ -80,8 +118,8 @@ Phase 01 — Database Schema v1 (complete):
 ## Current Architecture Decisions
 
 - Astro.js frontend
-- React islands for interactivity
-- Tailwind CSS
+- React islands for interactivity (React not yet installed — deferred until first interactive island)
+- Tailwind CSS v4
 - Supabase PostgreSQL
 - Supabase Auth
 - Supabase RLS
@@ -102,7 +140,7 @@ Phase 01 — Database Schema v1 (complete):
 
 ## Active Branch
 
-feature/phase-03-app-foundation-auth
+feature/phase-04-admin-dashboard-foundation
 
 ## Migration Files Created
 
@@ -143,15 +181,18 @@ the admin dashboard server endpoints.
 
 - Countries and subjects import source not yet confirmed (needed for post-schema data load).
 - english_requirements jsonb schema example not yet documented.
-- Admin dashboard implementation details are not finalized.
 - Frontend design system is not finalized.
 - MCP/tooling setup is not finalized.
 - T2-A (anon INSERT degree_levels) returned HTTP 401 instead of 403. This is correct behaviour:
   PostgREST returns 401 when the role has no INSERT grant at all (pre-RLS rejection), and 403
   when a grant exists but an RLS policy blocks the row. The write is blocked either way.
+- /admin/users shows profile data only (display_name, account_status). Email requires a
+  privileged server endpoint querying auth.users via service role — deferred to future phase.
 
 ## Next Steps
 
-1. Merge feature/phase-03-app-foundation-auth to main.
-2. Load countries and subjects via import batch.
-3. Begin Phase 04: admin CRUD, public SEO pages, or React islands (TBD).
+1. Manually verify all 9 admin routes: anonymous redirect, student 403, super_admin access.
+2. Verify logout works from the new admin layout topbar.
+3. Merge feature/phase-04-admin-dashboard-foundation to main.
+4. Load countries and subjects via import batch.
+5. Begin Phase 05: admin CRUD (create/edit/publish) or public SEO pages (TBD).

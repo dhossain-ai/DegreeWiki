@@ -1,0 +1,86 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../lib/admin/guard'
+import { QUALITY_RESULT_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+
+const { data, error } = await supabase
+  .from('data_quality_checks')
+  .select('id, entity_type, check_type, result, checked_at')
+  .order('checked_at', { ascending: false })
+  .limit(50)
+
+type QualityRow = {
+  id: string
+  entity_type: string
+  check_type: string
+  result: string
+  checked_at: string
+}
+const rows = (data ?? []) as QualityRow[]
+
+const passCt = rows.filter(r => r.result === 'pass').length
+const failCt = rows.filter(r => r.result === 'fail').length
+const warnCt = rows.filter(r => r.result === 'warning').length
+---
+<AdminLayout title="Data Quality — DegreeWiki Admin" activePath="/admin/data-quality" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Data Quality</h1>
+    <span class="text-sm text-gray-400">Read-only · recent 50 checks</span>
+  </div>
+
+  {!error && rows.length > 0 && (
+    <div class="flex gap-4 mb-6">
+      <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm">
+        <span class="font-semibold text-green-700">{passCt}</span>
+        <span class="text-green-600 ml-1">pass</span>
+      </div>
+      <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm">
+        <span class="font-semibold text-red-700">{failCt}</span>
+        <span class="text-red-600 ml-1">fail</span>
+      </div>
+      <div class="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm">
+        <span class="font-semibold text-yellow-700">{warnCt}</span>
+        <span class="text-yellow-600 ml-1">warning</span>
+      </div>
+    </div>
+  )}
+
+  {error ? (
+    <p class="text-sm text-red-600 py-4">Could not load data.</p>
+  ) : rows.length === 0 ? (
+    <p class="text-sm text-gray-500 py-4">No quality checks recorded yet. Checks accumulate as data is verified.</p>
+  ) : (
+    <div class="overflow-x-auto rounded-lg border border-gray-200">
+      <table class="w-full text-sm text-left">
+        <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+          <tr>
+            <th class="px-4 py-3">Entity Type</th>
+            <th class="px-4 py-3">Check Type</th>
+            <th class="px-4 py-3">Result</th>
+            <th class="px-4 py-3">Checked At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
+              <td class="px-4 py-3 text-gray-600 text-xs">{row.entity_type}</td>
+              <td class="px-4 py-3 text-gray-700 font-mono text-xs">{row.check_type}</td>
+              <td class="px-4 py-3">
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${QUALITY_RESULT_BADGE[row.result] ?? FALLBACK_BADGE}`}>
+                  {row.result}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.checked_at).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AdminLayout>

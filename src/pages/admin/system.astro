@@ -1,0 +1,90 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../lib/admin/guard'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+
+const [rolesRes, permissionsRes] = await Promise.all([
+  supabase.from('roles').select('code, name, description').order('code'),
+  supabase.from('permissions').select('code, name, description').order('code'),
+])
+
+type RoleRow = { code: string; name: string; description: string | null }
+type PermissionRow = { code: string; name: string; description: string | null }
+
+const roles = (rolesRes.data ?? []) as RoleRow[]
+const permissions = (permissionsRes.data ?? []) as PermissionRow[]
+---
+<AdminLayout title="System — DegreeWiki Admin" activePath="/admin/system" userEmail={user.email ?? ''}>
+  <h1 class="text-xl font-bold text-gray-900 mb-6">System</h1>
+
+  <div class="mb-2">
+    <p class="text-xs text-gray-400">
+      Showing roles and permissions from seed data. No secrets or environment variables are shown here.
+    </p>
+  </div>
+
+  <div class="grid gap-6 mt-6 lg:grid-cols-2">
+    <!-- Roles -->
+    <div>
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Roles ({roles.length})</h2>
+      {rolesRes.error ? (
+        <p class="text-sm text-red-600">Could not load roles.</p>
+      ) : roles.length === 0 ? (
+        <p class="text-sm text-gray-500">No roles found.</p>
+      ) : (
+        <div class="rounded-lg border border-gray-200 overflow-hidden">
+          <table class="w-full text-sm text-left">
+            <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-4 py-3">Code</th>
+                <th class="px-4 py-3">Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map(role => (
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                  <td class="px-4 py-3 font-mono text-xs text-gray-600">{role.code}</td>
+                  <td class="px-4 py-3 text-gray-700">{role.name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+
+    <!-- Permissions -->
+    <div>
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Permissions ({permissions.length})</h2>
+      {permissionsRes.error ? (
+        <p class="text-sm text-red-600">Could not load permissions.</p>
+      ) : permissions.length === 0 ? (
+        <p class="text-sm text-gray-500">No permissions found.</p>
+      ) : (
+        <div class="rounded-lg border border-gray-200 overflow-hidden">
+          <table class="w-full text-sm text-left">
+            <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-4 py-3">Code</th>
+                <th class="px-4 py-3">Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {permissions.map(perm => (
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                  <td class="px-4 py-3 font-mono text-xs text-gray-600">{perm.code}</td>
+                  <td class="px-4 py-3 text-gray-700">{perm.name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  </div>
+</AdminLayout>

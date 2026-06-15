@@ -1,0 +1,38 @@
+---
+interface Props {
+  activePath?: string
+}
+const { activePath = '' } = Astro.props
+
+const navLinks = [
+  { href: '/admin', label: 'Dashboard' },
+  { href: '/admin/universities', label: 'Universities' },
+  { href: '/admin/programs', label: 'Programs' },
+  { href: '/admin/scholarships', label: 'Scholarships' },
+  { href: '/admin/articles', label: 'Articles' },
+  { href: '/admin/data-quality', label: 'Data Quality' },
+  { href: '/admin/imports', label: 'Imports' },
+  { href: '/admin/users', label: 'Users' },
+  { href: '/admin/system', label: 'System' },
+]
+---
+<nav class="w-56 flex-shrink-0 bg-gray-800 text-white flex flex-col min-h-screen">
+  <div class="px-4 py-5 border-b border-gray-700">
+    <span class="font-bold text-base">DegreeWiki</span>
+    <span class="block text-xs text-gray-400 mt-0.5">Admin Panel</span>
+  </div>
+  <ul class="flex-1 py-2">
+    {navLinks.map(link => (
+      <li>
+        <a
+          href={link.href}
+          class={activePath === link.href
+            ? 'block px-4 py-2 text-sm font-medium bg-gray-700 text-white'
+            : 'block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors'}
+        >
+          {link.label}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>

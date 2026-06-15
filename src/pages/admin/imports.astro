@@ -1,0 +1,79 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../lib/admin/guard'
+import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+
+const { data, error } = await supabase
+  .from('import_batches')
+  .select('id, batch_type, import_status, total_records, processed_count, error_count, created_at')
+  .order('created_at', { ascending: false })
+  .limit(100)
+
+type ImportBatchRow = {
+  id: string
+  batch_type: string
+  import_status: string
+  total_records: number
+  processed_count: number
+  error_count: number
+  created_at: string
+}
+const rows = (data ?? []) as ImportBatchRow[]
+---
+<AdminLayout title="Imports — DegreeWiki Admin" activePath="/admin/imports" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Import Batches</h1>
+    <span class="text-sm text-gray-400">Read-only · {rows.length} shown</span>
+  </div>
+
+  {error ? (
+    <p class="text-sm text-red-600 py-4">Could not load data.</p>
+  ) : rows.length === 0 ? (
+    <p class="text-sm text-gray-500 py-4">No import batches found.</p>
+  ) : (
+    <div class="overflow-x-auto rounded-lg border border-gray-200">
+      <table class="w-full text-sm text-left">
+        <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+          <tr>
+            <th class="px-4 py-3">Type</th>
+            <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">Total</th>
+            <th class="px-4 py-3">Processed</th>
+            <th class="px-4 py-3">Errors</th>
+            <th class="px-4 py-3">Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
+              <td class="px-4 py-3">
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${BATCH_TYPE_BADGE[row.batch_type] ?? FALLBACK_BADGE}`}>
+                  {row.batch_type}
+                </span>
+              </td>
+              <td class="px-4 py-3">
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
+                  {row.import_status}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-gray-700">{row.total_records}</td>
+              <td class="px-4 py-3 text-gray-700">{row.processed_count}</td>
+              <td class="px-4 py-3">
+                <span class={row.error_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>
+                  {row.error_count}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AdminLayout>

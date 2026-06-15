@@ -1,0 +1,71 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../lib/admin/guard'
+import { ACCOUNT_STATUS_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+
+// Queries user_profiles only. Email lives in Supabase Auth and is intentionally
+// not queried from this read-only admin page. Display name and account status
+// are the safe fields accessible via RLS.
+const { data, error } = await supabase
+  .from('user_profiles')
+  .select('id, display_name, account_status, created_at')
+  .order('created_at', { ascending: false })
+  .limit(100)
+
+type UserProfileRow = {
+  id: string
+  display_name: string | null
+  account_status: string
+  created_at: string
+}
+const rows = (data ?? []) as UserProfileRow[]
+---
+<AdminLayout title="Users — DegreeWiki Admin" activePath="/admin/users" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Users</h1>
+    <span class="text-sm text-gray-400">Read-only · {rows.length} shown</span>
+  </div>
+
+  <p class="text-xs text-gray-400 mb-4">
+    Showing app profile data only. Email lives in Supabase Auth and is intentionally not queried from this read-only admin page.
+  </p>
+
+  {error ? (
+    <p class="text-sm text-red-600 py-4">Could not load data.</p>
+  ) : rows.length === 0 ? (
+    <p class="text-sm text-gray-500 py-4">No user profiles found.</p>
+  ) : (
+    <div class="overflow-x-auto rounded-lg border border-gray-200">
+      <table class="w-full text-sm text-left">
+        <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+          <tr>
+            <th class="px-4 py-3">User ID</th>
+            <th class="px-4 py-3">Display Name</th>
+            <th class="px-4 py-3">Account Status</th>
+            <th class="px-4 py-3">Joined</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
+              <td class="px-4 py-3 text-gray-400 font-mono text-xs">{row.id.slice(0, 8)}…</td>
+              <td class="px-4 py-3 text-gray-700">{row.display_name ?? <span class="text-gray-400 italic">not set</span>}</td>
+              <td class="px-4 py-3">
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${ACCOUNT_STATUS_BADGE[row.account_status] ?? FALLBACK_BADGE}`}>
+                  {row.account_status}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AdminLayout>

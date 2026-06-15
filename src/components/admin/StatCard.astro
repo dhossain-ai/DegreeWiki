@@ -1,0 +1,13 @@
+---
+interface Props {
+  label: string
+  value: number | string
+  subLabel?: string
+}
+const { label, value, subLabel } = Astro.props
+---
+<div class="bg-white rounded-lg border border-gray-200 p-6">
+  <p class="text-sm font-medium text-gray-500">{label}</p>
+  <p class="mt-1 text-3xl font-bold text-gray-900">{value}</p>
+  {subLabel && <p class="mt-1 text-xs text-gray-400">{subLabel}</p>}
+</div>

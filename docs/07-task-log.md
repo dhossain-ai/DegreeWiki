@@ -1735,6 +1735,172 @@ Next:
 
 ---
 
+## 2026-06-15 - Phase 04: Admin Dashboard Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Build a minimal admin dashboard shell and read-only admin data views using the Phase 03
+super_admin gate. No CRUD, no migrations, no schema changes, no service_role in src.
+
+Column verification performed before writing queries:
+- scholarships.deadline: confirmed as `date` (migration 007)
+- data_quality_checks.result: confirmed as text CHECK(pass|fail|warning) (migration 009)
+- data_quality_checks.checked_at: confirmed (migration 009)
+- articles.published_at: confirmed as timestamptz nullable (migration 008)
+- import_batches.batch_type: confirmed as text CHECK(universities|programs|scholarships|mixed) (migration 010)
+- import_batches.import_status: confirmed with 8 canonical values (migration 010)
+- user_profiles columns: id, display_name, avatar_url, account_status, created_at, updated_at (migration 002)
+  No email column — email lives in auth.users, requires service_role to query directly.
+- permissions columns: id, code, name, description (migration 002)
+
+Completed:
+
+New lib files:
+
+src/lib/admin/guard.ts:
+- Exports requireSuperAdmin(cookies, request, requestPath): Promise<GuardResult>
+- Runs getUser() then has_role('super_admin') RPC on the same server client
+- Returns { type: 'redirect', to } | { type: 'forbidden' } | { type: 'ok', user, supabase }
+- Pages handle redirect/forbidden; guard returns the supabase client to avoid creating it twice
+
+src/lib/admin/badges.ts:
+- Static Record<string, string> maps for badge Tailwind classes
+- All values are literal strings — Tailwind v4 scanner can find them all
+- Maps: CONTENT_STATUS_BADGE, IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, QUALITY_RESULT_BADGE,
+  ACCOUNT_STATUS_BADGE, FALLBACK_BADGE
+
+New layout and components:
+
+src/layouts/AdminLayout.astro:
+- Wraps BaseLayout (no duplicate html/head/body tags)
+- Two-column flex layout: AdminSidebar (fixed width) + main content area
+- Topbar in content area: shows userEmail prop + logout form button
+- Accepts: title, activePath, userEmail props
+
+src/components/admin/AdminSidebar.astro:
+- Static nav list with 9 links: Dashboard, Universities, Programs, Scholarships,
+  Articles, Data Quality, Imports, Users, System
+- Active link highlighted via static ternary strings (Tailwind v4 compatible)
+
+src/components/admin/StatCard.astro:
+- Accepts: label, value, subLabel (optional)
+- Simple white card with label/value display
+
+Pages modified:
+
+src/pages/admin/index.astro (replaced):
+- Now renders AdminLayout with 6 StatCards
+- Parallel count queries: universities, programs, scholarships, articles, import_batches, user_profiles
+- Uses { count: 'exact', head: true } HEAD queries
+
+Pages added:
+
+src/pages/admin/universities.astro:
+- Columns: name, slug, content_status badge, verification_status, data_completeness_score, created_at
+- Ordered by created_at desc, limit 100
+- Empty state + error state handled
+
+src/pages/admin/programs.astro:
+- Columns: title, slug, content_status badge, degree level code, created_at
+- degree_levels looked up separately via parallel query + Map to avoid join complexity
+- Ordered by created_at desc, limit 100
+
+src/pages/admin/scholarships.astro:
+- Columns: name, slug, content_status badge, scholarship_type, deadline, created_at
+- scholarships.deadline is a real date column (confirmed from migration 007)
+
+src/pages/admin/articles.astro:
+- Columns: title, slug, content_status badge, published_at, created_at
+- articles.published_at is nullable timestamptz (confirmed from migration 008)
+- Shows '—' when published_at is null
+
+src/pages/admin/data-quality.astro:
+- Summary counts: pass, fail, warning (computed from recent 50 rows)
+- Columns: entity_type, check_type, result badge, checked_at
+- Ordered by checked_at desc, limit 50
+
+src/pages/admin/imports.astro:
+- Columns: batch_type badge, import_status badge, total_records, processed_count,
+  error_count (red if > 0), created_at
+- Ordered by created_at desc, limit 100
+
+src/pages/admin/users.astro:
+- Columns: user ID (first 8 chars truncated), display_name, account_status badge, created_at
+- Queries user_profiles only — email not available without service_role
+- UI note explains the email limitation
+
+src/pages/admin/system.astro:
+- Two-column grid: Roles table (code, name) + Permissions table (code, name)
+- Queries roles and permissions tables from seed data
+- No secrets, no env vars, no raw headers shown
+
+Access guard (all 9 routes):
+- Anonymous → /login?redirect=${encodeURIComponent(requestPath)}
+- Non-super_admin → 403 Forbidden: super_admin role required.
+- super_admin → page renders
+
+Validation:
+
+npm run build: PASS (Cloudflare adapter, 7.26s, zero errors)
+
+grep -R "service_role" src/:
+- One match: a comment in users.astro explaining why email is not shown.
+  No actual service_role key usage anywhere in src/.
+
+git ls-files --others --exclude-standard | grep -E "\.env|secret|key":
+- No output. No secret files untracked.
+
+git status:
+- src/pages/admin/index.astro: modified
+- src/components/, src/layouts/AdminLayout.astro, src/lib/admin/,
+  src/pages/admin/*.astro (8 new): untracked
+
+Important Decisions Made:
+- requireSuperAdmin() returns the supabase client to avoid creating two server clients per page.
+  The client already has the session baked in from getUser(); reusing it is correct.
+- Badge class maps use static literal string values only. No dynamic class construction.
+  Ternary expressions in AdminSidebar also use only static string literals.
+- AdminLayout wraps BaseLayout — the html/head/body tags are owned by BaseLayout.
+  AdminLayout does not create its own shell, preventing nested document tags.
+- user_profiles has no email column. /admin/users is limited to display_name and account_status.
+  This is a deliberate RLS-safe limitation noted inline in the UI.
+- degree_levels lookup on the programs page uses a parallel query + Map rather than a PostgREST
+  join to avoid TypeScript complexity with untyped join shapes.
+- /admin/system shows only roles and permissions — both are safe lookup/seed tables.
+  No env vars, no tokens, no headers are exposed.
+- All list pages limit to 100 rows ordered by created_at desc. No pagination in Phase 04.
+
+Files created:
+- src/lib/admin/guard.ts
+- src/lib/admin/badges.ts
+- src/layouts/AdminLayout.astro
+- src/components/admin/AdminSidebar.astro
+- src/components/admin/StatCard.astro
+- src/pages/admin/universities.astro
+- src/pages/admin/programs.astro
+- src/pages/admin/scholarships.astro
+- src/pages/admin/articles.astro
+- src/pages/admin/data-quality.astro
+- src/pages/admin/imports.astro
+- src/pages/admin/users.astro
+- src/pages/admin/system.astro
+
+Files modified:
+- src/pages/admin/index.astro (complete rewrite)
+- docs/06-status.md
+- docs/07-task-log.md
+
+Next:
+- Manually verify all 9 routes: anonymous redirect, student 403, super_admin access.
+- Verify logout works from the new admin layout topbar.
+- Merge feature/phase-04-admin-dashboard-foundation to main.
+- Load countries and subjects via import batch.
+- Begin Phase 05: admin CRUD or public SEO pages (TBD).
+
+---
+
 ## 2026-06-15 - Phase 03: App Foundation and Auth
 
 Tool:

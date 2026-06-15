@@ -1,37 +1,31 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro'
-import { createClient } from '../../lib/supabase/server'
+import AdminLayout from '../../layouts/AdminLayout.astro'
+import StatCard from '../../components/admin/StatCard.astro'
+import { requireSuperAdmin } from '../../lib/admin/guard'
 
-const supabase = createClient(Astro.cookies, Astro.request)
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
 
-// getUser() makes a network call to Supabase to validate the JWT.
-// Do not use getSession() here — it reads from cookies and is not authoritative.
-const { data: { user }, error: userError } = await supabase.auth.getUser()
+const { user, supabase } = guard
 
-if (!user || userError) {
-  return Astro.redirect('/login?redirect=/admin')
-}
-
-// Confirm super_admin role via DB function.
-// has_role() is SECURITY DEFINER and bypasses RLS safely.
-// Parameter name confirmed from migration 002_auth_roles.sql.
-const { data: isSuperAdmin, error: roleError } = await supabase.rpc('has_role', {
-  role_code: 'super_admin',
-})
-
-if (roleError || !isSuperAdmin) {
-  return new Response('403 Forbidden: super_admin role required.', { status: 403 })
-}
+const [univRes, progRes, scholRes, articleRes, importRes, userRes] = await Promise.all([
+  supabase.from('universities').select('*', { count: 'exact', head: true }),
+  supabase.from('programs').select('*', { count: 'exact', head: true }),
+  supabase.from('scholarships').select('*', { count: 'exact', head: true }),
+  supabase.from('articles').select('*', { count: 'exact', head: true }),
+  supabase.from('import_batches').select('*', { count: 'exact', head: true }),
+  supabase.from('user_profiles').select('*', { count: 'exact', head: true }),
+])
 ---
-<BaseLayout title="Admin — DegreeWiki">
-  <main class="max-w-2xl mx-auto p-8">
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold">Admin</h1>
-      <form method="post" action="/api/auth/logout">
-        <button type="submit" class="text-sm text-red-600 underline">Logout</button>
-      </form>
-    </div>
-    <p class="text-sm text-gray-500 mb-2">Signed in as <strong>{user.email}</strong></p>
-    <p class="text-green-700 font-medium">Access granted — super_admin confirmed.</p>
-  </main>
-</BaseLayout>
+<AdminLayout title="Dashboard — DegreeWiki Admin" activePath="/admin" userEmail={user.email ?? ''}>
+  <h1 class="text-xl font-bold text-gray-900 mb-6">Dashboard</h1>
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+    <StatCard label="Universities" value={univRes.count ?? 0} />
+    <StatCard label="Programs" value={progRes.count ?? 0} />
+    <StatCard label="Scholarships" value={scholRes.count ?? 0} />
+    <StatCard label="Articles" value={articleRes.count ?? 0} />
+    <StatCard label="Import Batches" value={importRes.count ?? 0} />
+    <StatCard label="Users" value={userRes.count ?? 0} />
+  </div>
+</AdminLayout>
