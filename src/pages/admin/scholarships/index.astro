@@ -1,7 +1,7 @@
 ---
-import AdminLayout from '../../layouts/AdminLayout.astro'
-import { requireSuperAdmin } from '../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -20,7 +20,7 @@ type ScholarshipRow = {
   name: string
   slug: string
   content_status: string
-  scholarship_type: string
+  scholarship_type: string | null
   deadline: string | null
   created_at: string
 }
@@ -29,13 +29,16 @@ const rows = (data ?? []) as ScholarshipRow[]
 <AdminLayout title="Scholarships — DegreeWiki Admin" activePath="/admin/scholarships" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-bold text-gray-900">Scholarships</h1>
-    <span class="text-sm text-gray-400">Read-only · {rows.length} shown</span>
+    <a href="/admin/scholarships/new"
+      class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      + New Scholarship
+    </a>
   </div>
 
   {error ? (
     <p class="text-sm text-red-600 py-4">Could not load data.</p>
   ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No records found.</p>
+    <p class="text-sm text-gray-500 py-4">No scholarships found. <a href="/admin/scholarships/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
   ) : (
     <div class="overflow-x-auto rounded-lg border border-gray-200">
       <table class="w-full text-sm text-left">
@@ -43,10 +46,11 @@ const rows = (data ?? []) as ScholarshipRow[]
           <tr>
             <th class="px-4 py-3">Name</th>
             <th class="px-4 py-3">Slug</th>
-            <th class="px-4 py-3">Status</th>
             <th class="px-4 py-3">Type</th>
+            <th class="px-4 py-3">Status</th>
             <th class="px-4 py-3">Deadline</th>
             <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
@@ -54,14 +58,17 @@ const rows = (data ?? []) as ScholarshipRow[]
             <tr class="border-b border-gray-100 hover:bg-gray-50">
               <td class="px-4 py-3 font-medium text-gray-900">{row.name}</td>
               <td class="px-4 py-3 text-gray-500 font-mono text-xs">{row.slug}</td>
+              <td class="px-4 py-3 text-gray-600 text-xs">{row.scholarship_type ?? '—'}</td>
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
                   {row.content_status}
                 </span>
               </td>
-              <td class="px-4 py-3 text-gray-600 text-xs">{row.scholarship_type}</td>
               <td class="px-4 py-3 text-gray-400 text-xs">{row.deadline ?? '—'}</td>
               <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3 text-right">
+                <a href={`/admin/scholarships/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+              </td>
             </tr>
           ))}
         </tbody>
