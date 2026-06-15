@@ -21,3 +21,28 @@ export function validateSlug(value: string): string | null {
   }
   return null
 }
+
+export function validateNumeric(
+  value: string,
+  label: string,
+  options: { min?: number } = {}
+): string | null {
+  if (!value || value.trim() === '') return null
+  const n = Number(value.trim())
+  if (!isFinite(n)) return `${label} must be a valid number.`
+  if (options.min !== undefined && n < options.min) return `${label} must be at least ${options.min}.`
+  return null
+}
+
+export function validateUrl(value: string, label: string): string | null {
+  if (!value || value.trim() === '') return null
+  try {
+    const url = new URL(value.trim())
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return `${label} must start with http:// or https://.`
+    }
+  } catch {
+    return `${label} must be a valid URL (e.g. https://example.com).`
+  }
+  return null
+}
