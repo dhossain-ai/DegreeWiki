@@ -1,16 +1,46 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 04 — Admin Dashboard Foundation — IN PROGRESS (implementation complete, pending manual verification and merge).
+Phase 05 — Admin CRUD Foundation — implementation complete, pending manual verification.
 
-Admin shell, sidebar, topbar, and 9 read-only list pages built. All pages use the Phase 03
-super_admin gate (getUser + has_role RPC). No CRUD, no migrations, no schema changes, no
-service_role in src. npm run build passed (Cloudflare output). No secrets committed.
+Countries, cities, universities (list/new/edit), degree levels (list/edit), and subjects
+(list/new/edit) built with server-side Astro form POST handling. All pages use the existing
+super_admin gate. No migrations, no service_role in src, no secrets committed.
+npm run build passed (Cloudflare output, 9.76s).
 
 ## Last Completed Work
+
+Phase 05 — Admin CRUD Foundation (implementation complete):
+
+- Added src/lib/admin/validate.ts — manual validation helpers (no Zod; Zod not in package.json).
+  Functions: validateRequired, validateExactLength, validateIn, validateSlug.
+- Added src/lib/admin/slug.ts — toSlug() helper: lowercase, strip non-alnum, collapse hyphens.
+- Added /admin/countries (new list page), /admin/countries/new, /admin/countries/[id] (edit).
+  Fields: name, slug, iso2, iso3, continent, overview, content_status.
+- Added /admin/cities (new list page), /admin/cities/new, /admin/cities/[id] (edit).
+  Fields: name, slug, country_id (select from all countries), content_status.
+  List shows joined country name.
+- Moved /admin/universities from flat universities.astro → universities/index.astro
+  (required to allow universities/ folder for new/edit routes; same URL, no breakage).
+  Added + New University button and Edit links to the list.
+  Added /admin/universities/new and /admin/universities/[id] (edit).
+  Fields: name, slug, country_id, city_id (optional), official_url, overview, content_status.
+- Added /admin/degree-levels (new list page), /admin/degree-levels/[id] (edit only — no create).
+  Fields: name, display_order, is_active. Code field shown as read-only info, not an input.
+- Added /admin/subjects (new list page), /admin/subjects/new, /admin/subjects/[id] (edit).
+  Fields: name, slug, parent_subject_id (select excluding self on edit), display_order, content_status.
+  Self-parent assignment blocked server-side on edit.
+- Updated AdminSidebar.astro: added Countries, Cities, Degree Levels, Subjects nav links (13 total).
+- All new routes enforce the existing requireSuperAdmin() guard.
+- All writes use the session-authenticated Supabase server client. No service_role in src.
+- No migrations. No new API endpoints. No React. No client-side JS.
+- Constraint errors (code 23505) surface as user-readable field-level messages.
+- POST-redirect-GET on success (no flash message system needed).
+- npm run build: passed (Cloudflare output, 9.76s).
+- grep service_role src/: 0 matches.
 
 Phase 04 — Admin Dashboard Foundation (implementation complete):
 
@@ -140,7 +170,7 @@ Phase 01 — Database Schema v1 (complete):
 
 ## Active Branch
 
-feature/phase-04-admin-dashboard-foundation
+feature/phase-05-admin-crud-foundation
 
 ## Migration Files Created
 
@@ -191,8 +221,10 @@ the admin dashboard server endpoints.
 
 ## Next Steps
 
-1. Manually verify all 9 admin routes: anonymous redirect, student 403, super_admin access.
-2. Verify logout works from the new admin layout topbar.
-3. Merge feature/phase-04-admin-dashboard-foundation to main.
-4. Load countries and subjects via import batch.
-5. Begin Phase 05: admin CRUD (create/edit/publish) or public SEO pages (TBD).
+1. Manually verify all new admin routes: anonymous redirect, student 403, super_admin access.
+2. Test create/edit for countries, cities, universities, subjects.
+3. Test degree levels list and edit.
+4. Verify duplicate slug / required field validation shows inline errors.
+5. Merge feature/phase-05-admin-crud-foundation to main after manual verification.
+6. Load countries and subjects data through the new admin forms.
+7. Begin Phase 06: TBD (programs CRUD, public SEO pages, or articles).

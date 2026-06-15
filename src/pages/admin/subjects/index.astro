@@ -1,0 +1,75 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+
+const { data, error } = await supabase
+  .from('subjects')
+  .select('id, name, slug, display_order, content_status, created_at, parent:parent_subject_id(name)')
+  .order('display_order', { ascending: true })
+  .limit(200)
+
+type SubjectRow = {
+  id: string
+  name: string
+  slug: string
+  display_order: number
+  content_status: string
+  created_at: string
+  parent: { name: string } | null
+}
+const rows = (data ?? []) as SubjectRow[]
+---
+<AdminLayout title="Subjects — DegreeWiki Admin" activePath="/admin/subjects" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Subjects</h1>
+    <a href="/admin/subjects/new" class="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      + New Subject
+    </a>
+  </div>
+
+  {error ? (
+    <p class="text-sm text-red-600 py-4">Could not load data.</p>
+  ) : rows.length === 0 ? (
+    <p class="text-sm text-gray-500 py-4">No subjects found. <a href="/admin/subjects/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
+  ) : (
+    <div class="overflow-x-auto rounded-lg border border-gray-200">
+      <table class="w-full text-sm text-left">
+        <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+          <tr>
+            <th class="px-4 py-3">Name</th>
+            <th class="px-4 py-3">Slug</th>
+            <th class="px-4 py-3">Parent</th>
+            <th class="px-4 py-3">Order</th>
+            <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
+              <td class="px-4 py-3 font-medium text-gray-900">{row.name}</td>
+              <td class="px-4 py-3 text-gray-500 font-mono text-xs">{row.slug}</td>
+              <td class="px-4 py-3 text-gray-500 text-xs">{row.parent?.name ?? '—'}</td>
+              <td class="px-4 py-3 text-gray-600">{row.display_order}</td>
+              <td class="px-4 py-3">
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
+                  {row.content_status}
+                </span>
+              </td>
+              <td class="px-4 py-3">
+                <a href={`/admin/subjects/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AdminLayout>

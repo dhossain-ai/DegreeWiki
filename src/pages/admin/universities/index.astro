@@ -1,7 +1,7 @@
 ---
-import AdminLayout from '../../layouts/AdminLayout.astro'
-import { requireSuperAdmin } from '../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -29,13 +29,15 @@ const rows = (data ?? []) as UniversityRow[]
 <AdminLayout title="Universities — DegreeWiki Admin" activePath="/admin/universities" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-bold text-gray-900">Universities</h1>
-    <span class="text-sm text-gray-400">Read-only · {rows.length} shown</span>
+    <a href="/admin/universities/new" class="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      + New University
+    </a>
   </div>
 
   {error ? (
     <p class="text-sm text-red-600 py-4">Could not load data.</p>
   ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No records found.</p>
+    <p class="text-sm text-gray-500 py-4">No universities found. <a href="/admin/universities/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
   ) : (
     <div class="overflow-x-auto rounded-lg border border-gray-200">
       <table class="w-full text-sm text-left">
@@ -47,6 +49,7 @@ const rows = (data ?? []) as UniversityRow[]
             <th class="px-4 py-3">Verification</th>
             <th class="px-4 py-3">Completeness</th>
             <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
@@ -62,6 +65,9 @@ const rows = (data ?? []) as UniversityRow[]
               <td class="px-4 py-3 text-gray-600 text-xs">{row.verification_status}</td>
               <td class="px-4 py-3 text-gray-600">{row.data_completeness_score}%</td>
               <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3">
+                <a href={`/admin/universities/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+              </td>
             </tr>
           ))}
         </tbody>

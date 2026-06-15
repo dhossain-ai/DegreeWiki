@@ -1,0 +1,193 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { toSlug } from '../../../lib/admin/slug'
+import {
+  type FormErrors,
+  validateRequired,
+  validateExactLength,
+  validateIn,
+  validateSlug,
+} from '../../../lib/admin/validate'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+const { id } = Astro.params
+
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+
+type Values = {
+  name: string
+  slug: string
+  iso2: string
+  iso3: string
+  continent: string
+  overview: string
+  content_status: string
+}
+
+// Load existing record
+const { data: existing, error: loadError } = await supabase
+  .from('countries')
+  .select('id, name, slug, iso2, iso3, continent, overview, content_status')
+  .eq('id', id)
+  .single()
+
+if (loadError || !existing) {
+  return new Response('Country not found.', { status: 404 })
+}
+
+type CountryRecord = {
+  id: string
+  name: string
+  slug: string
+  iso2: string
+  iso3: string
+  continent: string | null
+  overview: string | null
+  content_status: string
+}
+const record = existing as CountryRecord
+
+let values: Values = {
+  name: record.name,
+  slug: record.slug,
+  iso2: record.iso2,
+  iso3: record.iso3,
+  continent: record.continent ?? '',
+  overview: record.overview ?? '',
+  content_status: record.content_status,
+}
+let errors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = {
+    name: String(form.get('name') ?? '').trim(),
+    slug: String(form.get('slug') ?? '').trim(),
+    iso2: String(form.get('iso2') ?? '').trim().toUpperCase(),
+    iso3: String(form.get('iso3') ?? '').trim().toUpperCase(),
+    continent: String(form.get('continent') ?? '').trim(),
+    overview: String(form.get('overview') ?? '').trim(),
+    content_status: String(form.get('content_status') ?? 'draft').trim(),
+  }
+
+  if (!values.slug && values.name) values.slug = toSlug(values.name)
+
+  const e: FormErrors = {}
+  const nameErr = validateRequired(values.name, 'Name')
+  if (nameErr) e.name = nameErr
+  const iso2Err = validateRequired(values.iso2, 'ISO2') ?? validateExactLength(values.iso2, 2, 'ISO2')
+  if (iso2Err) e.iso2 = iso2Err
+  const iso3Err = validateRequired(values.iso3, 'ISO3') ?? validateExactLength(values.iso3, 3, 'ISO3')
+  if (iso3Err) e.iso3 = iso3Err
+  const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
+  if (slugErr) e.slug = slugErr
+  const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
+  if (statusErr) e.content_status = statusErr
+
+  errors = e
+
+  if (Object.keys(errors).length === 0) {
+    const { error } = await supabase
+      .from('countries')
+      .update({
+        name: values.name,
+        slug: values.slug,
+        iso2: values.iso2,
+        iso3: values.iso3,
+        continent: values.continent || null,
+        overview: values.overview || null,
+        content_status: values.content_status,
+      })
+      .eq('id', id)
+
+    if (error) {
+      if (error.code === '23505') {
+        serverError = 'A country with this slug, ISO2, or ISO3 already exists.'
+      } else {
+        serverError = 'Could not save. Please try again.'
+      }
+    } else {
+      return Astro.redirect('/admin/countries')
+    }
+  }
+}
+---
+<AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/countries" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Edit Country</h1>
+    <a href="/admin/countries" class="text-sm text-gray-500 hover:underline">← Back to Countries</a>
+  </div>
+
+  {serverError && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+  )}
+
+  <form method="post" class="max-w-xl space-y-4">
+    <div>
+      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+      <input type="text" id="name" name="name" value={values.name} required
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {errors.name && <p class="mt-1 text-xs text-red-600">{errors.name}</p>}
+    </div>
+
+    <div>
+      <label for="slug" class="block text-sm font-medium text-gray-700 mb-1">Slug *</label>
+      <input type="text" id="slug" name="slug" value={values.slug}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+      {errors.slug && <p class="mt-1 text-xs text-red-600">{errors.slug}</p>}
+    </div>
+
+    <div class="flex gap-4">
+      <div class="flex-1">
+        <label for="iso2" class="block text-sm font-medium text-gray-700 mb-1">ISO2 Code *</label>
+        <input type="text" id="iso2" name="iso2" value={values.iso2} maxlength={2}
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono uppercase" />
+        {errors.iso2 && <p class="mt-1 text-xs text-red-600">{errors.iso2}</p>}
+      </div>
+      <div class="flex-1">
+        <label for="iso3" class="block text-sm font-medium text-gray-700 mb-1">ISO3 Code *</label>
+        <input type="text" id="iso3" name="iso3" value={values.iso3} maxlength={3}
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono uppercase" />
+        {errors.iso3 && <p class="mt-1 text-xs text-red-600">{errors.iso3}</p>}
+      </div>
+    </div>
+
+    <div>
+      <label for="continent" class="block text-sm font-medium text-gray-700 mb-1">Continent</label>
+      <input type="text" id="continent" name="continent" value={values.continent}
+        placeholder="e.g. Europe, Asia, North America"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div>
+      <label for="overview" class="block text-sm font-medium text-gray-700 mb-1">Overview</label>
+      <textarea id="overview" name="overview" rows={4}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{values.overview}</textarea>
+    </div>
+
+    <div>
+      <label for="content_status" class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
+      <select id="content_status" name="content_status"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        {CONTENT_STATUS_OPTIONS.map(s => (
+          <option value={s} selected={values.content_status === s}>{s}</option>
+        ))}
+      </select>
+      {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+        Save Changes
+      </button>
+      <a href="/admin/countries" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </form>
+</AdminLayout>

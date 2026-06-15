@@ -4,6 +4,191 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 05: Admin CRUD Foundation for Core Content
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add safe admin create/edit forms for countries, cities, universities, degree levels (edit only),
+and subjects through server-side Astro form POST handling. No migrations, no service_role,
+no React, no client-side JS.
+
+Pre-implementation column verification:
+- countries: id, iso2, iso3, name, slug, continent, overview, content_status (migration 004)
+  No currency_code, region, or timezone columns exist.
+- cities: id, name, slug, country_id, content_status (migration 004)
+  No region_or_state or timezone columns exist.
+- universities: id, name, slug, country_id, city_id, official_url, overview, content_status (migration 005)
+  No institution_type or ownership_type columns exist.
+- degree_levels: id, code, name, display_order, is_active (migration 004)
+  No plural_name or description_short columns exist. code is seeded and must not be editable.
+- subjects: id, name, slug, parent_subject_id, display_order, content_status (migration 004)
+  No summary or description column exists.
+
+Zod check: not in package.json. Manual validation helpers used instead.
+
+Completed:
+
+New utility files:
+
+src/lib/admin/validate.ts:
+- FormErrors type alias (Record<string, string>)
+- validateRequired, validateExactLength, validateIn, validateSlug functions
+- No external dependencies
+
+src/lib/admin/slug.ts:
+- toSlug(str): lowercase, strip non-alnum, collapse whitespace/hyphens
+
+Countries (new — no existing file):
+
+src/pages/admin/countries/index.astro:
+- List table: name, slug, iso2, iso3, content_status badge, created_at, Edit link
+- + New Country button
+
+src/pages/admin/countries/new.astro:
+- Fields: name, slug (auto-generated if blank), iso2 (2 chars), iso3 (3 chars),
+  continent, overview, content_status select
+- Validation: name required, iso2 exact 2 chars, iso3 exact 3 chars, slug format
+- ISO2/ISO3 uppercased server-side before insert
+- 23505 → "A country with this slug, ISO2, or ISO3 already exists."
+- POST-redirect-GET to /admin/countries on success
+
+src/pages/admin/countries/[id].astro (edit):
+- Loads existing row by id, 404 if not found
+- Same fields and validation as new
+- POST-redirect-GET to /admin/countries on success
+
+Cities (new — no existing file):
+
+src/pages/admin/cities/index.astro:
+- List table: name, slug, joined country name, content_status badge, created_at, Edit link
+- Uses .select('id, name, slug, content_status, created_at, countries(name)')
+
+src/pages/admin/cities/new.astro:
+- Fields: name, slug, country_id (select from all countries, ordered by name), content_status
+- Warning shown if no countries exist yet
+- 23505 → "A city with this slug already exists in that country."
+
+src/pages/admin/cities/[id].astro (edit):
+- Same fields, prefilled from DB
+
+Universities (moved flat file + new routes):
+
+src/pages/admin/universities.astro DELETED.
+Reason: cannot have both universities.astro (file) and universities/ (folder) in the same
+directory. File system and Astro routing both require one or the other.
+
+src/pages/admin/universities/index.astro (moved from flat, import paths updated):
+- Same list columns as Phase 04, plus Edit link column and + New University button
+
+src/pages/admin/universities/new.astro:
+- Fields: name, slug, country_id (required), city_id (optional select), official_url,
+  overview, content_status
+- Loads countries and cities in parallel for dropdowns
+- 23505 → "A university with this slug already exists."
+
+src/pages/admin/universities/[id].astro (edit):
+- Same fields, prefilled from DB
+
+Degree Levels (new — edit only):
+
+src/pages/admin/degree-levels/index.astro:
+- List table: code (read-only display), name, display_order, is_active badge
+- Note shown: "Seeded values — edit only, no create or delete"
+
+src/pages/admin/degree-levels/[id].astro (edit):
+- code shown as read-only info box (not an input — never sent in the update payload)
+- Fields: name, display_order, is_active (select: active/inactive with description)
+- Warning shown that deactivating affects all program search filters
+- Validation: name required, display_order non-negative integer
+
+Subjects (new — no existing file):
+
+src/pages/admin/subjects/index.astro:
+- List table: name, slug, parent subject name, display_order, content_status, Edit link
+- Uses self-join alias: .select('..., parent:parent_subject_id(name)')
+- 200-row limit (subject lists can be larger than country/city lists)
+
+src/pages/admin/subjects/new.astro:
+- Fields: name, slug, parent_subject_id (select all subjects), display_order, content_status
+
+src/pages/admin/subjects/[id].astro (edit):
+- Parent dropdown excludes self (.neq('id', id))
+- Server-side self-parent check: if parent_subject_id === id → validation error
+- "A subject cannot be its own parent."
+
+Sidebar (updated):
+
+src/components/admin/AdminSidebar.astro:
+- Added Countries, Cities, Degree Levels, Subjects links
+- Nav now has 13 links total (was 9)
+- Link order: Dashboard, Countries, Cities, Universities, Degree Levels, Subjects,
+  Programs, Scholarships, Articles, Data Quality, Imports, Users, System
+
+Fields omitted because columns do not exist:
+- Countries: no currency_code, no region — omitted
+- Cities: no region_or_state, no timezone — omitted
+- Universities: no institution_type, no ownership_type — omitted
+- Subjects: no description/summary — omitted
+- Degree Levels: no plural_name, no description_short — omitted
+
+Validation behavior:
+- Required fields: name (all), iso2/iso3 (countries), country_id (cities/universities)
+- Slug: required, must match ^[a-z0-9]+(?:-[a-z0-9]+)*$ — auto-generated from name if blank
+- content_status: must be one of draft|in_review|published|unpublished|archived
+- display_order: non-negative integer (degree levels, subjects)
+- 23505 unique constraint violations surface as human-readable server error messages
+- Form values preserved on validation failure so user does not lose input
+
+Build result:
+npm run build: PASS (Cloudflare output, 9.76s, zero errors)
+
+PowerShell service_role search:
+Get-ChildItem src -Recurse -File | Select-String -Pattern "service_role" → 0 matches
+
+Git status:
+- modified: src/components/admin/AdminSidebar.astro
+- deleted: src/pages/admin/universities.astro
+- untracked: src/lib/admin/slug.ts, src/lib/admin/validate.ts,
+  src/pages/admin/cities/, src/pages/admin/countries/,
+  src/pages/admin/degree-levels/, src/pages/admin/subjects/,
+  src/pages/admin/universities/
+
+Files created:
+- src/lib/admin/validate.ts
+- src/lib/admin/slug.ts
+- src/pages/admin/countries/index.astro
+- src/pages/admin/countries/new.astro
+- src/pages/admin/countries/[id].astro
+- src/pages/admin/cities/index.astro
+- src/pages/admin/cities/new.astro
+- src/pages/admin/cities/[id].astro
+- src/pages/admin/universities/index.astro
+- src/pages/admin/universities/new.astro
+- src/pages/admin/universities/[id].astro
+- src/pages/admin/degree-levels/index.astro
+- src/pages/admin/degree-levels/[id].astro
+- src/pages/admin/subjects/index.astro
+- src/pages/admin/subjects/new.astro
+- src/pages/admin/subjects/[id].astro
+
+Files modified:
+- src/components/admin/AdminSidebar.astro
+- docs/06-status.md
+- docs/07-task-log.md
+
+Files deleted:
+- src/pages/admin/universities.astro (replaced by universities/index.astro)
+
+Next:
+- Manually verify all new routes: anonymous redirect, student 403, super_admin access.
+- Test create/edit for each entity.
+- Verify validation errors display inline.
+- Merge feature/phase-05-admin-crud-foundation to main after verification.
+
+---
+
 ## 2026-06-14 - Project Docs Foundation
 
 Tool:

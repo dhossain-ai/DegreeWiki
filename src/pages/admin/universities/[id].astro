@@ -1,0 +1,209 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { toSlug } from '../../../lib/admin/slug'
+import {
+  type FormErrors,
+  validateRequired,
+  validateIn,
+  validateSlug,
+} from '../../../lib/admin/validate'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+const { id } = Astro.params
+
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+
+// Load existing record
+const { data: existing, error: loadError } = await supabase
+  .from('universities')
+  .select('id, name, slug, country_id, city_id, official_url, overview, content_status')
+  .eq('id', id)
+  .single()
+
+if (loadError || !existing) {
+  return new Response('University not found.', { status: 404 })
+}
+
+type UniversityRecord = {
+  id: string
+  name: string
+  slug: string
+  country_id: string
+  city_id: string | null
+  official_url: string | null
+  overview: string | null
+  content_status: string
+}
+const record = existing as UniversityRecord
+
+// Load countries and cities for dropdowns
+const [{ data: countriesData }, { data: citiesData }] = await Promise.all([
+  supabase.from('countries').select('id, name').order('name', { ascending: true }),
+  supabase.from('cities').select('id, name, country_id').order('name', { ascending: true }),
+])
+
+type CountryOption = { id: string; name: string }
+type CityOption = { id: string; name: string; country_id: string }
+const countries = (countriesData ?? []) as CountryOption[]
+const cities = (citiesData ?? []) as CityOption[]
+
+type Values = {
+  name: string
+  slug: string
+  country_id: string
+  city_id: string
+  official_url: string
+  overview: string
+  content_status: string
+}
+
+let values: Values = {
+  name: record.name,
+  slug: record.slug,
+  country_id: record.country_id,
+  city_id: record.city_id ?? '',
+  official_url: record.official_url ?? '',
+  overview: record.overview ?? '',
+  content_status: record.content_status,
+}
+let errors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = {
+    name: String(form.get('name') ?? '').trim(),
+    slug: String(form.get('slug') ?? '').trim(),
+    country_id: String(form.get('country_id') ?? '').trim(),
+    city_id: String(form.get('city_id') ?? '').trim(),
+    official_url: String(form.get('official_url') ?? '').trim(),
+    overview: String(form.get('overview') ?? '').trim(),
+    content_status: String(form.get('content_status') ?? 'draft').trim(),
+  }
+
+  if (!values.slug && values.name) values.slug = toSlug(values.name)
+
+  const e: FormErrors = {}
+  const nameErr = validateRequired(values.name, 'Name')
+  if (nameErr) e.name = nameErr
+  const countryErr = validateRequired(values.country_id, 'Country')
+  if (countryErr) e.country_id = countryErr
+  const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
+  if (slugErr) e.slug = slugErr
+  const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
+  if (statusErr) e.content_status = statusErr
+
+  errors = e
+
+  if (Object.keys(errors).length === 0) {
+    const { error } = await supabase
+      .from('universities')
+      .update({
+        name: values.name,
+        slug: values.slug,
+        country_id: values.country_id,
+        city_id: values.city_id || null,
+        official_url: values.official_url || null,
+        overview: values.overview || null,
+        content_status: values.content_status,
+      })
+      .eq('id', id)
+
+    if (error) {
+      if (error.code === '23505') {
+        serverError = 'A university with this slug already exists.'
+      } else {
+        serverError = 'Could not save. Please try again.'
+      }
+    } else {
+      return Astro.redirect('/admin/universities')
+    }
+  }
+}
+---
+<AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/universities" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Edit University</h1>
+    <a href="/admin/universities" class="text-sm text-gray-500 hover:underline">← Back to Universities</a>
+  </div>
+
+  {serverError && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+  )}
+
+  <form method="post" class="max-w-xl space-y-4">
+    <div>
+      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+      <input type="text" id="name" name="name" value={values.name} required
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {errors.name && <p class="mt-1 text-xs text-red-600">{errors.name}</p>}
+    </div>
+
+    <div>
+      <label for="slug" class="block text-sm font-medium text-gray-700 mb-1">Slug *</label>
+      <input type="text" id="slug" name="slug" value={values.slug}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+      {errors.slug && <p class="mt-1 text-xs text-red-600">{errors.slug}</p>}
+    </div>
+
+    <div>
+      <label for="country_id" class="block text-sm font-medium text-gray-700 mb-1">Country *</label>
+      <select id="country_id" name="country_id"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        <option value="">— select a country —</option>
+        {countries.map(c => (
+          <option value={c.id} selected={values.country_id === c.id}>{c.name}</option>
+        ))}
+      </select>
+      {errors.country_id && <p class="mt-1 text-xs text-red-600">{errors.country_id}</p>}
+    </div>
+
+    <div>
+      <label for="city_id" class="block text-sm font-medium text-gray-700 mb-1">City</label>
+      <select id="city_id" name="city_id"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        <option value="">— none —</option>
+        {cities.map(c => (
+          <option value={c.id} selected={values.city_id === c.id}>{c.name}</option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label for="official_url" class="block text-sm font-medium text-gray-700 mb-1">Official URL</label>
+      <input type="url" id="official_url" name="official_url" value={values.official_url}
+        placeholder="https://www.university.edu"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div>
+      <label for="overview" class="block text-sm font-medium text-gray-700 mb-1">Overview</label>
+      <textarea id="overview" name="overview" rows={4}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{values.overview}</textarea>
+    </div>
+
+    <div>
+      <label for="content_status" class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
+      <select id="content_status" name="content_status"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        {CONTENT_STATUS_OPTIONS.map(s => (
+          <option value={s} selected={values.content_status === s}>{s}</option>
+        ))}
+      </select>
+      {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+        Save Changes
+      </button>
+      <a href="/admin/universities" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </form>
+</AdminLayout>

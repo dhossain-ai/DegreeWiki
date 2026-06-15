@@ -1,0 +1,131 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { type FormErrors, validateRequired } from '../../../lib/admin/validate'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+const { id } = Astro.params
+
+// Load existing record — code is read-only, excluded from the update payload
+const { data: existing, error: loadError } = await supabase
+  .from('degree_levels')
+  .select('id, code, name, display_order, is_active')
+  .eq('id', id)
+  .single()
+
+if (loadError || !existing) {
+  return new Response('Degree level not found.', { status: 404 })
+}
+
+type DegreeLevelRecord = {
+  id: string
+  code: string
+  name: string
+  display_order: number
+  is_active: boolean
+}
+const record = existing as DegreeLevelRecord
+
+type Values = {
+  name: string
+  display_order: string
+  is_active: boolean
+}
+
+let values: Values = {
+  name: record.name,
+  display_order: String(record.display_order),
+  is_active: record.is_active,
+}
+let errors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = {
+    name: String(form.get('name') ?? '').trim(),
+    display_order: String(form.get('display_order') ?? '0').trim(),
+    is_active: form.get('is_active') === 'true',
+  }
+
+  const e: FormErrors = {}
+  const nameErr = validateRequired(values.name, 'Name')
+  if (nameErr) e.name = nameErr
+
+  const orderNum = Number(values.display_order)
+  if (!Number.isInteger(orderNum) || orderNum < 0) {
+    e.display_order = 'Display order must be a non-negative integer.'
+  }
+
+  errors = e
+
+  if (Object.keys(errors).length === 0) {
+    const { error } = await supabase
+      .from('degree_levels')
+      .update({
+        name: values.name,
+        display_order: orderNum,
+        is_active: values.is_active,
+      })
+      .eq('id', id)
+
+    if (error) {
+      serverError = 'Could not save. Please try again.'
+    } else {
+      return Astro.redirect('/admin/degree-levels')
+    }
+  }
+}
+---
+<AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/degree-levels" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Edit Degree Level</h1>
+    <a href="/admin/degree-levels" class="text-sm text-gray-500 hover:underline">← Back to Degree Levels</a>
+  </div>
+
+  <div class="mb-4 px-4 py-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-gray-600">
+    Code: <span class="font-mono font-medium text-gray-900">{record.code}</span> — read-only, do not change.
+  </div>
+
+  {serverError && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+  )}
+
+  <form method="post" class="max-w-xl space-y-4">
+    <div>
+      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+      <input type="text" id="name" name="name" value={values.name} required
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {errors.name && <p class="mt-1 text-xs text-red-600">{errors.name}</p>}
+    </div>
+
+    <div>
+      <label for="display_order" class="block text-sm font-medium text-gray-700 mb-1">Display Order</label>
+      <input type="number" id="display_order" name="display_order" value={values.display_order} min={0}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {errors.display_order && <p class="mt-1 text-xs text-red-600">{errors.display_order}</p>}
+    </div>
+
+    <div>
+      <label for="is_active" class="block text-sm font-medium text-gray-700 mb-1">Active</label>
+      <select id="is_active" name="is_active"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        <option value="true" selected={values.is_active}>Active — shown in search filters and forms</option>
+        <option value="false" selected={!values.is_active}>Inactive — hidden from public use</option>
+      </select>
+      <p class="mt-1 text-xs text-gray-400">Deactivating affects all program search filters that reference this level.</p>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+        Save Changes
+      </button>
+      <a href="/admin/degree-levels" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </form>
+</AdminLayout>

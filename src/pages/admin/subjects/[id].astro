@@ -1,0 +1,187 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { toSlug } from '../../../lib/admin/slug'
+import {
+  type FormErrors,
+  validateRequired,
+  validateIn,
+  validateSlug,
+} from '../../../lib/admin/validate'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+const { id } = Astro.params
+
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+
+// Load existing record
+const { data: existing, error: loadError } = await supabase
+  .from('subjects')
+  .select('id, name, slug, parent_subject_id, display_order, content_status')
+  .eq('id', id)
+  .single()
+
+if (loadError || !existing) {
+  return new Response('Subject not found.', { status: 404 })
+}
+
+type SubjectRecord = {
+  id: string
+  name: string
+  slug: string
+  parent_subject_id: string | null
+  display_order: number
+  content_status: string
+}
+const record = existing as SubjectRecord
+
+// Load all subjects except this one for the parent dropdown
+const { data: subjectsData } = await supabase
+  .from('subjects')
+  .select('id, name')
+  .neq('id', id)
+  .order('name', { ascending: true })
+
+type SubjectOption = { id: string; name: string }
+const subjectOptions = (subjectsData ?? []) as SubjectOption[]
+
+type Values = {
+  name: string
+  slug: string
+  parent_subject_id: string
+  display_order: string
+  content_status: string
+}
+
+let values: Values = {
+  name: record.name,
+  slug: record.slug,
+  parent_subject_id: record.parent_subject_id ?? '',
+  display_order: String(record.display_order),
+  content_status: record.content_status,
+}
+let errors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = {
+    name: String(form.get('name') ?? '').trim(),
+    slug: String(form.get('slug') ?? '').trim(),
+    parent_subject_id: String(form.get('parent_subject_id') ?? '').trim(),
+    display_order: String(form.get('display_order') ?? '0').trim(),
+    content_status: String(form.get('content_status') ?? 'draft').trim(),
+  }
+
+  if (!values.slug && values.name) values.slug = toSlug(values.name)
+
+  const e: FormErrors = {}
+  const nameErr = validateRequired(values.name, 'Name')
+  if (nameErr) e.name = nameErr
+  const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
+  if (slugErr) e.slug = slugErr
+  const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
+  if (statusErr) e.content_status = statusErr
+  const orderNum = Number(values.display_order)
+  if (!Number.isInteger(orderNum) || orderNum < 0) {
+    e.display_order = 'Display order must be a non-negative integer.'
+  }
+  // Block self-parent assignment
+  if (values.parent_subject_id && values.parent_subject_id === id) {
+    e.parent_subject_id = 'A subject cannot be its own parent.'
+  }
+
+  errors = e
+
+  if (Object.keys(errors).length === 0) {
+    const { error } = await supabase
+      .from('subjects')
+      .update({
+        name: values.name,
+        slug: values.slug,
+        parent_subject_id: values.parent_subject_id || null,
+        display_order: orderNum,
+        content_status: values.content_status,
+      })
+      .eq('id', id)
+
+    if (error) {
+      if (error.code === '23505') {
+        serverError = 'A subject with this slug already exists.'
+      } else {
+        serverError = 'Could not save. Please try again.'
+      }
+    } else {
+      return Astro.redirect('/admin/subjects')
+    }
+  }
+}
+---
+<AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/subjects" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Edit Subject</h1>
+    <a href="/admin/subjects" class="text-sm text-gray-500 hover:underline">← Back to Subjects</a>
+  </div>
+
+  {serverError && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+  )}
+
+  <form method="post" class="max-w-xl space-y-4">
+    <div>
+      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+      <input type="text" id="name" name="name" value={values.name} required
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {errors.name && <p class="mt-1 text-xs text-red-600">{errors.name}</p>}
+    </div>
+
+    <div>
+      <label for="slug" class="block text-sm font-medium text-gray-700 mb-1">Slug *</label>
+      <input type="text" id="slug" name="slug" value={values.slug}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+      {errors.slug && <p class="mt-1 text-xs text-red-600">{errors.slug}</p>}
+    </div>
+
+    <div>
+      <label for="parent_subject_id" class="block text-sm font-medium text-gray-700 mb-1">Parent Subject</label>
+      <select id="parent_subject_id" name="parent_subject_id"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        <option value="">— none (top-level subject) —</option>
+        {subjectOptions.map(s => (
+          <option value={s.id} selected={values.parent_subject_id === s.id}>{s.name}</option>
+        ))}
+      </select>
+      {errors.parent_subject_id && <p class="mt-1 text-xs text-red-600">{errors.parent_subject_id}</p>}
+    </div>
+
+    <div>
+      <label for="display_order" class="block text-sm font-medium text-gray-700 mb-1">Display Order</label>
+      <input type="number" id="display_order" name="display_order" value={values.display_order} min={0}
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {errors.display_order && <p class="mt-1 text-xs text-red-600">{errors.display_order}</p>}
+    </div>
+
+    <div>
+      <label for="content_status" class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
+      <select id="content_status" name="content_status"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        {CONTENT_STATUS_OPTIONS.map(s => (
+          <option value={s} selected={values.content_status === s}>{s}</option>
+        ))}
+      </select>
+      {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+        Save Changes
+      </button>
+      <a href="/admin/subjects" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </form>
+</AdminLayout>
