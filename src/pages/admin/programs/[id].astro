@@ -1,0 +1,543 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { toSlug } from '../../../lib/admin/slug'
+import {
+  type FormErrors,
+  validateRequired,
+  validateIn,
+  validateSlug,
+  validateNumeric,
+  validateUrl,
+} from '../../../lib/admin/validate'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+const { id } = Astro.params
+if (!id) return new Response('Not found.', { status: 404 })
+
+const CONTENT_STATUS_OPTIONS  = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS    = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const STUDY_MODE_OPTIONS      = ['full_time', 'part_time', 'online', 'hybrid'] as const
+const DELIVERY_MODE_OPTIONS   = ['on_campus', 'online', 'hybrid', 'distance'] as const
+const TUITION_PERIOD_OPTIONS  = ['per_year', 'per_semester', 'total', 'per_credit'] as const
+
+// Load existing record
+const { data: existing, error: loadError } = await supabase
+  .from('programs')
+  .select(`
+    id, title, slug, university_id, degree_level_id, degree_award, primary_subject_id,
+    duration_months, study_mode, delivery_mode, language_of_instruction,
+    tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period, tuition_notes,
+    application_fee_amount, application_fee_currency, application_fee_notes,
+    official_url, application_url, admission_requirements, gpa_requirements,
+    curriculum_summary, career_outcomes, content_status, verification_status
+  `)
+  .eq('id', id)
+  .single()
+
+if (loadError || !existing) {
+  return new Response('Program not found.', { status: 404 })
+}
+
+type ProgramRecord = {
+  id: string; title: string; slug: string; university_id: string; degree_level_id: string
+  degree_award: string | null; primary_subject_id: string | null
+  duration_months: number | null; study_mode: string | null; delivery_mode: string | null
+  language_of_instruction: string | null; tuition_min_amount: number | null
+  tuition_max_amount: number | null; tuition_currency: string | null
+  tuition_period: string | null; tuition_notes: string | null
+  application_fee_amount: number | null; application_fee_currency: string | null
+  application_fee_notes: string | null; official_url: string | null
+  application_url: string | null; admission_requirements: string | null
+  gpa_requirements: string | null; curriculum_summary: string | null
+  career_outcomes: string | null; content_status: string; verification_status: string
+}
+const record = existing as ProgramRecord
+
+// Load dropdown data for form
+type UniversityOption  = { id: string; name: string; country_id: string; city_id: string | null }
+type DegreeLevelOption = { id: string; code: string; name: string }
+type SubjectOption     = { id: string; name: string }
+
+const [{ data: uniData }, { data: dlData }, { data: subData }] = await Promise.all([
+  supabase.from('universities').select('id, name, country_id, city_id').order('name', { ascending: true }),
+  supabase.from('degree_levels').select('id, code, name').order('display_order', { ascending: true }),
+  supabase.from('subjects').select('id, name').order('name', { ascending: true }).limit(500),
+])
+
+const universities = (uniData  ?? []) as UniversityOption[]
+const degreeLevels = (dlData   ?? []) as DegreeLevelOption[]
+const subjects     = (subData  ?? []) as SubjectOption[]
+
+type Values = {
+  title: string; slug: string; university_id: string; degree_level_id: string
+  degree_award: string; primary_subject_id: string; duration_months: string
+  study_mode: string; delivery_mode: string; language_of_instruction: string
+  tuition_min_amount: string; tuition_max_amount: string; tuition_currency: string
+  tuition_period: string; tuition_notes: string; application_fee_amount: string
+  application_fee_currency: string; application_fee_notes: string
+  official_url: string; application_url: string; admission_requirements: string
+  gpa_requirements: string; curriculum_summary: string; career_outcomes: string
+  content_status: string; verification_status: string
+}
+
+let values: Values = {
+  title: record.title,
+  slug: record.slug,
+  university_id: record.university_id,
+  degree_level_id: record.degree_level_id,
+  degree_award: record.degree_award ?? '',
+  primary_subject_id: record.primary_subject_id ?? '',
+  duration_months: record.duration_months !== null ? String(record.duration_months) : '',
+  study_mode: record.study_mode ?? '',
+  delivery_mode: record.delivery_mode ?? '',
+  language_of_instruction: record.language_of_instruction ?? '',
+  tuition_min_amount: record.tuition_min_amount !== null ? String(record.tuition_min_amount) : '',
+  tuition_max_amount: record.tuition_max_amount !== null ? String(record.tuition_max_amount) : '',
+  tuition_currency: record.tuition_currency ?? '',
+  tuition_period: record.tuition_period ?? '',
+  tuition_notes: record.tuition_notes ?? '',
+  application_fee_amount: record.application_fee_amount !== null ? String(record.application_fee_amount) : '',
+  application_fee_currency: record.application_fee_currency ?? '',
+  application_fee_notes: record.application_fee_notes ?? '',
+  official_url: record.official_url ?? '',
+  application_url: record.application_url ?? '',
+  admission_requirements: record.admission_requirements ?? '',
+  gpa_requirements: record.gpa_requirements ?? '',
+  curriculum_summary: record.curriculum_summary ?? '',
+  career_outcomes: record.career_outcomes ?? '',
+  content_status: record.content_status,
+  verification_status: record.verification_status,
+}
+let errors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  const g = (key: string) => String(form.get(key) ?? '').trim()
+
+  values = {
+    title: g('title'), slug: g('slug'), university_id: g('university_id'),
+    degree_level_id: g('degree_level_id'), degree_award: g('degree_award'),
+    primary_subject_id: g('primary_subject_id'), duration_months: g('duration_months'),
+    study_mode: g('study_mode'), delivery_mode: g('delivery_mode'),
+    language_of_instruction: g('language_of_instruction'),
+    tuition_min_amount: g('tuition_min_amount'), tuition_max_amount: g('tuition_max_amount'),
+    tuition_currency: g('tuition_currency'), tuition_period: g('tuition_period'),
+    tuition_notes: g('tuition_notes'), application_fee_amount: g('application_fee_amount'),
+    application_fee_currency: g('application_fee_currency'),
+    application_fee_notes: g('application_fee_notes'), official_url: g('official_url'),
+    application_url: g('application_url'), admission_requirements: g('admission_requirements'),
+    gpa_requirements: g('gpa_requirements'), curriculum_summary: g('curriculum_summary'),
+    career_outcomes: g('career_outcomes'),
+    content_status: g('content_status') || 'draft',
+    verification_status: g('verification_status') || 'unverified',
+  }
+
+  if (!values.slug && values.title) values.slug = toSlug(values.title)
+
+  const e: FormErrors = {}
+
+  const titleErr = validateRequired(values.title, 'Title')
+  if (titleErr) e.title = titleErr
+
+  const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
+  if (slugErr) e.slug = slugErr
+
+  const uniErr = validateRequired(values.university_id, 'University')
+  if (uniErr) e.university_id = uniErr
+
+  const dlErr = validateRequired(values.degree_level_id, 'Degree Level')
+  if (dlErr) e.degree_level_id = dlErr
+
+  const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
+  if (statusErr) e.content_status = statusErr
+
+  const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
+  if (verErr) e.verification_status = verErr
+
+  if (values.study_mode) {
+    const err = validateIn(values.study_mode, STUDY_MODE_OPTIONS, 'Study Mode')
+    if (err) e.study_mode = err
+  }
+  if (values.delivery_mode) {
+    const err = validateIn(values.delivery_mode, DELIVERY_MODE_OPTIONS, 'Delivery Mode')
+    if (err) e.delivery_mode = err
+  }
+  if (values.tuition_period) {
+    const err = validateIn(values.tuition_period, TUITION_PERIOD_OPTIONS, 'Tuition Period')
+    if (err) e.tuition_period = err
+  }
+
+  if (values.duration_months) {
+    const d = Number(values.duration_months)
+    if (!isFinite(d) || d < 1 || !Number.isInteger(d)) {
+      e.duration_months = 'Duration must be a positive whole number of months.'
+    }
+  }
+
+  const minErr = validateNumeric(values.tuition_min_amount, 'Minimum Tuition', { min: 0 })
+  if (minErr) e.tuition_min_amount = minErr
+  const maxErr = validateNumeric(values.tuition_max_amount, 'Maximum Tuition', { min: 0 })
+  if (maxErr) e.tuition_max_amount = maxErr
+  if (!e.tuition_min_amount && !e.tuition_max_amount &&
+      values.tuition_min_amount && values.tuition_max_amount) {
+    if (Number(values.tuition_max_amount) < Number(values.tuition_min_amount)) {
+      e.tuition_max_amount = 'Maximum tuition must be greater than or equal to minimum tuition.'
+    }
+  }
+
+  const feeErr = validateNumeric(values.application_fee_amount, 'Application Fee', { min: 0 })
+  if (feeErr) e.application_fee_amount = feeErr
+
+  const offErr = validateUrl(values.official_url, 'Official URL')
+  if (offErr) e.official_url = offErr
+  const appUrlErr = validateUrl(values.application_url, 'Application URL')
+  if (appUrlErr) e.application_url = appUrlErr
+
+  if (!e.university_id) {
+    const found = universities.find(u => u.id === values.university_id)
+    if (!found) e.university_id = 'Selected university not found.'
+  }
+
+  errors = e
+
+  if (Object.keys(errors).length === 0) {
+    const uni = universities.find(u => u.id === values.university_id)!
+    const { error } = await supabase
+      .from('programs')
+      .update({
+        title: values.title,
+        slug: values.slug,
+        university_id: values.university_id,
+        country_id: uni.country_id,
+        city_id: uni.city_id ?? null,
+        degree_level_id: values.degree_level_id,
+        degree_award: values.degree_award || null,
+        primary_subject_id: values.primary_subject_id || null,
+        duration_months: values.duration_months ? parseInt(values.duration_months, 10) : null,
+        study_mode: values.study_mode || null,
+        delivery_mode: values.delivery_mode || null,
+        language_of_instruction: values.language_of_instruction || null,
+        tuition_min_amount: values.tuition_min_amount ? parseFloat(values.tuition_min_amount) : null,
+        tuition_max_amount: values.tuition_max_amount ? parseFloat(values.tuition_max_amount) : null,
+        tuition_currency: values.tuition_currency || null,
+        tuition_period: values.tuition_period || null,
+        tuition_notes: values.tuition_notes || null,
+        application_fee_amount: values.application_fee_amount ? parseFloat(values.application_fee_amount) : null,
+        application_fee_currency: values.application_fee_currency || null,
+        application_fee_notes: values.application_fee_notes || null,
+        official_url: values.official_url || null,
+        application_url: values.application_url || null,
+        admission_requirements: values.admission_requirements || null,
+        gpa_requirements: values.gpa_requirements || null,
+        curriculum_summary: values.curriculum_summary || null,
+        career_outcomes: values.career_outcomes || null,
+        content_status: values.content_status,
+        verification_status: values.verification_status,
+      })
+      .eq('id', id)
+
+    if (error) {
+      serverError = error.code === '23505'
+        ? 'A program with this slug already exists.'
+        : 'Could not save. Please try again.'
+    } else {
+      return Astro.redirect('/admin/programs')
+    }
+  }
+}
+
+const inputClass = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const labelClass = 'block text-sm font-medium text-gray-700 mb-1'
+const errorClass = 'mt-1 text-xs text-red-600'
+const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 pb-1 border-b border-gray-200'
+---
+<AdminLayout title={`Edit ${record.title} — DegreeWiki Admin`} activePath="/admin/programs" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Edit Program</h1>
+    <a href="/admin/programs" class="text-sm text-gray-500 hover:underline">← Back to Programs</a>
+  </div>
+
+  {serverError && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+  )}
+
+  <form method="post" class="max-w-2xl space-y-6">
+
+    <!-- Identity -->
+    <div>
+      <h2 class={sectionHeadClass}>Identity</h2>
+      <div class="space-y-4">
+        <div>
+          <label for="title" class={labelClass}>Title *</label>
+          <input type="text" id="title" name="title" value={values.title} required
+            class={inputClass} />
+          {errors.title && <p class={errorClass}>{errors.title}</p>}
+        </div>
+
+        <div>
+          <label for="slug" class={labelClass}>Slug *</label>
+          <input type="text" id="slug" name="slug" value={values.slug}
+            class={inputClass + ' font-mono'} />
+          {errors.slug && <p class={errorClass}>{errors.slug}</p>}
+        </div>
+
+        <div>
+          <label for="university_id" class={labelClass}>University *</label>
+          <select id="university_id" name="university_id" class={selectClass}>
+            <option value="">— select a university —</option>
+            {universities.map(u => (
+              <option value={u.id} selected={values.university_id === u.id}>{u.name}</option>
+            ))}
+          </select>
+          {errors.university_id && <p class={errorClass}>{errors.university_id}</p>}
+          <p class="mt-1 text-xs text-gray-400">Country and city are derived from the selected university.</p>
+        </div>
+
+        <div>
+          <label for="degree_level_id" class={labelClass}>Degree Level *</label>
+          <select id="degree_level_id" name="degree_level_id" class={selectClass}>
+            <option value="">— select a degree level —</option>
+            {degreeLevels.map(d => (
+              <option value={d.id} selected={values.degree_level_id === d.id}>{d.name} ({d.code})</option>
+            ))}
+          </select>
+          {errors.degree_level_id && <p class={errorClass}>{errors.degree_level_id}</p>}
+        </div>
+
+        <div>
+          <label for="content_status" class={labelClass}>Status *</label>
+          <select id="content_status" name="content_status" class={selectClass}>
+            {CONTENT_STATUS_OPTIONS.map(s => (
+              <option value={s} selected={values.content_status === s}>{s}</option>
+            ))}
+          </select>
+          {errors.content_status && <p class={errorClass}>{errors.content_status}</p>}
+        </div>
+      </div>
+    </div>
+
+    <!-- Academic Details -->
+    <div>
+      <h2 class={sectionHeadClass}>Academic Details</h2>
+      <div class="space-y-4">
+        <div>
+          <label for="degree_award" class={labelClass}>Degree Award</label>
+          <input type="text" id="degree_award" name="degree_award" value={values.degree_award}
+            placeholder="e.g. Bachelor of Science, Master of Arts"
+            class={inputClass} />
+        </div>
+
+        <div>
+          <label for="primary_subject_id" class={labelClass}>Primary Subject</label>
+          <select id="primary_subject_id" name="primary_subject_id" class={selectClass}>
+            <option value="">— none —</option>
+            {subjects.map(s => (
+              <option value={s.id} selected={values.primary_subject_id === s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="study_mode" class={labelClass}>Study Mode</label>
+            <select id="study_mode" name="study_mode" class={selectClass}>
+              <option value="">— none —</option>
+              {STUDY_MODE_OPTIONS.map(m => (
+                <option value={m} selected={values.study_mode === m}>{m}</option>
+              ))}
+            </select>
+            {errors.study_mode && <p class={errorClass}>{errors.study_mode}</p>}
+          </div>
+          <div>
+            <label for="delivery_mode" class={labelClass}>Delivery Mode</label>
+            <select id="delivery_mode" name="delivery_mode" class={selectClass}>
+              <option value="">— none —</option>
+              {DELIVERY_MODE_OPTIONS.map(m => (
+                <option value={m} selected={values.delivery_mode === m}>{m}</option>
+              ))}
+            </select>
+            {errors.delivery_mode && <p class={errorClass}>{errors.delivery_mode}</p>}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="language_of_instruction" class={labelClass}>Language of Instruction</label>
+            <input type="text" id="language_of_instruction" name="language_of_instruction"
+              value={values.language_of_instruction} placeholder="e.g. English"
+              class={inputClass} />
+          </div>
+          <div>
+            <label for="duration_months" class={labelClass}>Duration (months)</label>
+            <input type="number" id="duration_months" name="duration_months"
+              value={values.duration_months} min="1" step="1" placeholder="e.g. 24"
+              class={inputClass} />
+            {errors.duration_months && <p class={errorClass}>{errors.duration_months}</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tuition -->
+    <div>
+      <h2 class={sectionHeadClass}>Tuition</h2>
+      <div class="space-y-4">
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label for="tuition_min_amount" class={labelClass}>Min Amount</label>
+            <input type="number" id="tuition_min_amount" name="tuition_min_amount"
+              value={values.tuition_min_amount} min="0" step="any" placeholder="0"
+              class={inputClass} />
+            {errors.tuition_min_amount && <p class={errorClass}>{errors.tuition_min_amount}</p>}
+          </div>
+          <div>
+            <label for="tuition_max_amount" class={labelClass}>Max Amount</label>
+            <input type="number" id="tuition_max_amount" name="tuition_max_amount"
+              value={values.tuition_max_amount} min="0" step="any" placeholder="0"
+              class={inputClass} />
+            {errors.tuition_max_amount && <p class={errorClass}>{errors.tuition_max_amount}</p>}
+          </div>
+          <div>
+            <label for="tuition_currency" class={labelClass}>Currency</label>
+            <input type="text" id="tuition_currency" name="tuition_currency"
+              value={values.tuition_currency} placeholder="USD"
+              class={inputClass + ' font-mono'} />
+          </div>
+        </div>
+
+        <div>
+          <label for="tuition_period" class={labelClass}>Tuition Period</label>
+          <select id="tuition_period" name="tuition_period" class={selectClass}>
+            <option value="">— none —</option>
+            {TUITION_PERIOD_OPTIONS.map(p => (
+              <option value={p} selected={values.tuition_period === p}>{p}</option>
+            ))}
+          </select>
+          {errors.tuition_period && <p class={errorClass}>{errors.tuition_period}</p>}
+        </div>
+
+        <div>
+          <label for="tuition_notes" class={labelClass}>Tuition Notes</label>
+          <textarea id="tuition_notes" name="tuition_notes" rows={2}
+            class={inputClass}>{values.tuition_notes}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Application Fees -->
+    <div>
+      <h2 class={sectionHeadClass}>Application Fees</h2>
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="application_fee_amount" class={labelClass}>Fee Amount</label>
+            <input type="number" id="application_fee_amount" name="application_fee_amount"
+              value={values.application_fee_amount} min="0" step="any" placeholder="0"
+              class={inputClass} />
+            {errors.application_fee_amount && <p class={errorClass}>{errors.application_fee_amount}</p>}
+          </div>
+          <div>
+            <label for="application_fee_currency" class={labelClass}>Fee Currency</label>
+            <input type="text" id="application_fee_currency" name="application_fee_currency"
+              value={values.application_fee_currency} placeholder="USD"
+              class={inputClass + ' font-mono'} />
+          </div>
+        </div>
+
+        <div>
+          <label for="application_fee_notes" class={labelClass}>Fee Notes</label>
+          <textarea id="application_fee_notes" name="application_fee_notes" rows={2}
+            class={inputClass}>{values.application_fee_notes}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- URLs -->
+    <div>
+      <h2 class={sectionHeadClass}>URLs</h2>
+      <div class="space-y-4">
+        <div>
+          <label for="official_url" class={labelClass}>Official Program URL</label>
+          <input type="url" id="official_url" name="official_url" value={values.official_url}
+            placeholder="https://university.edu/programs/..."
+            class={inputClass} />
+          {errors.official_url && <p class={errorClass}>{errors.official_url}</p>}
+        </div>
+
+        <div>
+          <label for="application_url" class={labelClass}>Application URL</label>
+          <input type="url" id="application_url" name="application_url" value={values.application_url}
+            placeholder="https://apply.university.edu/..."
+            class={inputClass} />
+          {errors.application_url && <p class={errorClass}>{errors.application_url}</p>}
+        </div>
+      </div>
+    </div>
+
+    <!-- Admissions -->
+    <div>
+      <h2 class={sectionHeadClass}>Admissions</h2>
+      <div class="space-y-4">
+        <div>
+          <label for="admission_requirements" class={labelClass}>Admission Requirements</label>
+          <textarea id="admission_requirements" name="admission_requirements" rows={4}
+            class={inputClass}>{values.admission_requirements}</textarea>
+        </div>
+
+        <div>
+          <label for="gpa_requirements" class={labelClass}>GPA Requirements</label>
+          <input type="text" id="gpa_requirements" name="gpa_requirements"
+            value={values.gpa_requirements} placeholder="e.g. Minimum 3.0 GPA on a 4.0 scale"
+            class={inputClass} />
+        </div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div>
+      <h2 class={sectionHeadClass}>Content</h2>
+      <div class="space-y-4">
+        <div>
+          <label for="curriculum_summary" class={labelClass}>Curriculum Summary</label>
+          <textarea id="curriculum_summary" name="curriculum_summary" rows={4}
+            class={inputClass}>{values.curriculum_summary}</textarea>
+        </div>
+
+        <div>
+          <label for="career_outcomes" class={labelClass}>Career Outcomes</label>
+          <textarea id="career_outcomes" name="career_outcomes" rows={4}
+            class={inputClass}>{values.career_outcomes}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Verification -->
+    <div>
+      <h2 class={sectionHeadClass}>Verification</h2>
+      <div>
+        <label for="verification_status" class={labelClass}>Verification Status</label>
+        <select id="verification_status" name="verification_status" class={selectClass}>
+          {VERIFICATION_OPTIONS.map(s => (
+            <option value={s} selected={values.verification_status === s}>{s}</option>
+          ))}
+        </select>
+        {errors.verification_status && <p class={errorClass}>{errors.verification_status}</p>}
+      </div>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+        Save Changes
+      </button>
+      <a href="/admin/programs" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </form>
+</AdminLayout>
