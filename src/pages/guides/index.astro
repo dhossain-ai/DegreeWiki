@@ -3,26 +3,118 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
-const { data: articles, error } = await supabase
-  .from('articles')
-  .select('id, title, slug, summary, published_at, article_categories(name)')
-  .eq('content_status', 'published')
-  .order('published_at', { ascending: false })
-  .limit(100)
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function parseUUID(v: string | null): string | undefined {
+  return v && UUID_RE.test(v) ? v : undefined
+}
+
+const sp         = Astro.url.searchParams
+const rawQ       = sp.get('q') ?? ''
+const q          = rawQ.trim().replace(/[,()]/g, '').slice(0, 100) || undefined
+const categoryId = parseUUID(sp.get('category'))
+
+const hasFilters = !!(q || categoryId)
+
+const { data: categoriesData } = await supabase
+  .from('article_categories')
+  .select('id, name')
+  .order('display_order', { ascending: true })
+  .order('name', { ascending: true })
+
+const categories = categoriesData ?? []
+
+let query = supabase
+  .from('articles')
+  .select(
+    'id, title, slug, summary, published_at, article_categories(id, name)',
+    { count: 'exact' }
+  )
+  .eq('content_status', 'published')
+  .order('published_at', { ascending: false, nullsFirst: false })
+  .order('title', { ascending: true })
+  .limit(201)
+
+if (q)          query = query.or(`title.ilike.%${q}%,summary.ilike.%${q}%`)
+if (categoryId) query = query.eq('article_category_id', categoryId)
+
+const { data, count, error } = await query
 if (error) console.error('guides list error:', error.message)
-const rows = articles ?? []
+
+const allRows   = data ?? []
+const overLimit = (count ?? allRows.length) > 200
+const rows      = allRows.slice(0, 200)
 
 function formatDate(d: string | null): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
+
+const selectClass = 'w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
+const inputClass  = 'w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
+const labelClass  = 'block text-xs font-medium text-gray-600 mb-1'
 ---
-<PublicLayout title="Guides — DegreeWiki">
+<PublicLayout title="Guides — DegreeWiki" noindex={hasFilters}>
   <div class="max-w-3xl mx-auto px-4 py-8">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">Guides</h1>
+
+    <form method="get" action="/guides" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+        <div class="sm:col-span-2">
+          <label class={labelClass} for="q">Search titles and summaries</label>
+          <input id="q" name="q" type="search" value={rawQ.trim().replace(/[,()]/g, '').slice(0, 100)}
+                 placeholder="e.g. visa, scholarship application…"
+                 class={inputClass} />
+        </div>
+
+        <div>
+          <label class={labelClass} for="category">Category</label>
+          <select id="category" name="category" class={selectClass}>
+            <option value="">All categories</option>
+            {categories.map((c: any) => (
+              <option value={c.id} selected={categoryId === c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+      </div>
+
+      <div class="flex items-center gap-3 mt-4">
+        <button type="submit"
+                class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">
+          Search
+        </button>
+        {hasFilters && (
+          <a href="/guides"
+             class="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
+            Clear filters
+          </a>
+        )}
+      </div>
+    </form>
+
+    {overLimit ? (
+      <p class="text-sm text-gray-500 mb-4">
+        Showing 200 of {(count ?? 200).toLocaleString()} guides. Narrow your search to see more.
+      </p>
+    ) : rows.length > 0 ? (
+      <p class="text-sm text-gray-500 mb-4">
+        {rows.length} {rows.length === 1 ? 'guide' : 'guides'} found.
+      </p>
+    ) : null}
+
     {rows.length === 0 ? (
-      <p class="text-gray-500 text-sm">No results yet.</p>
+      <div class="text-center py-12 text-gray-500">
+        {hasFilters ? (
+          <div>
+            <p class="text-base mb-3">No guides match your filters.</p>
+            <a href="/guides" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+          </div>
+        ) : (
+          <p class="text-base">No guides have been published yet.</p>
+        )}
+      </div>
     ) : (
       <div class="space-y-4">
         {rows.map((a: any) => (
