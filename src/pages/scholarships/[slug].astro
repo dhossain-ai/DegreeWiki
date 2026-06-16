@@ -1,0 +1,159 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import { createClient } from '../../lib/supabase/server'
+
+const { slug } = Astro.params
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: scholarship } = await supabase
+  .from('scholarships')
+  .select(`
+    id, name, slug,
+    scholarship_type, provider_name, provider_type, funding_type, application_type,
+    overview, eligibility_summary,
+    amount_min, amount_max, currency, coverage_notes,
+    deadline, deadline_text,
+    official_url, application_url, provider_url,
+    seo_title, seo_description
+  `)
+  .eq('slug', slug!)
+  .eq('content_status', 'published')
+  .single()
+
+if (!scholarship) {
+  return new Response(null, { status: 404 })
+}
+
+const s = scholarship as any
+
+function formatLabel(value: string | null): string | null {
+  if (!value) return null
+  return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function formatAmount(): string | null {
+  if (s.amount_min == null && s.amount_max == null) return null
+  const fmt = (n: any) => Number(n).toLocaleString()
+  const range = s.amount_min != null && s.amount_max != null
+    ? `${fmt(s.amount_min)} – ${fmt(s.amount_max)}`
+    : s.amount_min != null ? fmt(s.amount_min) : `up to ${fmt(s.amount_max)}`
+  return [s.currency, range].filter(Boolean).join(' ')
+}
+
+function formatDate(d: string | null): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+const amount   = formatAmount()
+const deadline = formatDate(s.deadline) ?? s.deadline_text ?? null
+const pageTitle = s.seo_title || s.name
+const pageDesc  = s.seo_description || s.eligibility_summary || undefined
+---
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc}>
+  <div class="max-w-3xl mx-auto px-4 py-8">
+    <a href="/scholarships" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Scholarships</a>
+
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">{s.name}</h1>
+
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm mb-8 bg-gray-50 rounded-lg p-5 border border-gray-200">
+      {s.scholarship_type && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Type</dt>
+          <dd class="text-gray-900">{formatLabel(s.scholarship_type)}</dd>
+        </div>
+      )}
+      {s.funding_type && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Funding Type</dt>
+          <dd class="text-gray-900">{formatLabel(s.funding_type)}</dd>
+        </div>
+      )}
+      {s.provider_name && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Provider</dt>
+          <dd class="text-gray-900">{s.provider_name}</dd>
+        </div>
+      )}
+      {s.provider_type && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Provider Type</dt>
+          <dd class="text-gray-900">{formatLabel(s.provider_type)}</dd>
+        </div>
+      )}
+      {s.application_type && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">How to Apply</dt>
+          <dd class="text-gray-900">{formatLabel(s.application_type)}</dd>
+        </div>
+      )}
+      {amount && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Amount</dt>
+          <dd class="text-gray-900">{amount}</dd>
+        </div>
+      )}
+      {deadline && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Deadline</dt>
+          <dd class="text-gray-900">{deadline}</dd>
+        </div>
+      )}
+      {s.official_url && (
+        <div class="sm:col-span-2">
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Official Page</dt>
+          <dd>
+            <a href={s.official_url} target="_blank" rel="noopener noreferrer"
+               class="text-blue-600 hover:underline break-all">{s.official_url}</a>
+          </dd>
+        </div>
+      )}
+      {s.application_url && (
+        <div class="sm:col-span-2">
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Apply</dt>
+          <dd>
+            <a href={s.application_url} target="_blank" rel="noopener noreferrer"
+               class="text-blue-600 hover:underline break-all">{s.application_url}</a>
+          </dd>
+        </div>
+      )}
+      {s.provider_url && (
+        <div class="sm:col-span-2">
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Provider Website</dt>
+          <dd>
+            <a href={s.provider_url} target="_blank" rel="noopener noreferrer"
+               class="text-blue-600 hover:underline break-all">{s.provider_url}</a>
+          </dd>
+        </div>
+      )}
+    </dl>
+
+    {s.overview && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Overview</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{s.overview}</p>
+      </div>
+    )}
+
+    {s.eligibility_summary && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Eligibility</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{s.eligibility_summary}</p>
+      </div>
+    )}
+
+    {s.coverage_notes && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">What's Covered</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{s.coverage_notes}</p>
+      </div>
+    )}
+
+    {s.deadline_text && s.deadline && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Deadline Notes</h2>
+        <p class="text-gray-700 text-sm">{s.deadline_text}</p>
+      </div>
+    )}
+  </div>
+</PublicLayout>
