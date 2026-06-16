@@ -1,14 +1,90 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## Current Phase
 
-Phase 18 — TBD.
+Phase 19 — TBD.
 
-Phase 17 — Source / Verification Display Foundation — implementation complete, pending manual verification.
+Phase 18 — AI Gateway + AI Safety Architecture — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 18 — AI Gateway + AI Safety Architecture (implementation complete):
+
+- Created server-only AI foundation in src/lib/ai/.
+  No public chatbot UI, no Fit Finder UI, no live LLM calls, no external API calls,
+  no public AI endpoint, no migrations, no new dependencies, no service_role, no React,
+  no client-side JS, no admin changes.
+
+src/lib/ai/ structure:
+  types.ts — all shared types: AIRequest, AIResponse, AIContext, AIPrompt,
+    AIProviderConfig, AIProviderResponse, AIUsageEntry, AIGuardrailResult,
+    AIRuntimeEnv, StudentProfileSummary, AISessionType, AIRole.
+  gateway.ts — callAI() entry point: runs input guardrails, rate limit check,
+    then returns controlled fallback (no live provider in Phase 18).
+    TODO Phase 19 block marks provider resolution, prompt build, output
+    guardrails, and usage logging steps.
+  providers/interface.ts — AIProvider interface: complete(prompt, config).
+    All implementations must use fetch() only (Cloudflare Workers compatible).
+  providers/gemini.ts — GeminiProvider stub. Throws "Gemini provider is not
+    enabled in Phase 18." No fetch calls.
+  prompts/finder-summary.ts — buildFinderPrompt(context): builds system +
+    user prompt for AI Finder explanation. System prompt enforces database-first
+    rule, no invented facts, no guarantees, verify-official-sources disclaimer.
+  prompts/chat-answer.ts — buildChatPrompt(userMessage, context): builds
+    system + user prompt for chatbot. Same safety boundaries.
+  safety/guardrails.ts — checkInput() and checkOutput(): deterministic
+    first-pass regex guardrails. Blocks fake documents, essay ghostwriting,
+    immigration fraud, visa fraud (input). Blocks guaranteed admission/
+    scholarship/visa claims (output). Conservative exact-phrase matching.
+  usage/logging.ts — writeUsageLog() placeholder. No database writes in
+    Phase 18. TODO Phase 19 marker for service role wiring.
+  usage/limits.ts — checkRateLimit() placeholder. Always returns allowed.
+    TODO Phase 19 marker for ai_usage_logs query enforcement.
+
+Files created (9):
+  src/lib/ai/types.ts
+  src/lib/ai/gateway.ts
+  src/lib/ai/providers/interface.ts
+  src/lib/ai/providers/gemini.ts
+  src/lib/ai/prompts/finder-summary.ts
+  src/lib/ai/prompts/chat-answer.ts
+  src/lib/ai/safety/guardrails.ts
+  src/lib/ai/usage/logging.ts
+  src/lib/ai/usage/limits.ts
+
+Files modified (3):
+  .env.example (added GEMINI_API_KEY, AI_PROVIDER, AI_MODEL, rate limit vars
+    with server-only annotations)
+  docs/04-ai-system.md (replaced structural sketch with finalized Phase 18
+    architecture: gateway, provider abstraction, safety rules, prompt boundaries,
+    env strategy, rate-limit/logging future plans, Cloudflare compatibility)
+  docs/06-status.md (this file)
+
+src/env.d.ts: does not exist in this project — not created or modified.
+  AI env vars typed via AIRuntimeEnv interface in src/lib/ai/types.ts instead.
+
+npm run build: PASS (Cloudflare server build, 1.75s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+Get-ChildItem -Path src/lib/ai -Recurse -File | Select-String -Pattern "PUBLIC_" → 2 matches,
+  both are comments warning against PUBLIC_ usage, not actual misuse.
+
+Exclusions (deferred to Phase 19+):
+  No public chatbot UI.
+  No Fit Finder UI.
+  No live LLM calls.
+  No external AI API calls.
+  No public AI endpoint.
+  No migrations.
+  No new npm dependencies.
+  No service_role.
+  No React or client-side JS.
+  No admin changes.
+  No src/pages/api/ai/health.ts (removed from scope).
+  No providers/openrouter.ts (removed from scope).
+  No src/env.d.ts (does not exist; AIRuntimeEnv in types.ts covers AI vars).
+  No wrangler.toml changes.
 
 Phase 17 — Source / Verification Display Foundation (implementation complete):
 

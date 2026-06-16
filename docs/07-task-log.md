@@ -4,6 +4,184 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-17 - Phase 18: AI Gateway + AI Safety Architecture
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Create the first safe AI foundation for DegreeWiki: server-only AI gateway architecture,
+provider abstraction, safety/guardrail system, system prompt boundaries, typed request/
+response contracts, usage logging and rate-limit placeholders, and updated AI docs.
+No public chatbot UI, no Fit Finder UI, no live LLM calls, no external API calls,
+no public AI endpoint, no migrations, no new dependencies, no service_role.
+
+---
+
+### AI Schema Inspected
+
+Migration 012 (ai_tables.sql) — all five AI tables confirmed present and correct:
+  ai_finder_results       — one record per Finder run, server-only write RLS
+  ai_finder_program_matches — ranked real programs inside a Finder result (FK to programs)
+  ai_conversations        — chat session, logged-in RLS + anonymous via service role
+  ai_messages             — individual messages, server-only write RLS
+  ai_usage_logs           — immutable cost/token audit log, service role only
+
+Migration 011 (student_profiles.sql) — confirmed:
+  student_profiles        — preferences + anonymous session_token + expires_at
+  student_profile_subjects
+  student_profile_countries
+
+No migrations needed. All AI tables were already in place.
+
+---
+
+### Files Created
+
+src/lib/ai/types.ts
+src/lib/ai/gateway.ts
+src/lib/ai/providers/interface.ts
+src/lib/ai/providers/gemini.ts
+src/lib/ai/prompts/finder-summary.ts
+src/lib/ai/prompts/chat-answer.ts
+src/lib/ai/safety/guardrails.ts
+src/lib/ai/usage/logging.ts
+src/lib/ai/usage/limits.ts
+
+### Files Modified
+
+.env.example — added GEMINI_API_KEY, AI_PROVIDER, AI_MODEL, AI_RATE_LIMIT_ANON_DAILY,
+  AI_RATE_LIMIT_USER_DAILY with server-only annotations
+docs/04-ai-system.md — replaced structural sketch with finalized Phase 18 architecture
+docs/06-status.md — Phase 18 entry added, current phase set to Phase 19
+docs/07-task-log.md — this entry
+
+### Files NOT Modified
+
+src/env.d.ts — does not exist in this project. AIRuntimeEnv interface in types.ts
+  covers AI env var typing for the AI module. No wrangler.toml changes.
+wrangler.toml — not modified per scope.
+package.json — not modified. No new dependencies.
+Supabase migrations — not modified.
+Public pages — not modified.
+Admin pages — not modified.
+
+---
+
+### AI Architecture Decisions
+
+Database-first rule enforced via type:
+  AIContext is a required parameter to callAI(). It cannot be null or omitted.
+  Caller must retrieve real database records before calling the gateway.
+  The LLM receives only records in AIContext.records — it cannot access the DB directly.
+
+Gateway (gateway.ts):
+  Single server-only entry point for all LLM calls.
+  Order: checkInput → checkRateLimit → (Phase 19: provider call) → fallback.
+  Phase 18: returns controlled fallback "AI provider is not enabled in this phase."
+  TODO Phase 19 block marks exact steps: provider resolution, prompt build,
+  output guardrails, usage logging.
+
+Provider strategy:
+  AIProvider interface (providers/interface.ts) defines the contract.
+  All implementations must use fetch() only — no Node http/https. Cloudflare compatible.
+  GeminiProvider stub (providers/gemini.ts) throws on complete() — no fetch calls in Phase 18.
+  No OpenRouter stub in Phase 18 (deferred per scope).
+
+Prompt boundaries:
+  finder-summary.ts and chat-answer.ts both embed a hardcoded system prompt.
+  System prompt rules: use only DegreeWiki context, do not invent facts,
+  do not guarantee admission/scholarship/visa outcomes, advise official source verification,
+  state when context is insufficient.
+  User input goes in the user turn only — never interpolated into the system turn.
+
+Guardrails (safety/guardrails.ts):
+  checkInput(): deterministic regex — blocks fake documents, essay ghostwriting,
+    immigration fraud, visa fraud before any LLM call.
+  checkOutput(): deterministic regex — blocks guaranteed admission/scholarship/visa
+    claims in LLM output before returning to caller.
+  Conservative exact-phrase matching. Not a complete safety system.
+  Semantic moderation deferred.
+
+Usage logging (usage/logging.ts):
+  writeUsageLog() defined with full AIUsageEntry signature.
+  Phase 18: no-op body. No service role import.
+  TODO Phase 19: insert into ai_usage_logs via service role client.
+
+Rate limiting (usage/limits.ts):
+  checkRateLimit() defined with (userId, sessionType) signature.
+  Phase 18: always returns { allowed: true, remaining: 99 }.
+  TODO Phase 19: query ai_usage_logs for today's count, enforce env var limits.
+
+Env strategy:
+  GEMINI_API_KEY and all AI vars are server-only. No PUBLIC_ prefix.
+  Cloudflare Workers: accessed via locals.runtime.env.
+  AIRuntimeEnv interface in types.ts covers typing for the AI module.
+  src/env.d.ts does not exist — not created per scope rule.
+  wrangler.toml not modified — GEMINI_API_KEY should be set via:
+    wrangler secret put GEMINI_API_KEY
+
+---
+
+### Explicit Exclusions
+
+No public chatbot UI.
+No Fit Finder UI.
+No live LLM calls.
+No external AI API calls.
+No public AI endpoint (health.ts removed from scope).
+No migrations.
+No new npm dependencies.
+No service_role usage anywhere in Phase 18.
+No React or client-side JS.
+No admin changes.
+No src/pages/api/ai/health.ts.
+No providers/openrouter.ts.
+No src/env.d.ts creation.
+No wrangler.toml changes.
+
+---
+
+### Build Result
+
+npm run build: PASS
+  Cloudflare server build, 1.75s, zero errors, zero warnings relevant to new code.
+
+### service_role Search Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role"
+  → 0 matches.
+
+### PUBLIC_ Misuse Search Result
+
+Get-ChildItem -Path src/lib/ai -Recurse -File | Select-String -Pattern "PUBLIC_"
+  → 2 matches: both are comments in types.ts and gemini.ts explicitly warning
+    against using PUBLIC_ for AI secrets. No actual PUBLIC_ usage.
+
+---
+
+### Manual Test Checklist
+
+The following can be verified locally after setting GEMINI_API_KEY in .env.local:
+
+[ ] npm run build passes with zero errors.
+[ ] service_role search: 0 matches in src/.
+[ ] PUBLIC_ misuse search: 0 actual uses (only warning comments) in src/lib/ai/.
+[ ] src/lib/ai/ directory created with all 9 files present.
+[ ] types.ts exports: AISessionType, AIRole, StudentProfileSummary, AIContext,
+    AIRequest, AIResponse, AIPrompt, AIProviderConfig, AIProviderResponse,
+    AIUsageEntry, AIGuardrailResult, AIRuntimeEnv.
+[ ] gateway.ts imports resolve cleanly (no circular deps).
+[ ] guardrails.ts checkInput("fake recommendation letter") returns { passed: false }.
+[ ] guardrails.ts checkOutput("guaranteed admission") returns { passed: false }.
+[ ] guardrails.ts checkInput("which universities are in Germany?") returns { passed: true }.
+[ ] .env.example contains GEMINI_API_KEY, AI_PROVIDER, AI_MODEL, rate limit vars.
+[ ] No GEMINI_API_KEY or AI provider secret is prefixed with PUBLIC_.
+[ ] docs/04-ai-system.md shows finalized structure (not the old sketch).
+[ ] No public AI page is accessible at any route.
+
+---
+
 ## 2026-06-16 - Phase 17: Source / Verification Display Foundation
 
 Tool:
