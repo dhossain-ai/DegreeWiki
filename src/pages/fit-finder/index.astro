@@ -1,0 +1,498 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import { createClient } from '../../lib/supabase/server'
+import { SITE_URL } from '../../lib/site'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SHORT_TEXT_MAX = 40
+const START_PREF_MAX = 80
+const NOTES_MAX = 1000
+
+type FormErrors = Record<string, string>
+type LookupOption = { id: string; name: string }
+
+type Values = {
+  current_country_id: string
+  target_degree_level_id: string
+  budget_min: string
+  budget_max: string
+  budget_currency: string
+  gpa: string
+  english_score_type: string
+  english_score: string
+  work_experience_years: string
+  study_start_preference: string
+  additional_notes: string
+  student_profile_subjects: string[]
+  student_profile_countries: string[]
+}
+
+const emptyValues = (): Values => ({
+  current_country_id: '',
+  target_degree_level_id: '',
+  budget_min: '',
+  budget_max: '',
+  budget_currency: '',
+  gpa: '',
+  english_score_type: '',
+  english_score: '',
+  work_experience_years: '',
+  study_start_preference: '',
+  additional_notes: '',
+  student_profile_subjects: [],
+  student_profile_countries: [],
+})
+
+const uniqueStrings = (items: FormDataEntryValue[]): string[] => {
+  const seen = new Set<string>()
+  const values: string[] = []
+  for (const item of items) {
+    const value = String(item ?? '').trim()
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    values.push(value)
+  }
+  return values
+}
+
+function fromForm(form: FormData): Values {
+  const g = (key: string) => String(form.get(key) ?? '').trim()
+  return {
+    current_country_id: g('current_country_id'),
+    target_degree_level_id: g('target_degree_level_id'),
+    budget_min: g('budget_min'),
+    budget_max: g('budget_max'),
+    budget_currency: g('budget_currency').toUpperCase(),
+    gpa: g('gpa'),
+    english_score_type: g('english_score_type'),
+    english_score: g('english_score'),
+    work_experience_years: g('work_experience_years'),
+    study_start_preference: g('study_start_preference'),
+    additional_notes: g('additional_notes').slice(0, NOTES_MAX),
+    student_profile_subjects: uniqueStrings(form.getAll('student_profile_subjects')),
+    student_profile_countries: uniqueStrings(form.getAll('student_profile_countries')),
+  }
+}
+
+const isUUID = (value: string) => UUID_RE.test(value)
+
+function validateNumber(value: string, label: string, min: number): string | null {
+  if (!value) return null
+  const n = Number(value)
+  if (!isFinite(n)) return `${label} must be a valid number.`
+  if (n < min) return `${label} must be at least ${min}.`
+  return null
+}
+
+function validateValues(
+  values: Values,
+  countries: LookupOption[],
+  degreeLevels: LookupOption[],
+  subjects: LookupOption[],
+): FormErrors {
+  const errors: FormErrors = {}
+  const countryIds = new Set(countries.map(c => c.id))
+  const degreeLevelIds = new Set(degreeLevels.map(d => d.id))
+  const subjectIds = new Set(subjects.map(s => s.id))
+
+  if (values.current_country_id) {
+    if (!isUUID(values.current_country_id) || !countryIds.has(values.current_country_id)) {
+      errors.current_country_id = 'Select a valid current country.'
+    }
+  }
+
+  if (values.target_degree_level_id) {
+    if (!isUUID(values.target_degree_level_id) || !degreeLevelIds.has(values.target_degree_level_id)) {
+      errors.target_degree_level_id = 'Select a valid degree level.'
+    }
+  }
+
+  const badTargetCountry = values.student_profile_countries.find(id => !isUUID(id) || !countryIds.has(id))
+  if (badTargetCountry) errors.student_profile_countries = 'Select valid target countries.'
+
+  const badSubject = values.student_profile_subjects.find(id => !isUUID(id) || !subjectIds.has(id))
+  if (badSubject) errors.student_profile_subjects = 'Select valid subjects.'
+
+  const budgetMinErr = validateNumber(values.budget_min, 'Minimum budget', 0)
+  if (budgetMinErr) errors.budget_min = budgetMinErr
+
+  const budgetMaxErr = validateNumber(values.budget_max, 'Maximum budget', 0)
+  if (budgetMaxErr) errors.budget_max = budgetMaxErr
+
+  if (!errors.budget_min && !errors.budget_max && values.budget_min && values.budget_max) {
+    if (Number(values.budget_max) < Number(values.budget_min)) {
+      errors.budget_max = 'Maximum budget must be greater than or equal to minimum budget.'
+    }
+  }
+
+  const gpaErr = validateNumber(values.gpa, 'GPA', 0)
+  if (gpaErr) errors.gpa = gpaErr
+
+  const englishErr = validateNumber(values.english_score, 'English score', 0)
+  if (englishErr) errors.english_score = englishErr
+
+  if (values.work_experience_years) {
+    const years = Number(values.work_experience_years)
+    if (!Number.isInteger(years) || years < 0) {
+      errors.work_experience_years = 'Work experience must be a non-negative whole number.'
+    }
+  }
+
+  if (values.budget_currency.length > SHORT_TEXT_MAX) {
+    errors.budget_currency = `Currency must be ${SHORT_TEXT_MAX} characters or fewer.`
+  }
+
+  if (values.english_score_type.length > SHORT_TEXT_MAX) {
+    errors.english_score_type = `English score type must be ${SHORT_TEXT_MAX} characters or fewer.`
+  }
+
+  if (values.study_start_preference.length > START_PREF_MAX) {
+    errors.study_start_preference = `Study start preference must be ${START_PREF_MAX} characters or fewer.`
+  }
+
+  if (values.additional_notes.length > NOTES_MAX) {
+    errors.additional_notes = `Additional notes must be ${NOTES_MAX} characters or fewer.`
+  }
+
+  return errors
+}
+
+const [
+  { data: countriesData, error: countriesError },
+  { data: degreeLevelsData, error: degreeLevelsError },
+  { data: subjectsData, error: subjectsError },
+  { data: { user } },
+] = await Promise.all([
+  supabase.from('countries').select('id, name').order('name'),
+  supabase.from('degree_levels').select('id, name, display_order').order('display_order'),
+  supabase.from('subjects').select('id, name').order('name'),
+  supabase.auth.getUser(),
+])
+
+if (countriesError) console.error('fit finder countries lookup error:', countriesError.message)
+if (degreeLevelsError) console.error('fit finder degree levels lookup error:', degreeLevelsError.message)
+if (subjectsError) console.error('fit finder subjects lookup error:', subjectsError.message)
+
+const countries = (countriesData ?? []) as LookupOption[]
+const degreeLevels = (degreeLevelsData ?? []) as LookupOption[]
+const subjects = (subjectsData ?? []) as LookupOption[]
+
+let values = emptyValues()
+let errors: FormErrors = {}
+let serverError = ''
+let authMessage = ''
+
+if (Astro.request.method === 'GET' && user) {
+  const { data: profile, error: profileError } = await supabase
+    .from('student_profiles')
+    .select(`
+      id, current_country_id, target_degree_level_id,
+      budget_min, budget_max, budget_currency,
+      gpa, english_score_type, english_score,
+      work_experience_years, study_start_preference, additional_notes
+    `)
+    .eq('user_id', user.id)
+    .eq('is_anonymous', false)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('fit finder profile load error:', profileError.message)
+  } else if (profile) {
+    const [{ data: subjectRows }, { data: countryRows }] = await Promise.all([
+      supabase
+        .from('student_profile_subjects')
+        .select('subject_id')
+        .eq('student_profile_id', profile.id)
+        .order('preference_rank', { ascending: true }),
+      supabase
+        .from('student_profile_countries')
+        .select('country_id')
+        .eq('student_profile_id', profile.id)
+        .order('preference_rank', { ascending: true }),
+    ])
+
+    values = {
+      current_country_id: profile.current_country_id ?? '',
+      target_degree_level_id: profile.target_degree_level_id ?? '',
+      budget_min: profile.budget_min == null ? '' : String(profile.budget_min),
+      budget_max: profile.budget_max == null ? '' : String(profile.budget_max),
+      budget_currency: profile.budget_currency ?? '',
+      gpa: profile.gpa == null ? '' : String(profile.gpa),
+      english_score_type: profile.english_score_type ?? '',
+      english_score: profile.english_score == null ? '' : String(profile.english_score),
+      work_experience_years: profile.work_experience_years == null ? '' : String(profile.work_experience_years),
+      study_start_preference: profile.study_start_preference ?? '',
+      additional_notes: profile.additional_notes ?? '',
+      student_profile_subjects: (subjectRows ?? []).map((row: any) => row.subject_id).filter(Boolean),
+      student_profile_countries: (countryRows ?? []).map((row: any) => row.country_id).filter(Boolean),
+    }
+  }
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = fromForm(form)
+
+  if (!user) {
+    authMessage = 'Sign in to save your Fit Finder preferences. Anonymous saving will be reviewed in a later phase.'
+  } else {
+    errors = validateValues(values, countries, degreeLevels, subjects)
+
+    if (Object.keys(errors).length === 0) {
+      const profilePayload = {
+        user_id: user.id,
+        is_anonymous: false,
+        session_token: null,
+        current_country_id: values.current_country_id || null,
+        target_degree_level_id: values.target_degree_level_id || null,
+        budget_min: values.budget_min ? Number(values.budget_min) : null,
+        budget_max: values.budget_max ? Number(values.budget_max) : null,
+        budget_currency: values.budget_currency || null,
+        gpa: values.gpa ? Number(values.gpa) : null,
+        english_score_type: values.english_score_type || null,
+        english_score: values.english_score ? Number(values.english_score) : null,
+        work_experience_years: values.work_experience_years ? Number(values.work_experience_years) : null,
+        study_start_preference: values.study_start_preference || null,
+        additional_notes: values.additional_notes || null,
+      }
+
+      const { data: existingProfile, error: existingError } = await supabase
+        .from('student_profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_anonymous', false)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (existingError) {
+        console.error('fit finder profile lookup error:', existingError.message)
+        serverError = 'Could not save your preferences. Please try again.'
+      } else {
+        const profileWrite = existingProfile
+          ? await supabase
+              .from('student_profiles')
+              .update(profilePayload)
+              .eq('id', existingProfile.id)
+              .select('id')
+              .single()
+          : await supabase
+              .from('student_profiles')
+              .insert(profilePayload)
+              .select('id')
+              .single()
+
+        if (profileWrite.error || !profileWrite.data) {
+          console.error('fit finder profile save error:', profileWrite.error?.message)
+          serverError = 'Could not save your preferences. Please try again.'
+        } else {
+          const profileId = profileWrite.data.id
+          const subjectRows = values.student_profile_subjects.map((subjectId, index) => ({
+            student_profile_id: profileId,
+            subject_id: subjectId,
+            preference_rank: index + 1,
+          }))
+          const countryRows = values.student_profile_countries.map((countryId, index) => ({
+            student_profile_id: profileId,
+            country_id: countryId,
+            preference_rank: index + 1,
+          }))
+
+          const deleteSubjects = await supabase
+            .from('student_profile_subjects')
+            .delete()
+            .eq('student_profile_id', profileId)
+          const deleteCountries = await supabase
+            .from('student_profile_countries')
+            .delete()
+            .eq('student_profile_id', profileId)
+
+          if (deleteSubjects.error || deleteCountries.error) {
+            console.error('fit finder preference replace error:', deleteSubjects.error?.message ?? deleteCountries.error?.message)
+            serverError = 'Could not save your preferences. Please try again.'
+          } else {
+            const insertSubjects = subjectRows.length > 0
+              ? await supabase.from('student_profile_subjects').insert(subjectRows)
+              : { error: null }
+            const insertCountries = countryRows.length > 0
+              ? await supabase.from('student_profile_countries').insert(countryRows)
+              : { error: null }
+
+            if (insertSubjects.error || insertCountries.error) {
+              console.error('fit finder preference insert error:', insertSubjects.error?.message ?? insertCountries.error?.message)
+              serverError = 'Could not save your preferences. Please try again.'
+            } else {
+              return Astro.redirect('/fit-finder/result')
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const labelClass = 'block text-sm font-medium text-gray-700 mb-1'
+const errorClass = 'mt-1 text-xs text-red-600'
+const hintClass = 'mt-1 text-xs text-gray-500'
+const sectionClass = 'border border-gray-200 rounded-lg p-4 bg-white'
+const sectionHeadClass = 'text-base font-semibold text-gray-900 mb-4'
+const isSelected = (items: string[], id: string) => items.includes(id)
+---
+<PublicLayout
+  title="Fit Finder — DegreeWiki"
+  description="Save study preferences for future DegreeWiki program matching."
+  noindex={true}
+  canonical={SITE_URL + '/fit-finder'}
+>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="max-w-2xl">
+      <h1 class="text-2xl font-bold text-gray-900 mb-2">Fit Finder</h1>
+      <p class="text-sm text-gray-600 mb-6">
+        Save your study preferences now. Program matching will be added in the next phase.
+      </p>
+    </div>
+
+    {authMessage && (
+      <div class="max-w-2xl mb-5 px-4 py-3 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-900">
+        {authMessage}{' '}
+        <a href="/login?redirect=/fit-finder" class="font-medium underline">Sign in to continue</a>.
+      </div>
+    )}
+
+    {serverError && (
+      <div class="max-w-2xl mb-5 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
+        {serverError}
+      </div>
+    )}
+
+    <form method="post" action="/fit-finder" class="max-w-2xl space-y-5">
+      <section class={sectionClass}>
+        <h2 class={sectionHeadClass}>Study preferences</h2>
+        <div class="space-y-4">
+          <div>
+            <label for="current_country_id" class={labelClass}>Current country</label>
+            <select id="current_country_id" name="current_country_id" class={selectClass}>
+              <option value="">Select a country</option>
+              {countries.map(country => (
+                <option value={country.id} selected={values.current_country_id === country.id}>{country.name}</option>
+              ))}
+            </select>
+            {errors.current_country_id && <p class={errorClass}>{errors.current_country_id}</p>}
+          </div>
+
+          <div>
+            <label for="target_degree_level_id" class={labelClass}>Target degree level</label>
+            <select id="target_degree_level_id" name="target_degree_level_id" class={selectClass}>
+              <option value="">Select a degree level</option>
+              {degreeLevels.map(level => (
+                <option value={level.id} selected={values.target_degree_level_id === level.id}>{level.name}</option>
+              ))}
+            </select>
+            {errors.target_degree_level_id && <p class={errorClass}>{errors.target_degree_level_id}</p>}
+          </div>
+
+          <div>
+            <label for="student_profile_countries" class={labelClass}>Target countries</label>
+            <select id="student_profile_countries" name="student_profile_countries" multiple size="6" class={selectClass}>
+              {countries.map(country => (
+                <option value={country.id} selected={isSelected(values.student_profile_countries, country.id)}>{country.name}</option>
+              ))}
+            </select>
+            <p class={hintClass}>Use Ctrl or Shift to select more than one country.</p>
+            {errors.student_profile_countries && <p class={errorClass}>{errors.student_profile_countries}</p>}
+          </div>
+
+          <div>
+            <label for="student_profile_subjects" class={labelClass}>Subjects of interest</label>
+            <select id="student_profile_subjects" name="student_profile_subjects" multiple size="8" class={selectClass}>
+              {subjects.map(subject => (
+                <option value={subject.id} selected={isSelected(values.student_profile_subjects, subject.id)}>{subject.name}</option>
+              ))}
+            </select>
+            <p class={hintClass}>Use Ctrl or Shift to select more than one subject.</p>
+            {errors.student_profile_subjects && <p class={errorClass}>{errors.student_profile_subjects}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section class={sectionClass}>
+        <h2 class={sectionHeadClass}>Budget</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label for="budget_min" class={labelClass}>Minimum budget</label>
+            <input id="budget_min" name="budget_min" type="number" min="0" step="any" value={values.budget_min} class={inputClass} />
+            {errors.budget_min && <p class={errorClass}>{errors.budget_min}</p>}
+          </div>
+          <div>
+            <label for="budget_max" class={labelClass}>Maximum budget</label>
+            <input id="budget_max" name="budget_max" type="number" min="0" step="any" value={values.budget_max} class={inputClass} />
+            {errors.budget_max && <p class={errorClass}>{errors.budget_max}</p>}
+          </div>
+          <div>
+            <label for="budget_currency" class={labelClass}>Currency</label>
+            <input id="budget_currency" name="budget_currency" type="text" maxlength={SHORT_TEXT_MAX} value={values.budget_currency} placeholder="USD" class={inputClass + ' font-mono'} />
+            {errors.budget_currency && <p class={errorClass}>{errors.budget_currency}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section class={sectionClass}>
+        <h2 class={sectionHeadClass}>Academic background</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label for="gpa" class={labelClass}>GPA</label>
+            <input id="gpa" name="gpa" type="number" min="0" step="any" value={values.gpa} class={inputClass} />
+            {errors.gpa && <p class={errorClass}>{errors.gpa}</p>}
+          </div>
+          <div>
+            <label for="work_experience_years" class={labelClass}>Work experience years</label>
+            <input id="work_experience_years" name="work_experience_years" type="number" min="0" step="1" value={values.work_experience_years} class={inputClass} />
+            {errors.work_experience_years && <p class={errorClass}>{errors.work_experience_years}</p>}
+          </div>
+          <div>
+            <label for="english_score_type" class={labelClass}>English score type</label>
+            <input id="english_score_type" name="english_score_type" type="text" maxlength={SHORT_TEXT_MAX} value={values.english_score_type} placeholder="IELTS, TOEFL, PTE" class={inputClass} />
+            {errors.english_score_type && <p class={errorClass}>{errors.english_score_type}</p>}
+          </div>
+          <div>
+            <label for="english_score" class={labelClass}>English score</label>
+            <input id="english_score" name="english_score" type="number" min="0" step="any" value={values.english_score} class={inputClass} />
+            {errors.english_score && <p class={errorClass}>{errors.english_score}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section class={sectionClass}>
+        <h2 class={sectionHeadClass}>Timing and notes</h2>
+        <div class="space-y-4">
+          <div>
+            <label for="study_start_preference" class={labelClass}>Study start preference</label>
+            <input id="study_start_preference" name="study_start_preference" type="text" maxlength={START_PREF_MAX} value={values.study_start_preference} placeholder="Sep 2026, Spring intake, Anytime" class={inputClass} />
+            {errors.study_start_preference && <p class={errorClass}>{errors.study_start_preference}</p>}
+          </div>
+          <div>
+            <label for="additional_notes" class={labelClass}>Additional notes</label>
+            <textarea id="additional_notes" name="additional_notes" rows="5" maxlength={NOTES_MAX} class={inputClass}>{values.additional_notes}</textarea>
+            <p class={hintClass}>Do not include documents, passport details, bank information, or other sensitive personal data.</p>
+            {errors.additional_notes && <p class={errorClass}>{errors.additional_notes}</p>}
+          </div>
+        </div>
+      </section>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Save preferences
+        </button>
+        <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+          Browse programs
+        </a>
+      </div>
+    </form>
+  </div>
+</PublicLayout>

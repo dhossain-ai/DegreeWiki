@@ -1,0 +1,27 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import { SITE_URL } from '../../lib/site'
+---
+<PublicLayout
+  title="Fit Finder Saved — DegreeWiki"
+  description="Your DegreeWiki Fit Finder preferences have been saved."
+  noindex={true}
+  canonical={SITE_URL + '/fit-finder/result'}
+>
+  <div class="max-w-5xl mx-auto px-4 py-12">
+    <div class="max-w-2xl">
+      <h1 class="text-2xl font-bold text-gray-900 mb-3">Your preferences have been saved.</h1>
+      <p class="text-gray-600 mb-6">
+        Program matching will be added in the next phase.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a href="/programs" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Browse programs
+        </a>
+        <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+          Update preferences
+        </a>
+      </div>
+    </div>
+  </div>
+</PublicLayout>
