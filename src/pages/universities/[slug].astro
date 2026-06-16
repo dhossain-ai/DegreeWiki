@@ -1,6 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
+import { SITE_URL } from '../../lib/site'
 
 const { slug } = Astro.params
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -10,6 +11,7 @@ const { data: university } = await supabase
   .select(`
     id, name, slug, official_url, founded_year, student_count,
     ranking_summary, overview, seo_title, seo_description,
+    canonical_url, og_title, og_description,
     countries(name), cities(name)
   `)
   .eq('slug', slug!)
@@ -20,11 +22,14 @@ if (!university) {
   return new Response(null, { status: 404 })
 }
 
-const pageTitle = (university as any).seo_title || (university as any).name
-const pageDesc  = (university as any).seo_description || (university as any).ranking_summary || undefined
-const u = university as any
+const pageTitle  = (university as any).seo_title || (university as any).name
+const pageDesc   = (university as any).seo_description || (university as any).ranking_summary || undefined
+const u          = university as any
+const canonical  = u.canonical_url || `${SITE_URL}/universities/${slug}`
+const ogTitle    = u.og_title || pageTitle
+const ogDesc     = u.og_description || pageDesc
 ---
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc}>
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
   <div class="max-w-3xl mx-auto px-4 py-8">
     <a href="/universities" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Universities</a>
 

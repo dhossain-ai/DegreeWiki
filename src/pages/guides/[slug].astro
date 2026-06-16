@@ -1,6 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
+import { SITE_URL } from '../../lib/site'
 
 const { slug } = Astro.params
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -10,6 +11,7 @@ const { data: article } = await supabase
   .select(`
     id, title, slug, summary, content, published_at,
     seo_title, seo_description,
+    canonical_url, og_title, og_description,
     article_categories(name, slug)
   `)
   .eq('slug', slug!)
@@ -28,14 +30,17 @@ function formatDate(d: string | null): string | null {
 }
 
 const pubDate   = formatDate(a.published_at)
-const pageTitle = a.seo_title || a.title
-const pageDesc  = a.seo_description || a.summary || undefined
+const pageTitle  = a.seo_title || a.title
+const pageDesc   = a.seo_description || a.summary || undefined
+const canonical  = a.canonical_url || `${SITE_URL}/guides/${slug}`
+const ogTitle    = a.og_title || pageTitle
+const ogDesc     = a.og_description || pageDesc
 
 const contentParas: string[] = a.content
   ? a.content.split('\n\n').map((p: string) => p.trim()).filter(Boolean)
   : []
 ---
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc}>
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
   <div class="max-w-2xl mx-auto px-4 py-8">
     <a href="/guides" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Guides</a>
 

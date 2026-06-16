@@ -4,8 +4,13 @@ interface Props {
   title?: string
   description?: string
   noindex?: boolean
+  canonical?: string
+  ogTitle?: string
+  ogDescription?: string
+  ogType?: string
+  ogUrl?: string
 }
-const { title = 'DegreeWiki', description, noindex } = Astro.props
+const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescription, ogType, ogUrl } = Astro.props
 ---
 <!doctype html>
 <html lang="en">
@@ -15,7 +20,16 @@ const { title = 'DegreeWiki', description, noindex } = Astro.props
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
     {noindex && <meta name="robots" content="noindex, follow" />}
+    {canonical && <link rel="canonical" href={canonical} />}
     <link rel="icon" href="/favicon.svg" />
+    <meta property="og:site_name" content="DegreeWiki" />
+    <meta property="og:type" content={ogType ?? 'website'} />
+    <meta property="og:title" content={ogTitle ?? title ?? 'DegreeWiki'} />
+    {(ogDescription ?? description) && <meta property="og:description" content={ogDescription ?? description} />}
+    {(ogUrl ?? canonical) && <meta property="og:url" content={ogUrl ?? canonical} />}
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={ogTitle ?? title ?? 'DegreeWiki'} />
+    {(ogDescription ?? description) && <meta name="twitter:description" content={ogDescription ?? description} />}
   </head>
   <body class="min-h-screen bg-gray-50 text-gray-900">
     <slot />

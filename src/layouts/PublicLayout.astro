@@ -6,10 +6,15 @@ interface Props {
   title?: string
   description?: string
   noindex?: boolean
+  canonical?: string
+  ogTitle?: string
+  ogDescription?: string
+  ogType?: string
+  ogUrl?: string
 }
-const { title = 'DegreeWiki', description, noindex } = Astro.props
+const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescription, ogType, ogUrl } = Astro.props
 ---
-<BaseLayout title={title} description={description} noindex={noindex}>
+<BaseLayout title={title} description={description} noindex={noindex} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDescription} ogType={ogType} ogUrl={ogUrl}>
   <div class="min-h-screen flex flex-col bg-white">
     <PublicNav />
     <main class="flex-1">

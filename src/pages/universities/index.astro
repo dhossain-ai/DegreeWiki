@@ -1,6 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
+import { SITE_URL } from '../../lib/site'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
@@ -52,7 +53,7 @@ const selectClass = 'w-full rounded border border-gray-300 bg-white px-3 py-1.5 
 const inputClass  = 'w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
 const labelClass  = 'block text-xs font-medium text-gray-600 mb-1'
 ---
-<PublicLayout title="Universities — DegreeWiki" noindex={hasFilters}>
+<PublicLayout title="Universities — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/universities'}>
   <div class="max-w-5xl mx-auto px-4 py-8">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">Universities</h1>
 

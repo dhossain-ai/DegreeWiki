@@ -1,6 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
+import { SITE_URL } from '../../lib/site'
 
 const { slug } = Astro.params
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -16,6 +17,7 @@ const { data: program } = await supabase
     admission_requirements, english_requirements, gpa_requirements,
     curriculum_summary, career_outcomes,
     seo_title, seo_description,
+    canonical_url, og_title, og_description,
     universities(name, slug),
     degree_levels(name),
     subjects(name),
@@ -49,10 +51,13 @@ function formatTuition(): string | null {
 
 const tuition = formatTuition()
 const hasEnglishReqs = p.english_requirements != null && Object.keys(p.english_requirements).length > 0
-const pageTitle = p.seo_title || p.title
-const pageDesc  = p.seo_description || undefined
+const pageTitle  = p.seo_title || p.title
+const pageDesc   = p.seo_description || undefined
+const canonical  = p.canonical_url || `${SITE_URL}/programs/${slug}`
+const ogTitle    = p.og_title || pageTitle
+const ogDesc     = p.og_description || pageDesc
 ---
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc}>
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
   <div class="max-w-3xl mx-auto px-4 py-8">
     <a href="/programs" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Programs</a>
 

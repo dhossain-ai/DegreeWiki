@@ -1,6 +1,7 @@
 ---
 import PublicLayout from '../layouts/PublicLayout.astro'
 import { createClient } from '../lib/supabase/server'
+import { SITE_URL } from '../lib/site'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
@@ -49,6 +50,7 @@ function formatDeadline(d: string | null, dt: string | null): string | null {
 <PublicLayout
   title="DegreeWiki — Find Degrees, Scholarships & University Guides"
   description="Discover university programs, scholarships, and study-abroad guides for international students."
+  canonical={SITE_URL + '/'}
 >
 
   <!-- Hero -->
