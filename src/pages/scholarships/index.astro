@@ -3,69 +3,254 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
-const { data: scholarships, error } = await supabase
-  .from('scholarships')
-  .select('id, name, slug, scholarship_type, provider_name, funding_type, amount_min, amount_max, currency, deadline')
-  .eq('content_status', 'published')
-  .order('name')
-  .limit(100)
 
-if (error) console.error('scholarships list error:', error.message)
-const rows = scholarships ?? []
+const SCHOLARSHIP_TYPES = ['full', 'partial', 'merit', 'need_based', 'government', 'institutional', 'other'] as const
+const PROVIDER_TYPES    = ['government', 'university', 'private_foundation', 'corporate', 'ngo', 'other'] as const
+const FUNDING_TYPES     = ['full_tuition', 'partial_tuition', 'living_stipend', 'travel', 'research', 'full_funding', 'other'] as const
+const APPLICATION_TYPES = ['direct', 'university_portal', 'nomination', 'embassy', 'other'] as const
 
-function formatAmount(min: any, max: any, currency: string | null): string {
-  if (min == null && max == null) return '—'
-  const fmt = (n: any) => Number(n).toLocaleString()
-  const range = min != null && max != null
-    ? `${fmt(min)} – ${fmt(max)}`
-    : min != null ? fmt(min) : `up to ${fmt(max)}`
-  return [currency, range].filter(Boolean).join(' ')
+function parseEnum<T extends readonly string[]>(allowed: T, raw: string | null): T[number] | undefined {
+  return raw && (allowed as readonly string[]).includes(raw) ? raw as T[number] : undefined
 }
 
-function formatLabel(value: string | null): string {
-  if (!value) return '—'
+const sp = Astro.url.searchParams
+
+const q               = sp.get('q')?.trim().replace(/[,()]/g, '').slice(0, 100) || undefined
+const scholarshipType = parseEnum(SCHOLARSHIP_TYPES, sp.get('scholarship_type'))
+const providerType    = parseEnum(PROVIDER_TYPES,    sp.get('provider_type'))
+const fundingType     = parseEnum(FUNDING_TYPES,     sp.get('funding_type'))
+const applicationType = parseEnum(APPLICATION_TYPES, sp.get('application_type'))
+const currency        = sp.get('currency')?.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 10) || undefined
+const upcomingOnly    = sp.get('deadline') === 'upcoming'
+
+const today    = new Date()
+const todayISO = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`
+
+const hasFilters = !!(q || scholarshipType || providerType || fundingType || applicationType || currency || upcomingOnly)
+
+let query = supabase
+  .from('scholarships')
+  .select(
+    'id, name, slug, scholarship_type, provider_name, provider_type, funding_type, application_type, amount_min, amount_max, currency, deadline, deadline_text',
+    { count: 'exact' }
+  )
+  .eq('content_status', 'published')
+  .order('deadline', { ascending: true, nullsFirst: false })
+  .order('name',     { ascending: true })
+  .limit(201)
+
+if (q)               query = query.or(`name.ilike.%${q}%,provider_name.ilike.%${q}%`)
+if (scholarshipType) query = query.eq('scholarship_type', scholarshipType)
+if (providerType)    query = query.eq('provider_type', providerType)
+if (fundingType)     query = query.eq('funding_type', fundingType)
+if (applicationType) query = query.eq('application_type', applicationType)
+if (currency)        query = query.ilike('currency', `%${currency}%`)
+if (upcomingOnly)    query = query.gte('deadline', todayISO)
+
+const { data, count, error } = await query
+if (error) console.error('scholarships list error:', error.message)
+
+const allRows   = data ?? []
+const overLimit = (count ?? allRows.length) > 200
+const rows      = allRows.slice(0, 200)
+
+function formatAmount(min: any, max: any, cur: string | null): string | null {
+  if (min == null && max == null) return null
+  const fmt = (n: any) => Number(n).toLocaleString()
+  const range =
+    min != null && max != null
+      ? `${fmt(min)} – ${fmt(max)}`
+      : min != null ? fmt(min) : `up to ${fmt(max)}`
+  return [cur, range].filter(Boolean).join(' ')
+}
+
+function formatLabel(value: string | null | undefined): string {
+  if (!value) return ''
   return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-function formatDate(d: string | null): string {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+function formatDeadline(d: string | null, dt: string | null): string | null {
+  if (d) return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return dt ?? null
 }
+
+const selectClass = 'w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
+const inputClass  = 'w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
+const labelClass  = 'block text-xs font-medium text-gray-600 mb-1'
 ---
-<PublicLayout title="Scholarships — DegreeWiki">
+<PublicLayout title="Scholarships — DegreeWiki" noindex={hasFilters}>
   <div class="max-w-5xl mx-auto px-4 py-8">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">Scholarships</h1>
-    {rows.length === 0 ? (
-      <p class="text-gray-500 text-sm">No results yet.</p>
-    ) : (
-      <div class="overflow-x-auto rounded-lg border border-gray-200">
-        <table class="w-full text-sm text-left">
-          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
-            <tr>
-              <th class="px-4 py-3">Scholarship</th>
-              <th class="px-4 py-3">Type</th>
-              <th class="px-4 py-3">Provider</th>
-              <th class="px-4 py-3">Funding</th>
-              <th class="px-4 py-3">Deadline</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s: any) => (
-              <tr class="border-b border-gray-100 hover:bg-gray-50 last:border-b-0">
-                <td class="px-4 py-3">
-                  <a href={`/scholarships/${s.slug}`} class="text-blue-600 hover:underline font-medium">
-                    {s.name}
-                  </a>
-                </td>
-                <td class="px-4 py-3 text-gray-600">{formatLabel(s.scholarship_type)}</td>
-                <td class="px-4 py-3 text-gray-600">{s.provider_name ?? '—'}</td>
-                <td class="px-4 py-3 text-gray-500">{formatAmount(s.amount_min, s.amount_max, s.currency)}</td>
-                <td class="px-4 py-3 text-gray-500">{formatDate(s.deadline)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+    <form method="get" action="/scholarships" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+
+        <div class="sm:col-span-2 lg:col-span-3">
+          <label class={labelClass} for="q">Search scholarships</label>
+          <input id="q" name="q" type="search" value={q ?? ''}
+                 placeholder="e.g. Chevening, Gates, government merit…"
+                 class={inputClass} />
+        </div>
+
+        <div>
+          <label class={labelClass} for="scholarship_type">Scholarship type</label>
+          <select id="scholarship_type" name="scholarship_type" class={selectClass}>
+            <option value="">Any type</option>
+            <option value="full"          selected={scholarshipType === 'full'}>Full</option>
+            <option value="partial"       selected={scholarshipType === 'partial'}>Partial</option>
+            <option value="merit"         selected={scholarshipType === 'merit'}>Merit</option>
+            <option value="need_based"    selected={scholarshipType === 'need_based'}>Need Based</option>
+            <option value="government"    selected={scholarshipType === 'government'}>Government</option>
+            <option value="institutional" selected={scholarshipType === 'institutional'}>Institutional</option>
+            <option value="other"         selected={scholarshipType === 'other'}>Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="provider_type">Provider type</label>
+          <select id="provider_type" name="provider_type" class={selectClass}>
+            <option value="">Any provider</option>
+            <option value="government"         selected={providerType === 'government'}>Government</option>
+            <option value="university"         selected={providerType === 'university'}>University</option>
+            <option value="private_foundation" selected={providerType === 'private_foundation'}>Private Foundation</option>
+            <option value="corporate"          selected={providerType === 'corporate'}>Corporate</option>
+            <option value="ngo"                selected={providerType === 'ngo'}>NGO</option>
+            <option value="other"              selected={providerType === 'other'}>Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="funding_type">Funding type</label>
+          <select id="funding_type" name="funding_type" class={selectClass}>
+            <option value="">Any funding</option>
+            <option value="full_tuition"    selected={fundingType === 'full_tuition'}>Full Tuition</option>
+            <option value="partial_tuition" selected={fundingType === 'partial_tuition'}>Partial Tuition</option>
+            <option value="living_stipend"  selected={fundingType === 'living_stipend'}>Living Stipend</option>
+            <option value="travel"          selected={fundingType === 'travel'}>Travel</option>
+            <option value="research"        selected={fundingType === 'research'}>Research</option>
+            <option value="full_funding"    selected={fundingType === 'full_funding'}>Full Funding</option>
+            <option value="other"           selected={fundingType === 'other'}>Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="application_type">How to apply</label>
+          <select id="application_type" name="application_type" class={selectClass}>
+            <option value="">Any method</option>
+            <option value="direct"            selected={applicationType === 'direct'}>Direct</option>
+            <option value="university_portal" selected={applicationType === 'university_portal'}>University Portal</option>
+            <option value="nomination"        selected={applicationType === 'nomination'}>Nomination</option>
+            <option value="embassy"           selected={applicationType === 'embassy'}>Embassy</option>
+            <option value="other"             selected={applicationType === 'other'}>Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="currency">Currency</label>
+          <input id="currency" name="currency" type="text" value={currency ?? ''}
+                 placeholder="e.g. USD, GBP, EUR"
+                 class={inputClass} />
+        </div>
+
+        <div>
+          <label class={labelClass} for="deadline">Deadline</label>
+          <select id="deadline" name="deadline" class={selectClass}>
+            <option value="">Any deadline</option>
+            <option value="upcoming" selected={upcomingOnly}>Upcoming only</option>
+          </select>
+        </div>
+
       </div>
+
+      <div class="flex items-center gap-3 mt-4">
+        <button type="submit"
+                class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">
+          Search
+        </button>
+        {hasFilters && (
+          <a href="/scholarships"
+             class="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
+            Clear filters
+          </a>
+        )}
+      </div>
+    </form>
+
+    {overLimit ? (
+      <p class="text-sm text-gray-500 mb-4">
+        Showing 200 of {(count ?? 200).toLocaleString()} scholarships. Narrow your search to see more.
+      </p>
+    ) : rows.length > 0 ? (
+      <p class="text-sm text-gray-500 mb-4">
+        {rows.length} {rows.length === 1 ? 'scholarship' : 'scholarships'} found.
+      </p>
+    ) : null}
+
+    {rows.length === 0 ? (
+      <div class="text-center py-12 text-gray-500">
+        {hasFilters ? (
+          <div>
+            <p class="text-base mb-3">No scholarships match your filters.</p>
+            <a href="/scholarships" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+          </div>
+        ) : (
+          <p class="text-base">No scholarships have been published yet.</p>
+        )}
+      </div>
+    ) : (
+      <ul class="space-y-3">
+        {rows.map((s: any) => {
+          const amount   = formatAmount(s.amount_min, s.amount_max, s.currency)
+          const deadline = formatDeadline(s.deadline, s.deadline_text)
+          return (
+            <li class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+
+              <div class="flex items-start justify-between gap-4 mb-1.5">
+                <a href={`/scholarships/${s.slug}`}
+                   class="text-base font-semibold text-blue-600 hover:underline leading-snug">
+                  {s.name}
+                </a>
+                {amount && (
+                  <span class="text-sm text-gray-600 whitespace-nowrap shrink-0">{amount}</span>
+                )}
+              </div>
+
+              {s.provider_name && (
+                <p class="text-sm text-gray-700 mb-2">{s.provider_name}</p>
+              )}
+
+              <div class="flex flex-wrap gap-2 text-xs">
+                {s.scholarship_type && (
+                  <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                    {formatLabel(s.scholarship_type)}
+                  </span>
+                )}
+                {s.provider_type && (
+                  <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">
+                    {formatLabel(s.provider_type)}
+                  </span>
+                )}
+                {s.funding_type && (
+                  <span class="bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
+                    {formatLabel(s.funding_type)}
+                  </span>
+                )}
+                {s.application_type && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                    {formatLabel(s.application_type)}
+                  </span>
+                )}
+                {deadline && (
+                  <span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
+                    Deadline: {deadline}
+                  </span>
+                )}
+              </div>
+
+            </li>
+          )
+        })}
+      </ul>
     )}
   </div>
 </PublicLayout>
