@@ -4,11 +4,62 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 14 — TBD.
+Phase 15 — TBD.
 
-Phase 13 — Public Guides Search / Category Foundation — implementation complete, pending manual verification.
+Phase 14 — Public Home Page Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 14 — Public Home Page Foundation (implementation complete):
+
+- Upgraded / from a bare auth-placeholder page into a real public-facing homepage.
+  Uses PublicLayout (gains PublicNav automatically). No admin changes, no migrations,
+  no new dependencies, no React, no client-side JS, no service_role.
+- Replaced src/pages/index.astro — full rewrite with hero, discovery cards, start-here block,
+  latest programs/scholarships/guides sections, and secondary auth/admin row.
+
+Homepage sections implemented:
+
+  Hero: product name, subtitle for international students, two CTA buttons
+    (Browse Programs → /programs, Find Scholarships → /scholarships).
+  Discovery cards: four equal cards linking to /programs, /scholarships, /universities, /guides,
+    each with a title and one-line description.
+  Start here block: four goal-framed plain-link prompts using section index pages (no pre-filtered URLs).
+  Latest programs: 3 most-recently created published programs with title, university name,
+    degree level badge. Section omitted when no rows.
+  Latest scholarships: 3 most-recently created published scholarships with name, provider name,
+    deadline badge. Section omitted when no rows.
+  Latest guides: 3 most-recently published articles with category badge, date, title, summary.
+    Section omitted when no rows.
+  Auth/admin row: visually secondary footer row — signed-in shows email, Admin dashboard link,
+    Logout form; signed-out shows Sign in link.
+
+Supabase query strategy:
+  Four queries in Promise.all: auth.getUser(), programs limit 3 created_at DESC,
+  scholarships limit 3 created_at DESC, articles limit 3 published_at DESC nulls last.
+  All content queries include .eq('content_status', 'published').
+  All failures default to [] — homepage never crashes.
+  Uses existing createClient(Astro.cookies, Astro.request) — anon key, RLS enforced.
+  No service_role. No new dependencies. No migrations.
+
+SEO/meta:
+  title: "DegreeWiki — Find Degrees, Scholarships & University Guides"
+  description: "Discover university programs, scholarships, and study-abroad guides for international students."
+  No noindex — homepage is fully indexable.
+
+npm run build: PASS (Cloudflare server build, 1.36s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No search bar, autocomplete, or global search.
+  No personalized homepage, saved items, or user dashboard.
+  No AI features.
+  No sitemap, robots.txt, canonical, OpenGraph, or structured data (future SEO phase).
+  No latest universities section (no published_at column; created_at ordering is misleading).
+  No admin CRUD changes.
+  No public search/detail page changes.
+  No PublicNav, BaseLayout, or PublicLayout changes.
+
 
 Phase 13 — Public Guides Search / Category Foundation (implementation complete):
 

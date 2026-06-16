@@ -4,6 +4,199 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 14: Public Home Page Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Upgrade / from a bare auth-placeholder page into a real public-facing homepage with hero,
+discovery cards, start-here block, and latest content sections.
+No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+no AI, no saved items, no service_role.
+
+---
+
+### Files Changed
+
+src/pages/index.astro (full replacement):
+  Previous version: BaseLayout, inline nav list duplicating PublicNav, auth state check, bare links.
+  New version: PublicLayout, hero, discovery cards, start-here block, latest programs/scholarships/guides
+  sections (conditional), secondary auth/admin row.
+
+---
+
+### Homepage Sections
+
+1. Hero
+   Container: max-w-3xl, centered, py-16. White background with bottom border.
+   h1: "DegreeWiki"
+   Subtitle: "Find university programs, scholarships, and study-abroad guides for international students."
+   CTA buttons: "Browse Programs" → /programs (primary blue), "Find Scholarships" → /scholarships (outlined).
+
+2. Discovery cards
+   Grid: 1 col mobile → 2 col sm → 4 col lg. max-w-5xl, py-12.
+   Section heading: "Explore".
+   Four cards (block <a> links): Programs /programs, Scholarships /scholarships,
+   Universities /universities, Guides /guides. Each has title + one-line description.
+   Hover: bg-gray-50, border-blue-300.
+
+3. Start here block
+   bg-gray-50 rounded panel. Section heading: "Start here".
+   Four goal-framed plain links (plain section index URLs, no pre-filtered params):
+     I want to study abroad → /programs
+     I'm looking for scholarships → /scholarships
+     I want to compare universities → /universities
+     I need application advice → /guides
+
+4. Latest programs (conditional — omitted when 0 rows)
+   3-column grid. Section heading "Latest programs" + "Browse all programs →" link to /programs.
+   Each card: title (blue, line-clamp-2) → /programs/[slug], university name, degree level badge.
+
+5. Latest scholarships (conditional — omitted when 0 rows)
+   3-column grid. Section heading "Latest scholarships" + "View all scholarships →" link.
+   Each card: name (blue, line-clamp-2) → /scholarships/[slug], provider name, deadline badge (amber).
+
+6. Latest guides (conditional — omitted when 0 rows)
+   3-column grid. Section heading "Latest guides" + "View all guides →" link to /guides.
+   Each card: category badge + published date, title (blue, line-clamp-2) → /guides/[slug], summary.
+
+7. Auth/admin secondary row
+   border-t border-gray-100, text-xs, text-gray-400.
+   Signed in: email (gray-600), Admin dashboard link (blue-400), Logout form (red-400).
+   Signed out: Sign in link (gray-400 → blue-500 on hover).
+
+---
+
+### Data Queries
+
+All four queries run in Promise.all:
+
+  supabase.auth.getUser()
+  → user = authResult.data.user
+
+  supabase.from('programs')
+    .select('id, title, slug, universities(name), degree_levels(name)')
+    .eq('content_status', 'published')
+    .order('created_at', { ascending: false })
+    .limit(3)
+  → latestPrograms = latestProgramsData ?? []
+
+  supabase.from('scholarships')
+    .select('id, name, slug, provider_name, deadline, deadline_text')
+    .eq('content_status', 'published')
+    .order('created_at', { ascending: false })
+    .limit(3)
+  → latestScholarships = latestScholarshipsData ?? []
+
+  supabase.from('articles')
+    .select('id, title, slug, summary, published_at, article_categories(name)')
+    .eq('content_status', 'published')
+    .order('published_at', { ascending: false, nullsFirst: false })
+    .limit(3)
+  → latestGuides = latestGuidesData ?? []
+
+Client: createClient(Astro.cookies, Astro.request). Anon key only. No service_role.
+All errors default to []. Homepage never crashes due to a failed query.
+
+Helper functions:
+  formatDate(d) — published_at → "Month Day, Year" (en-US locale). Returns null if d is null.
+  formatDeadline(d, dt) — deadline date → "Mon Day, Year"; falls back to deadline_text; null if both absent.
+
+---
+
+### Auth/Admin Link Behavior
+
+supabase.auth.getUser() result used only for the secondary footer row.
+Signed in: renders "Signed in as {email}" + Admin dashboard link + Logout form (POST /api/auth/logout).
+Signed out: renders "Sign in" link → /login.
+Inline nav list from the old index.astro removed — PublicLayout provides PublicNav automatically.
+No duplicate nav links.
+
+---
+
+### SEO/Meta Behavior
+
+title:       "DegreeWiki — Find Degrees, Scholarships & University Guides"
+description: "Discover university programs, scholarships, and study-abroad guides for international students."
+noindex:     not passed — homepage is fully indexable.
+BaseLayout renders <meta name="description"> when description prop is set (behavior from Phase 09).
+No canonical, OpenGraph, robots.txt, sitemap, or structured data added.
+
+---
+
+### Build Result
+
+  npm run build: PASS
+  Cloudflare server build, 1.36s, zero errors, zero warnings (Sharp warning is pre-existing).
+
+---
+
+### service_role Result
+
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+1. GET / — page loads, PublicNav appears (DegreeWiki logo + 4 nav links), no duplicate nav.
+2. Hero visible: "DegreeWiki" h1, subtitle, two CTA buttons.
+3. "Browse Programs" button → /programs.
+4. "Find Scholarships" button → /scholarships.
+5. Discovery cards visible: Programs, Scholarships, Universities, Guides, all with descriptions.
+6. Programs card → /programs. Scholarships → /scholarships. Universities → /universities. Guides → /guides.
+7. "Start here" block visible with all four goal links.
+8. Start here: "I want to study abroad" → /programs.
+9. Start here: "I'm looking for scholarships" → /scholarships.
+10. Start here: "I want to compare universities" → /universities.
+11. Start here: "I need application advice" → /guides.
+12. Latest programs section: if published programs exist, 3 cards show title, university, degree badge.
+13. Program card title link → /programs/[slug].
+14. "Browse all programs →" link → /programs.
+15. Latest scholarships section: if published scholarships exist, 3 cards show name, provider, deadline badge.
+16. Scholarship card name link → /scholarships/[slug].
+17. "View all scholarships →" link → /scholarships.
+18. Latest guides section: if published guides exist, 3 cards show category, date, title, summary.
+19. Guide card title link → /guides/[slug].
+20. "View all guides →" link → /guides.
+21. Empty database: hero, discovery cards, start-here block all render; latest sections absent (no "no content" messages).
+22. Card with null university/degree/provider/deadline — optional fields absent with no crash.
+23. Card with null published_at on article — no date shown, no crash.
+24. Auth signed-out: small "Sign in" link visible in footer row, no admin link.
+25. Auth signed-in: "Signed in as {email}" + "Admin dashboard" link + "Logout" button visible.
+26. Logout button submits POST to /api/auth/logout.
+27. Admin dashboard link → /admin.
+28. <title> in page source = "DegreeWiki — Find Degrees, Scholarships & University Guides".
+29. <meta name="description"> present with correct content.
+30. No <meta name="robots"> tag on homepage.
+31. GET /programs — no regression.
+32. GET /scholarships — no regression.
+33. GET /universities — no regression.
+34. GET /guides — no regression.
+35. GET /admin/ unauthenticated — still redirects to /login (no admin regression).
+
+---
+
+### Explicit Exclusions
+
+- No search bar, autocomplete, or global search.
+- No personalized homepage, saved items, or user dashboard.
+- No AI features.
+- No sitemap, robots.txt, canonical, OpenGraph, or structured data (future SEO phase).
+- No latest universities section (no published_at on universities; created_at ordering unsuitable for homepage).
+- No React or client-side JavaScript of any kind.
+- No migrations.
+- No service_role in src/ (0 matches confirmed).
+- No new npm dependencies.
+- No PublicNav.astro changes.
+- No BaseLayout.astro changes.
+- No PublicLayout.astro changes.
+- No public search/detail page changes.
+- No admin page changes.
+
+---
+
 ## 2026-06-16 - Phase 13: Public Guides Search / Category Foundation
 
 Tool:
