@@ -1,39 +1,240 @@
 ---
-import BaseLayout from '../layouts/BaseLayout.astro'
+import PublicLayout from '../layouts/PublicLayout.astro'
 import { createClient } from '../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
-const { data: { user } } = await supabase.auth.getUser()
 
-const publicLinks = [
-  { href: '/universities', label: 'Universities' },
-  { href: '/programs',     label: 'Programs'     },
-  { href: '/scholarships', label: 'Scholarships' },
-  { href: '/guides',       label: 'Guides'        },
-]
+const [
+  authResult,
+  { data: latestProgramsData },
+  { data: latestScholarshipsData },
+  { data: latestGuidesData },
+] = await Promise.all([
+  supabase.auth.getUser(),
+  supabase
+    .from('programs')
+    .select('id, title, slug, universities(name), degree_levels(name)')
+    .eq('content_status', 'published')
+    .order('created_at', { ascending: false })
+    .limit(3),
+  supabase
+    .from('scholarships')
+    .select('id, name, slug, provider_name, deadline, deadline_text')
+    .eq('content_status', 'published')
+    .order('created_at', { ascending: false })
+    .limit(3),
+  supabase
+    .from('articles')
+    .select('id, title, slug, summary, published_at, article_categories(name)')
+    .eq('content_status', 'published')
+    .order('published_at', { ascending: false, nullsFirst: false })
+    .limit(3),
+])
+
+const user               = authResult.data.user
+const latestPrograms     = latestProgramsData     ?? []
+const latestScholarships = latestScholarshipsData ?? []
+const latestGuides       = latestGuidesData       ?? []
+
+function formatDate(d: string | null): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+function formatDeadline(d: string | null, dt: string | null): string | null {
+  if (d) return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return dt ?? null
+}
 ---
-<BaseLayout title="DegreeWiki">
-  <main class="max-w-2xl mx-auto p-8">
-    <h1 class="text-3xl font-bold mb-4">DegreeWiki</h1>
+<PublicLayout
+  title="DegreeWiki — Find Degrees, Scholarships & University Guides"
+  description="Discover university programs, scholarships, and study-abroad guides for international students."
+>
 
-    <nav class="flex flex-wrap gap-4 text-sm mb-8">
-      {publicLinks.map(link => (
-        <a href={link.href} class="text-blue-600 hover:underline">{link.label}</a>
-      ))}
-    </nav>
+  <!-- Hero -->
+  <section class="bg-white border-b border-gray-100">
+    <div class="max-w-3xl mx-auto px-4 py-16 text-center">
+      <h1 class="text-4xl font-bold text-gray-900 mb-4">DegreeWiki</h1>
+      <p class="text-lg text-gray-600 mb-8">
+        Find university programs, scholarships, and study-abroad guides for international students.
+      </p>
+      <div class="flex flex-wrap justify-center gap-3">
+        <a href="/programs"
+           class="px-6 py-2.5 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition-colors">
+          Browse Programs
+        </a>
+        <a href="/scholarships"
+           class="px-6 py-2.5 bg-white text-blue-600 font-medium rounded border border-blue-600 hover:bg-blue-50 transition-colors">
+          Find Scholarships
+        </a>
+      </div>
+    </div>
+  </section>
 
+  <!-- Discovery cards -->
+  <section class="max-w-5xl mx-auto px-4 py-12">
+    <h2 class="text-lg font-semibold text-gray-700 mb-6">Explore</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <a href="/programs"
+         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
+        <h3 class="text-base font-semibold text-gray-900 mb-1">Programs</h3>
+        <p class="text-sm text-gray-500">Search degree programs by country, subject, or level.</p>
+      </a>
+
+      <a href="/scholarships"
+         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
+        <h3 class="text-base font-semibold text-gray-900 mb-1">Scholarships</h3>
+        <p class="text-sm text-gray-500">Find funding opportunities by type, deadline, and provider.</p>
+      </a>
+
+      <a href="/universities"
+         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
+        <h3 class="text-base font-semibold text-gray-900 mb-1">Universities</h3>
+        <p class="text-sm text-gray-500">Browse universities by country and city.</p>
+      </a>
+
+      <a href="/guides"
+         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
+        <h3 class="text-base font-semibold text-gray-900 mb-1">Guides</h3>
+        <p class="text-sm text-gray-500">Read study-abroad guides and application advice.</p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- Start here -->
+  <section class="max-w-5xl mx-auto px-4 pb-12">
+    <div class="bg-gray-50 rounded-lg border border-gray-200 p-6">
+      <h2 class="text-lg font-semibold text-gray-700 mb-4">Start here</h2>
+      <ul class="space-y-3">
+        <li>
+          <a href="/programs" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
+            <span class="text-gray-400">&rarr;</span>
+            I want to study abroad
+          </a>
+        </li>
+        <li>
+          <a href="/scholarships" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
+            <span class="text-gray-400">&rarr;</span>
+            I&rsquo;m looking for scholarships
+          </a>
+        </li>
+        <li>
+          <a href="/universities" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
+            <span class="text-gray-400">&rarr;</span>
+            I want to compare universities
+          </a>
+        </li>
+        <li>
+          <a href="/guides" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
+            <span class="text-gray-400">&rarr;</span>
+            I need application advice
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Latest programs -->
+  {latestPrograms.length > 0 && (
+    <section class="max-w-5xl mx-auto px-4 pb-12">
+      <div class="flex items-baseline justify-between mb-5">
+        <h2 class="text-lg font-semibold text-gray-700">Latest programs</h2>
+        <a href="/programs" class="text-sm text-blue-600 hover:underline">Browse all programs &rarr;</a>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {latestPrograms.map((p: any) => (
+          <a href={`/programs/${p.slug}`}
+             class="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 transition-colors">
+            <h3 class="text-sm font-semibold text-blue-600 mb-1 line-clamp-2">{p.title}</h3>
+            {p.universities?.name && (
+              <p class="text-xs text-gray-600 mb-1.5">{p.universities.name}</p>
+            )}
+            {p.degree_levels?.name && (
+              <span class="inline-flex text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                {p.degree_levels.name}
+              </span>
+            )}
+          </a>
+        ))}
+      </div>
+    </section>
+  )}
+
+  <!-- Latest scholarships -->
+  {latestScholarships.length > 0 && (
+    <section class="max-w-5xl mx-auto px-4 pb-12">
+      <div class="flex items-baseline justify-between mb-5">
+        <h2 class="text-lg font-semibold text-gray-700">Latest scholarships</h2>
+        <a href="/scholarships" class="text-sm text-blue-600 hover:underline">View all scholarships &rarr;</a>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {latestScholarships.map((s: any) => {
+          const deadline = formatDeadline(s.deadline, s.deadline_text)
+          return (
+            <a href={`/scholarships/${s.slug}`}
+               class="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 transition-colors">
+              <h3 class="text-sm font-semibold text-blue-600 mb-1 line-clamp-2">{s.name}</h3>
+              {s.provider_name && (
+                <p class="text-xs text-gray-600 mb-1.5">{s.provider_name}</p>
+              )}
+              {deadline && (
+                <span class="inline-flex text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
+                  Deadline: {deadline}
+                </span>
+              )}
+            </a>
+          )
+        })}
+      </div>
+    </section>
+  )}
+
+  <!-- Latest guides -->
+  {latestGuides.length > 0 && (
+    <section class="max-w-5xl mx-auto px-4 pb-12">
+      <div class="flex items-baseline justify-between mb-5">
+        <h2 class="text-lg font-semibold text-gray-700">Latest guides</h2>
+        <a href="/guides" class="text-sm text-blue-600 hover:underline">View all guides &rarr;</a>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {latestGuides.map((g: any) => (
+          <a href={`/guides/${g.slug}`}
+             class="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 transition-colors">
+            <div class="flex items-center gap-2 text-xs text-gray-400 mb-1.5">
+              {g.article_categories?.name && (
+                <span class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium">
+                  {g.article_categories.name}
+                </span>
+              )}
+              {formatDate(g.published_at) && (
+                <span>{formatDate(g.published_at)}</span>
+              )}
+            </div>
+            <h3 class="text-sm font-semibold text-blue-600 mb-1 line-clamp-2">{g.title}</h3>
+            {g.summary && (
+              <p class="text-xs text-gray-500 line-clamp-2">{g.summary}</p>
+            )}
+          </a>
+        ))}
+      </div>
+    </section>
+  )}
+
+  <!-- Auth/admin secondary row -->
+  <div class="max-w-5xl mx-auto px-4 py-6 border-t border-gray-100">
     {user ? (
-      <div class="text-sm text-gray-600">
-        <p class="mb-3">Signed in as <strong class="text-gray-900">{user.email}</strong></p>
-        <div class="flex gap-4">
-          <a href="/admin" class="text-blue-600 hover:underline">Admin dashboard</a>
-          <form method="post" action="/api/auth/logout">
-            <button type="submit" class="text-red-600 hover:underline">Logout</button>
-          </form>
-        </div>
+      <div class="flex flex-wrap items-center gap-4 text-xs text-gray-400">
+        <span>Signed in as <span class="text-gray-600">{user.email}</span></span>
+        <a href="/admin" class="text-blue-400 hover:underline">Admin dashboard</a>
+        <form method="post" action="/api/auth/logout" class="inline">
+          <button type="submit" class="text-red-400 hover:underline cursor-pointer">Logout</button>
+        </form>
       </div>
     ) : (
-      <a href="/login" class="text-sm text-blue-600 hover:underline">Sign in</a>
+      <a href="/login" class="text-xs text-gray-400 hover:text-blue-500">Sign in</a>
     )}
-  </main>
-</BaseLayout>
+  </div>
+
+</PublicLayout>
