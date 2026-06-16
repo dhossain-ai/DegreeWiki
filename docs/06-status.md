@@ -4,11 +4,74 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 13 — TBD.
+Phase 14 — TBD.
 
-Phase 12 — Public University Search & Filter Foundation — implementation complete, pending manual verification.
+Phase 13 — Public Guides Search / Category Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 13 — Public Guides Search / Category Foundation (implementation complete):
+
+- Upgraded /guides from a basic published-guide list into a server-rendered guide discovery
+  page with GET-form search and category filter. No admin changes, no migrations, no new
+  dependencies, no React, no client-side JS, no service_role.
+- Replaced src/pages/guides/index.astro — full rewrite with filter form, conditional Supabase
+  query, result cards, result count, over-limit notice, and empty states.
+
+Filters implemented (2 total, all via GET query params):
+  q        — articles.title ilike '%q%' OR articles.summary ilike '%q%'
+  category — articles.article_category_id = <uuid>
+
+Filters deferred (column does not exist in current schema — no migration added):
+  article_type — not a column on articles table in schema v1
+
+Validation:
+  q: trim, remove commas and parentheses, max 100 chars. Empty string → absent.
+  category: UUID regex validated — invalid values treated as absent.
+  Invalid filters never crash the page; they are silently dropped before the query.
+
+Supabase query strategy:
+  Single query with { count: 'exact' } and .limit(201).
+  .eq('content_status', 'published') always applied (belt-and-suspenders + planner hint).
+  .order('published_at', { ascending: false, nullsFirst: false }) then .order('title', { ascending: true }).
+  q search uses .or('title.ilike.%q%,summary.ilike.%q%').
+  category filter uses .eq('article_category_id', categoryId).
+  Lookup query (article_categories) runs in parallel: select id, name, ordered by display_order then name.
+  Failed lookups default to [] — page does not crash.
+  Uses existing createClient(Astro.cookies, Astro.request) — anon key, RLS enforced.
+
+Result UI:
+  Card layout. Each card shows: category badge (if set), published_at date (if set),
+  title linked to /guides/[slug], summary (if set).
+  Result count shown above results. Over-200 notice when more than 200 match.
+  Selected filter values preserved after form submit.
+  Clear filters link shown when any filter is active.
+
+noindex behavior:
+  Filtered URLs (/guides?...) render <meta name="robots" content="noindex, follow">.
+  Unfiltered /guides has no robots meta tag and remains indexable.
+  Uses existing noindex prop support from Phase 10 (BaseLayout + PublicLayout).
+
+Empty states:
+  No filters + no rows → "No guides have been published yet."
+  Filters active + no rows → "No guides match your filters." + clear filters link.
+  Neither message reveals unpublished or hidden data.
+
+npm run build: PASS (Cloudflare server build, 1.56s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No article_type filter (column absent from schema v1).
+  No article junction table filters (article_countries, article_subjects, article_degree_levels).
+  No updated_at display.
+  No markdown rendering (no set:html).
+  No indexing_status behavior changes.
+  No pagination (hard limit 200 with over-limit notice).
+  No AI, no saved items, no user dashboard.
+  No admin page changes.
+  No new dependencies.
+  No migrations.
+  No SEO landing pages for filter combinations.
 
 Phase 12 — Public University Search & Filter Foundation (implementation complete):
 

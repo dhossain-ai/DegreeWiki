@@ -4,6 +4,163 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 13: Public Guides Search / Category Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Upgrade /guides from a basic published-guide list into a server-rendered guide discovery
+page with GET-form search and category filter.
+No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+no AI, no saved items, no service_role.
+
+---
+
+### Files Changed
+
+src/pages/guides/index.astro (full replacement):
+  Previous version: single Supabase query, card list, LIMIT 100, no filters, no search.
+  New version: GET filter form, 2 conditional filters, card result list, result count,
+  over-limit notice, two empty states, noindex logic, category lookup query.
+
+---
+
+### Schema Findings
+
+articles table (migration 008) confirmed columns available for filtering:
+  title (text) — searchable via ilike
+  summary (text, nullable) — searchable via ilike in .or()
+  article_category_id (uuid FK → article_categories) — filterable by UUID
+
+Column NOT present in schema v1 — no migration added:
+  article_type — does not exist
+
+GIN index confirmed: idx_articles_fts on to_tsvector('english', title || ' ' || coalesce(summary, ''))
+  Used ilike/.or() for consistency with existing project pattern; GIN available for future optimisation.
+
+article_categories table (migration 008):
+  id, name, slug, parent_category_id (self-ref), display_order, created_at, updated_at.
+  RLS: article_categories_select_public USING (true) — public anon SELECT always allowed.
+  Dropdown ordered by display_order ASC, then name ASC.
+
+---
+
+### Query Params Implemented
+
+  q        — articles.title ilike '%q%' OR articles.summary ilike '%q%'
+             via .or('title.ilike.%q%,summary.ilike.%q%')
+  category — articles.article_category_id = <uuid>
+
+---
+
+### Validation Behavior
+
+  q:       trim(), replace(/[,()]/g, ''), slice(0, 100). Empty string → undefined (filter absent).
+           Commas and parentheses removed to prevent breaking .or() string syntax.
+  category: UUID regex (/^[0-9a-f]{8}-...-[0-9a-f]{12}$/i). Invalid → undefined (filter absent).
+  All failures are silent — no error messages, no crashes, filter treated as absent.
+
+---
+
+### Supabase Query Strategy
+
+Lookup query (category dropdown):
+  supabase.from('article_categories').select('id, name')
+    .order('display_order', { ascending: true })
+    .order('name', { ascending: true })
+  RLS USING (true) — all categories always visible to anon. Failed lookup defaults to [].
+
+Articles main query:
+  supabase.from('articles')
+    .select('id, title, slug, summary, published_at, article_categories(id, name)',
+            { count: 'exact' })
+    .eq('content_status', 'published')
+    .order('published_at', { ascending: false, nullsFirst: false })
+    .order('title', { ascending: true })
+    .limit(201)
+  Filters chained conditionally:
+    if (q)          query = query.or(`title.ilike.%${q}%,summary.ilike.%${q}%`)
+    if (categoryId) query = query.eq('article_category_id', categoryId)
+  overLimit = (count ?? allRows.length) > 200
+  rows = allRows.slice(0, 200)
+
+Client: createClient(Astro.cookies, Astro.request). Anon key only. No service_role.
+
+---
+
+### Noindex Behavior
+
+  hasFilters = !!(q || categoryId)
+  <PublicLayout noindex={hasFilters}>
+  Filtered URLs (/guides?...) → <meta name="robots" content="noindex, follow">
+  Unfiltered /guides → no robots meta tag, remains indexable.
+  Uses existing noindex prop from Phase 10 (BaseLayout + PublicLayout). No layout changes needed.
+
+---
+
+### Build Result
+
+  npm run build: PASS
+  Cloudflare server build, 1.56s, zero errors, zero warnings (Sharp warning is pre-existing).
+
+---
+
+### service_role Result
+
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+1. GET /guides — blank form, all published guides listed (published_at DESC nulls last then title ASC), no noindex in source.
+2. GET /guides?q=visa — title/summary filter works, q field pre-filled, noindex in source.
+3. GET /guides?q=test%2Ccomma — comma stripped from q before query, no crash.
+4. GET /guides?q=test%28paren%29 — parentheses stripped from q before query, no crash.
+5. GET /guides?category=<valid-uuid> — category dropdown shows selection, results filtered.
+6. GET /guides?category=not-a-uuid — treated as no filter, page renders without error.
+7. GET /guides?q=visa&category=<uuid> — combined filters AND-chained correctly.
+8. GET /guides?q=&category= — empty params treated as absent, full list shown, no noindex.
+9. Result count shown correctly ("N guides found.").
+10. Over-200 notice appears when matching guides exceed 200.
+11. Empty result with filters → "No guides match your filters." + clear filters link.
+12. Empty result without filters → "No guides have been published yet."
+13. Guide card: category badge, published_at date, title link, summary all render correctly.
+14. Card with no category — no badge shown (no empty space).
+15. Card with no published_at — no date shown (no crash).
+16. Card with no summary — no summary line shown.
+17. Title link goes to /guides/[slug] (detail page — no regression).
+18. Clear filters link returns to /guides.
+19. Selected filter values preserved after form submit.
+20. GET /guides/[slug] — detail page loads without regression (no changes made).
+21. GET /programs — no regression.
+22. GET /scholarships — no regression.
+23. GET /universities — no regression.
+24. GET /admin/ unauthenticated — redirects to /login (no admin regression).
+
+---
+
+### Explicit Exclusions
+
+- No article_type filter — column does not exist in schema v1.
+- No article junction table filters (article_countries, article_subjects, article_degree_levels).
+- No updated_at display on cards.
+- No markdown rendering (no set:html).
+- No indexing_status behavior changes.
+- No React or client-side JavaScript of any kind.
+- No migrations (none required — all filter columns already exist with indexes).
+- No service_role in src/ (0 matches confirmed by PowerShell search).
+- No AI features.
+- No saved items or user dashboard.
+- No SEO landing pages for filter combinations.
+- No admin page changes (zero admin files touched).
+- No new npm dependencies.
+- No pagination UI (hard limit 200 with over-limit notice).
+- No /guides/[slug].astro changes.
+
+---
+
 ## 2026-06-16 - Phase 12: Public University Search & Filter Foundation
 
 Tool:
