@@ -4,6 +4,214 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 15: Basic SEO System
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add basic SEO infrastructure layer: robots.txt, dynamic sitemap.xml, SITE_URL helper,
+canonical URL support, and OpenGraph/Twitter metadata in BaseLayout/PublicLayout.
+Public page metadata cleanup for detail and list pages.
+No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+no AI, no service_role.
+
+---
+
+### Files Created
+
+public/robots.txt (new):
+  Static robots file served by Cloudflare from public/.
+  User-agent: * Allow: / Disallow: /admin/ /login /auth/ /api/
+  Sitemap: https://degreewiki.com/sitemap.xml (hardcoded; static file has no env access).
+
+src/lib/site.ts (new):
+  Exports SITE_URL = (import.meta.env.PUBLIC_SITE_URL ?? 'https://degreewiki.com').replace(/\/$/, '')
+  Consistent with existing PUBLIC_* env var convention.
+
+src/pages/sitemap.xml.ts (new):
+  Astro API endpoint (GET export). Returns application/xml; charset=utf-8 with Cache-Control: public, max-age=3600.
+  Uses createClient(context.cookies, context.request) — anon key, RLS enforced, no service_role.
+  Queries 4 tables in Promise.all: programs, scholarships, universities, articles.
+  Filter per table: content_status='published' AND indexing_status='index'.
+  Selects only: slug, updated_at.
+  Static URLs always included: /, /programs, /scholarships, /universities, /guides (no lastmod).
+  Detail URLs: /[type]/[slug] with updated_at date (YYYY-MM-DD) as lastmod.
+  Articles mapped to /guides/[slug].
+  XML-escaping applied to all loc and lastmod values via escXml() helper.
+  Per-table error isolation: error → console.error, defaults to [] for that table only.
+  Sitemap never returns a 500; always includes static URLs.
+
+---
+
+### Files Modified
+
+.env.example:
+  Added PUBLIC_SITE_URL= line.
+
+src/layouts/BaseLayout.astro:
+  Added props: canonical?, ogTitle?, ogDescription?, ogType?, ogUrl?
+  Renders <link rel="canonical"> only when canonical is provided.
+  New head tags: og:site_name, og:type (default 'website'), og:title (fallback to title),
+    og:description (only if ogDescription ?? description is set),
+    og:url (only if ogUrl ?? canonical is set).
+  Twitter tags: twitter:card=summary, twitter:title, twitter:description (if available).
+  No og:image, no twitter:image, no twitter:site.
+  All props optional; existing title/description/noindex behavior unchanged.
+  Admin pages (AdminLayout → BaseLayout) unaffected — all new props default to undefined.
+
+src/layouts/PublicLayout.astro:
+  Added same 5 new props to interface; passes all through to BaseLayout.
+
+src/pages/index.astro:
+  Added import SITE_URL from lib/site.
+  Added canonical={SITE_URL + '/'} to PublicLayout call.
+  OG title/description derived via BaseLayout fallbacks (no explicit ogTitle/ogDescription needed).
+
+src/pages/programs/index.astro:
+  Added import SITE_URL.
+  Added canonical={SITE_URL + '/programs'} to PublicLayout.
+  Canonical always points to clean base path — filtered URLs keep noindex={hasFilters} (existing).
+
+src/pages/scholarships/index.astro:
+  Same pattern as programs. canonical={SITE_URL + '/scholarships'}.
+
+src/pages/universities/index.astro:
+  Same pattern. canonical={SITE_URL + '/universities'}.
+
+src/pages/guides/index.astro:
+  Same pattern. canonical={SITE_URL + '/guides'}.
+
+src/pages/programs/[slug].astro:
+  Added import SITE_URL.
+  Added canonical_url, og_title, og_description to Supabase .select().
+  Computed: canonical = p.canonical_url || SITE_URL+'/programs/'+slug
+            ogTitle   = p.og_title || pageTitle
+            ogDesc    = p.og_description || pageDesc
+  PublicLayout call updated with canonical, ogTitle, ogDescription props.
+
+src/pages/scholarships/[slug].astro:
+  Same pattern. canonical = s.canonical_url || SITE_URL+'/scholarships/'+slug.
+
+src/pages/universities/[slug].astro:
+  Same pattern. canonical = u.canonical_url || SITE_URL+'/universities/'+slug.
+
+src/pages/guides/[slug].astro:
+  Same pattern. canonical = a.canonical_url || SITE_URL+'/guides/'+slug.
+
+---
+
+### robots Strategy
+
+Static public/robots.txt. Cloudflare serves directly from public/.
+Allows all user agents. Disallows /admin/, /login, /auth/, /api/.
+Sitemap URL hardcoded to production (static files cannot read env vars).
+
+---
+
+### sitemap Strategy
+
+Dynamic SSR endpoint — required because published record slugs are only known at request time.
+@astrojs/sitemap not used (generates static list; cannot query DB for published+index slugs).
+4 parallel Supabase queries, anon key, RLS enforced.
+Uniform filter: content_status='published' AND indexing_status='index' on all 4 tables.
+All records default to indexing_status='draft' — admin must explicitly set 'index' per record
+before it appears in the sitemap. This is intentional.
+If no records have indexing_status='index', sitemap returns only the 5 static URLs. Not an error.
+
+---
+
+### Canonical Strategy
+
+List/index pages: SITE_URL + path (no trailing slash except homepage which uses '/').
+Filtered list pages: same clean canonical — query params stripped. noindex meta unchanged.
+Detail pages: DB canonical_url if present, else SITE_URL + '/[type]/' + slug.
+Canonical rendered in BaseLayout as <link rel="canonical"> only when prop provided.
+Admin pages: canonical not passed → no canonical tag rendered. Correct.
+
+---
+
+### OG/Twitter Strategy
+
+og:site_name = DegreeWiki (always).
+og:type = 'website' for all pages in Phase 15.
+og:title fallback chain: ogTitle prop → title prop → 'DegreeWiki'.
+og:description rendered only when ogDescription ?? description is truthy.
+og:url rendered only when ogUrl ?? canonical is truthy.
+twitter:card = summary. twitter:title same as og:title. twitter:description same logic.
+No og:image or twitter:image (Cloudinary integration pending).
+No twitter:site (no handle confirmed).
+Detail pages: og_title, og_description queried from DB; fallback to pageTitle/pageDesc.
+List pages: no explicit ogTitle/ogDescription passed; BaseLayout uses title/description fallbacks.
+
+---
+
+### Indexing/noindex Behavior
+
+robots.txt: coarse-grained path-level directives for crawlers.
+sitemap.xml: only content_status='published' AND indexing_status='index' rows.
+noindex meta: filtered list pages still emit <meta name="robots" content="noindex, follow"> via existing noindex prop. Unchanged.
+Clean canonical on filtered pages: canonical always points to the unfiltered URL even when noindex is true.
+
+---
+
+### Environment Variable Update
+
+PUBLIC_SITE_URL added to .env.example (empty).
+Set PUBLIC_SITE_URL=http://localhost:4321 in local .env.local (not committed).
+Set PUBLIC_SITE_URL=https://degreewiki.com in Cloudflare Pages dashboard for production.
+SITE_URL constant falls back to 'https://degreewiki.com' if env var absent — safe for CI builds.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 1.42s, zero errors, zero warnings relevant to Phase 15).
+
+---
+
+### service_role Search Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+1. GET /robots.txt — file exists, correct text/plain content, Disallow rules present, Sitemap line present.
+2. GET /sitemap.xml — 200 OK, Content-Type application/xml, valid XML, <urlset> root,
+   5 static URLs present (/, /programs, /scholarships, /universities, /guides).
+3. Detail URLs appear in sitemap only for records with content_status='published' AND indexing_status='index'.
+   If no such records exist, sitemap returns only 5 static URLs — not an error.
+4. View source on homepage (/) — <link rel="canonical"> present, og:site_name, og:type, og:title,
+   og:url, twitter:card, twitter:title all present.
+5. View source on /programs (no filters) — <link rel="canonical" href="...degreewiki.com/programs">,
+   no noindex meta tag.
+6. View source on /programs?q=test — canonical still points to .../programs (clean path),
+   <meta name="robots" content="noindex, follow"> still present.
+7. View source on a published program detail page — canonical tag, og:title, og:description
+   (if description set), og:url, twitter tags all present.
+8. View source on /admin — no canonical tag rendered (admin pages unaffected).
+9. npm run build second run — still passes.
+
+---
+
+### Explicit Exclusions
+
+No og:image or twitter:image (Cloudinary pending).
+No twitter:site handle.
+No schema.org / JSON-LD structured data.
+No RSS feed or <link rel="alternate">.
+No hreflang / alternate language links.
+No og:type="article" for guides (deferred — requires article:published_time).
+No sitemap index file.
+No admin CRUD changes.
+No migrations.
+No new npm dependencies.
+No SEO landing page generation.
+
+---
+
 ## 2026-06-16 - Phase 14: Public Home Page Foundation
 
 Tool:

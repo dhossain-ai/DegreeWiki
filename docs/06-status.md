@@ -4,9 +4,90 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 15 — TBD.
+Phase 16 — TBD.
 
-Phase 14 — Public Home Page Foundation — implementation complete, pending manual verification.
+Phase 15 — Basic SEO System — implementation complete, pending manual verification.
+
+## Last Completed Work
+
+Phase 15 — Basic SEO System (implementation complete):
+
+- Added basic SEO infrastructure layer for DegreeWiki's public routes.
+  No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+  no service_role, no AI, no schema.org structured data.
+
+Files created:
+  public/robots.txt — static robots file: allows public crawling, disallows /admin/, /login,
+    /auth/, /api/, points Sitemap to https://degreewiki.com/sitemap.xml.
+  src/lib/site.ts — exports SITE_URL constant using PUBLIC_SITE_URL env var with fallback
+    to 'https://degreewiki.com'. Trailing slash stripped. Consistent with PUBLIC_* env pattern.
+  src/pages/sitemap.xml.ts — dynamic Astro API endpoint. Queries all 4 content tables in
+    parallel via existing createClient(context.cookies, context.request) with anon key / RLS.
+    Includes static URLs (/, /programs, /scholarships, /universities, /guides) plus detail URLs
+    filtered to content_status='published' AND indexing_status='index'. updated_at date used
+    as lastmod for detail URLs; omitted for static URLs. All loc/lastmod values XML-escaped.
+    Returns Content-Type: application/xml; charset=utf-8 with Cache-Control: public, max-age=3600.
+    Per-table error isolation: failed tables log to console.error and default to [] — sitemap
+    never crashes, static URLs always returned.
+
+Files modified:
+  .env.example — added PUBLIC_SITE_URL= line.
+  src/layouts/BaseLayout.astro — added canonical, ogTitle, ogDescription, ogType, ogUrl props.
+    Renders <link rel="canonical"> when canonical provided. Renders og:site_name, og:type,
+    og:title, og:description (if available), og:url (if available). Renders twitter:card=summary,
+    twitter:title, twitter:description (if available). All OG/Twitter props have sensible
+    fallbacks to title/description. No og:image, no twitter:image, no twitter:site.
+    Existing noindex behavior unchanged.
+  src/layouts/PublicLayout.astro — passes all new SEO props through to BaseLayout.
+  src/pages/index.astro — added SITE_URL import; added canonical={SITE_URL + '/'} to PublicLayout.
+  src/pages/programs/index.astro — added SITE_URL import; added canonical={SITE_URL + '/programs'}.
+    Canonical always points to clean path regardless of active filters. noindex behavior unchanged.
+  src/pages/scholarships/index.astro — same pattern, canonical={SITE_URL + '/scholarships'}.
+  src/pages/universities/index.astro — same pattern, canonical={SITE_URL + '/universities'}.
+  src/pages/guides/index.astro — same pattern, canonical={SITE_URL + '/guides'}.
+  src/pages/programs/[slug].astro — added SITE_URL import; added canonical_url, og_title,
+    og_description to Supabase select; computes canonical = canonical_url || SITE_URL+'/programs/'+slug,
+    ogTitle = og_title || pageTitle, ogDesc = og_description || pageDesc; passes to PublicLayout.
+  src/pages/scholarships/[slug].astro — same pattern.
+  src/pages/universities/[slug].astro — same pattern.
+  src/pages/guides/[slug].astro — same pattern.
+
+Sitemap indexing behavior:
+  All 4 content tables (programs, scholarships, universities, articles) require
+  content_status='published' AND indexing_status='index' to appear in the sitemap.
+  indexing_status defaults to 'draft' on all tables — records must be explicitly set to 'index'
+  by an admin before appearing in the sitemap. This is intentional: it gives the admin explicit
+  crawl-inclusion control per record.
+
+Canonical strategy:
+  List pages and homepage: SITE_URL + clean path (no query params).
+  Filtered list pages: canonical still points to the clean path (/programs not /programs?q=...).
+  Detail pages: db.canonical_url if set, otherwise SITE_URL + '/[type]/' + slug.
+
+OG/Twitter strategy:
+  ogTitle falls back to title (including — DegreeWiki suffix) when DB og_title is absent.
+  ogDescription falls back to description (which itself falls back to seo_description/summary).
+  og:type is 'website' for all pages in Phase 15.
+  og:image and twitter:image deferred (Cloudinary integration pending).
+
+Environment variable:
+  PUBLIC_SITE_URL added to .env.example. Set in .env.local for dev, Cloudflare Pages
+  dashboard for production. Falls back to 'https://degreewiki.com' if unset.
+
+npm run build: PASS (Cloudflare server build, 1.42s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No og:image or twitter:image (Cloudinary not yet integrated).
+  No twitter:site handle.
+  No schema.org / JSON-LD structured data.
+  No RSS feed.
+  No hreflang.
+  No og:type="article" for guides (requires article:published_time metadata — deferred).
+  No sitemap index (single sitemap file for now).
+  No admin CRUD changes.
+  No migrations.
+  No new npm dependencies.
 
 ## Last Completed Work
 
