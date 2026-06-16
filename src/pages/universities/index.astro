@@ -1,0 +1,50 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import { createClient } from '../../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+const { data: universities, error } = await supabase
+  .from('universities')
+  .select('id, name, slug, ranking_summary, countries(name), cities(name)')
+  .eq('content_status', 'published')
+  .order('name')
+  .limit(100)
+
+if (error) console.error('universities list error:', error.message)
+const rows = universities ?? []
+---
+<PublicLayout title="Universities — DegreeWiki">
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">Universities</h1>
+    {rows.length === 0 ? (
+      <p class="text-gray-500 text-sm">No results yet.</p>
+    ) : (
+      <div class="overflow-x-auto rounded-lg border border-gray-200">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3">University</th>
+              <th class="px-4 py-3">Country</th>
+              <th class="px-4 py-3">City</th>
+              <th class="px-4 py-3">Ranking</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((u: any) => (
+              <tr class="border-b border-gray-100 hover:bg-gray-50 last:border-b-0">
+                <td class="px-4 py-3">
+                  <a href={`/universities/${u.slug}`} class="text-blue-600 hover:underline font-medium">
+                    {u.name}
+                  </a>
+                </td>
+                <td class="px-4 py-3 text-gray-600">{u.countries?.name ?? '—'}</td>
+                <td class="px-4 py-3 text-gray-600">{u.cities?.name ?? '—'}</td>
+                <td class="px-4 py-3 text-gray-500">{u.ranking_summary ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+</PublicLayout>
