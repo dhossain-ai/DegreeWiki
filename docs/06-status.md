@@ -4,13 +4,70 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 08 — Articles / Guides CRUD Foundation — implementation complete, pending manual verification.
+Phase 10 — TBD.
 
-Articles list/new/edit built with server-side Astro form POST handling. 8 fields across
-5 form sections. No new validate.ts helpers or migrations needed. No service_role in src,
-no secrets committed. npm run build passed (Cloudflare output, 6.74s, zero errors).
+Phase 09 — Public Read-Only Content Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 09 — Public Read-Only Content Foundation (implementation complete):
+
+- RLS preflight confirmed on all 9 tables before any code was written.
+  All public SELECT policies exist and apply to the anon role (no TO clause).
+  No migrations required.
+- Created src/layouts/PublicLayout.astro — wraps BaseLayout, includes PublicNav.
+- Created src/components/public/PublicNav.astro — horizontal nav: DegreeWiki logo +
+  links to /universities, /programs, /scholarships, /guides. Active state via Astro.url.pathname.
+- Created src/pages/404.astro — clean 404 page using PublicLayout with links to all public sections.
+- Modified src/layouts/BaseLayout.astro — added optional description prop →
+  injects <meta name="description"> when present. Additive change; admin pages unaffected.
+- Modified src/pages/index.astro — added public nav links above auth block.
+- Created src/pages/universities/index.astro — published universities list (name, country, city, ranking).
+- Created src/pages/universities/[slug].astro — university detail (facts + ranking + overview).
+- Created src/pages/programs/index.astro — published programs list (title, university link, degree, study mode).
+- Created src/pages/programs/[slug].astro — program detail (full facts + tuition + curriculum + requirements).
+- Created src/pages/scholarships/index.astro — published scholarships list (name, type, provider, amount, deadline).
+- Created src/pages/scholarships/[slug].astro — scholarship detail (full facts + overview + eligibility).
+- Created src/pages/guides/index.astro — published articles list (card layout: category badge, date, excerpt).
+- Created src/pages/guides/[slug].astro — article detail (category, date, summary, content as plain text paragraphs).
+
+Public routes added:
+  /universities          — list
+  /universities/[slug]   — detail
+  /programs              — list
+  /programs/[slug]       — detail
+  /scholarships          — list
+  /scholarships/[slug]   — detail
+  /guides                — list  (public name for articles)
+  /guides/[slug]         — detail
+
+Key implementation decisions:
+  All queries filter content_status = 'published'. Missing or unpublished slug returns
+  new Response(null, { status: 404 }). Hard LIMIT 100 on all listing pages (no pagination).
+  No set:html anywhere. Article content rendered as plain-text paragraphs. english_requirements
+  (confirmed real JSONB column on programs) rendered with JSON.stringify in <pre> when non-null.
+  admission_requirements (TEXT) rendered as whitespace-pre-wrap paragraph.
+  published_at on articles is nullable — rendered gracefully with no crash.
+  All Supabase embedded joins (countries, cities, universities, degree_levels, subjects,
+  article_categories) may return null if the joined row is unpublished — all handled with
+  optional chaining and ?? fallbacks.
+
+RLS preflight: PASS. All 9 tables confirmed.
+npm run build: PASS (Cloudflare output, 1.42s, zero errors).
+Get-ChildItem src -Recurse -File | Select-String "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No search/filter/pagination UI.
+  No media/Cloudinary.
+  No AI.
+  No saved items or user dashboard.
+  No comments or report form.
+  No admin page changes.
+  No new dependencies.
+  No migrations.
+  No junction table display (scholarship_countries, article_subjects, etc.).
+  No author display on articles (author_user_id join deferred).
+  No rich text/markdown rendering.
 
 Phase 08 — Articles / Guides CRUD Foundation (implementation complete):
 
@@ -267,7 +324,7 @@ Phase 01 — Database Schema v1 (complete):
 
 ## Active Branch
 
-feature/phase-08-articles-crud-foundation
+main
 
 ## Migration Files Created
 
@@ -318,13 +375,22 @@ the admin dashboard server endpoints.
 
 ## Next Steps
 
-1. Manually verify all three article routes: anonymous redirect, student 403, super_admin access.
-2. Test article create: required field errors, slug auto-gen, duplicate slug, successful create.
-3. Verify created article row has all fields saved correctly in Supabase (including author_user_id set).
-4. Test create with content_status = published: confirm published_at is set in DB.
-5. Test article edit: prefill, save changes, 404 on nonexistent ID.
-6. Verify category dropdown shows all 7 seeded categories on create and edit forms.
-7. Test category validation: confirm article_category_id submitted as null when empty.
-8. Verify re-publishing a published article does not reset published_at.
-9. Merge feature/phase-08-articles-crud-foundation to main after manual verification.
-10. Begin Phase 09: TBD (SEO fields, junction table editors, or public guide pages).
+Phase 09 manual test checklist (verify before calling done):
+1. GET /universities — 200, table renders, "No results yet." if empty.
+2. GET /universities/[published-slug] — 200, name/country/city/overview visible.
+3. GET /universities/[draft-slug] — 404 response.
+4. GET /universities/does-not-exist — 404 response.
+5. GET /programs — 200, university link works.
+6. GET /programs/[published-slug] — 200, tuition and curriculum fields present.
+7. GET /scholarships — 200, deadline and amount columns visible.
+8. GET /scholarships/[published-slug] — 200, eligibility and URLs present.
+9. GET /guides — 200, card list with category badge and date.
+10. GET /guides/[published-slug] — 200, content paragraphs render, no set:html.
+11. GET /guides/[slug-with-null-published-at] — 200, no date shown, no crash.
+12. Any list page with empty table — 200, "No results yet." message.
+13. GET /admin/ unauthenticated — redirects to /login (no regression).
+14. <title> on detail page — uses seo_title if set, else name/title.
+15. <meta name="description"> — present when seo_description or fallback exists.
+16. Unauthenticated user can view all 8 public routes without auth redirect.
+
+Begin Phase 10 after Phase 09 manual verification passes.

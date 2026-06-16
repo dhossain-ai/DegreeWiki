@@ -4,6 +4,294 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 09: Public Read-Only Content Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add safe public read-only pages for universities, programs, scholarships, and guides/articles.
+No admin changes, no migrations, no service_role, no React, no client-side JS, no new dependencies.
+
+---
+
+### Preflight: Schema Columns and RLS Verification
+
+Confirmed actual columns from migrations 004–008 before writing any code.
+
+universities (migration 005):
+  id, name, slug (UNIQUE), country_id, city_id, official_url, founded_year, student_count,
+  ranking_summary, overview, content_status, verification_status, indexing_status,
+  data_completeness_score, source_confidence_score, last_verified_at, next_review_due_at,
+  logo_id, cover_image_id, og_image_id, seo_title, seo_description, seo_h1, canonical_url,
+  og_title, og_description, created_at, updated_at.
+
+programs (migration 006):
+  id, slug (UNIQUE), title, university_id, campus_id, country_id, city_id, degree_level_id,
+  degree_award, primary_subject_id, duration_months, study_mode, delivery_mode,
+  language_of_instruction, tuition_min_amount, tuition_max_amount, tuition_currency,
+  tuition_period, tuition_notes, application_fee_amount, application_fee_currency,
+  application_fee_notes, application_url, official_url, admission_requirements (TEXT),
+  english_requirements (JSONB — confirmed real column), gpa_requirements,
+  curriculum_summary, career_outcomes, content_status, verification_status, indexing_status,
+  data_completeness_score, source_confidence_score, last_verified_at, next_review_due_at,
+  og_image_id, seo_title, seo_description, seo_h1, canonical_url, og_title, og_description,
+  created_at, updated_at.
+
+scholarships (migration 007):
+  id, slug (UNIQUE), name, scholarship_type, provider_name, provider_type, funding_type,
+  application_type, overview, eligibility_summary, amount_min, amount_max, currency,
+  coverage_notes, deadline (date), deadline_text, official_url, application_url, provider_url,
+  content_status, verification_status, indexing_status, data_completeness_score,
+  source_confidence_score, last_verified_at, next_review_due_at, og_image_id,
+  seo_title, seo_description, seo_h1, canonical_url, og_title, og_description,
+  created_at, updated_at.
+
+articles (migration 008):
+  id, slug (UNIQUE), title, summary, content, author_user_id, article_category_id,
+  featured_image_id, og_image_id, content_status, verification_status, indexing_status,
+  data_completeness_score, source_confidence_score, published_at (nullable),
+  seo_title, seo_description, seo_h1, canonical_url, og_title, og_description,
+  created_at, updated_at.
+
+article_categories (migration 008):
+  id, name, slug (UNIQUE), parent_category_id (self-ref), display_order,
+  created_at, updated_at.
+
+countries (migration 004):
+  id, iso2, iso3, name, slug, continent, overview, content_status, verification_status,
+  indexing_status, data_completeness_score, source_confidence_score, last_verified_at,
+  next_review_due_at, og_image_id, seo_title, seo_description, seo_h1, canonical_url,
+  og_title, og_description, created_at, updated_at.
+
+cities (migration 004):
+  id, name, slug, country_id, content_status, created_at, updated_at.
+  Note: slug is unique within a country (composite UNIQUE), not globally.
+
+degree_levels (migration 004):
+  id, code (UNIQUE), name, display_order, is_active.
+  No content_status column — uses is_active boolean instead.
+
+subjects (migration 004):
+  id, name, slug (UNIQUE), parent_subject_id (self-ref), display_order, content_status,
+  created_at, updated_at.
+
+Confirmed RLS public SELECT policies (all PASS — no stop condition triggered):
+
+  universities       → universities_select_published      USING (content_status = 'published')  no TO clause
+  programs           → programs_select_published           USING (content_status = 'published')  no TO clause
+  scholarships       → scholarships_select_published       USING (content_status = 'published')  no TO clause
+  articles           → articles_select_published           USING (content_status = 'published')  no TO clause
+  article_categories → article_categories_select_public   USING (true)                          no TO clause
+  countries          → countries_select_published          USING (content_status = 'published')  no TO clause
+  cities             → cities_select_published             USING (content_status = 'published')  no TO clause
+  degree_levels      → degree_levels_select_active         USING (is_active = true)              no TO clause
+  subjects           → subjects_select_published           USING (content_status = 'published')  no TO clause
+
+No migrations needed. Implementation proceeded.
+
+---
+
+### Files Created
+
+src/components/public/PublicNav.astro:
+  Horizontal nav bar. Site name on left, four nav links on right.
+  Active link detection via Astro.url.pathname.startsWith(link.href).
+  Links: /universities, /programs, /scholarships, /guides.
+
+src/layouts/PublicLayout.astro:
+  Wraps BaseLayout. Includes PublicNav above <main>. Passes title + description through.
+
+src/pages/404.astro:
+  PublicLayout-based 404 page. Centered layout: large 404 number, h1, links to all public sections.
+
+src/pages/universities/index.astro:
+  Fetches published universities. Embedded joins: countries(name), cities(name).
+  Table columns: University (link to detail), Country, City, Ranking.
+  Empty state: "No results yet." LIMIT 100.
+
+src/pages/universities/[slug].astro:
+  Fetches single published university by slug. Returns 404 if not found or not published.
+  Facts grid (dl): Country, City, Founded, Students, Official Website.
+  Prose sections: Rankings, Overview.
+  Back link: ← All Universities.
+  SEO: title from seo_title ?? name; description from seo_description ?? ranking_summary.
+
+src/pages/programs/index.astro:
+  Fetches published programs. Embedded joins: universities(name, slug), degree_levels(name).
+  Table columns: Program (link), University (link to /universities/[slug]), Degree Level, Study Mode.
+  LIMIT 100.
+
+src/pages/programs/[slug].astro:
+  Fetches single published program by slug. Returns 404 if not found or not published.
+  Embedded joins: universities(name, slug), degree_levels(name), subjects(name),
+  countries(name), cities(name).
+  Facts grid: Degree Level, Degree Award, Subject, Country, City, Study Mode, Delivery, Language,
+  Duration, Tuition, GPA Requirement, Official Page, Apply.
+  Prose sections: Tuition Notes, Application Fee, Curriculum, Career Outcomes,
+  Admission Requirements, English Requirements.
+  admission_requirements (TEXT): rendered as whitespace-pre-wrap paragraph.
+  english_requirements (JSONB): rendered with JSON.stringify(null, 2) in <pre> block
+  only when non-null and Object.keys().length > 0.
+  SEO: title from seo_title ?? title; description from seo_description.
+
+src/pages/scholarships/index.astro:
+  Fetches published scholarships.
+  Table columns: Scholarship (link), Type (formatted label), Provider, Funding (amount range), Deadline.
+  LIMIT 100.
+
+src/pages/scholarships/[slug].astro:
+  Fetches single published scholarship by slug. Returns 404 if not found or not published.
+  Facts grid: Type, Funding Type, Provider, Provider Type, How to Apply, Amount, Deadline,
+  Official Page, Apply, Provider Website.
+  Prose sections: Overview, Eligibility, What's Covered, Deadline Notes.
+  deadline rendered as formatted date (en-US locale) with fallback to deadline_text.
+  SEO: title from seo_title ?? name; description from seo_description ?? eligibility_summary.
+
+src/pages/guides/index.astro:
+  Fetches published articles ordered by published_at DESC. Embedded join: article_categories(name).
+  Card layout: category badge, date, title (link to detail), summary excerpt.
+  LIMIT 100.
+
+src/pages/guides/[slug].astro:
+  Fetches single published article by slug. Returns 404 if not found or not published.
+  Embedded join: article_categories(name, slug).
+  Category badge + published date above h1.
+  summary rendered as blockquote-style aside.
+  content split on \n\n → array of <p> paragraphs. Plain text only. No set:html.
+  published_at nullable — rendered gracefully; no date shown if null.
+  SEO: title from seo_title ?? title; description from seo_description ?? summary.
+
+---
+
+### Files Modified
+
+src/layouts/BaseLayout.astro:
+  Added optional description?: string prop.
+  Injects <meta name="description" content={description} /> when present.
+  Additive change — AdminLayout never passes description, no effect on admin pages.
+
+src/pages/index.astro:
+  Added publicLinks nav row (Universities, Programs, Scholarships, Guides)
+  above the auth-conditional block. Visible to all visitors.
+
+---
+
+### Routes Created
+
+  /universities          → src/pages/universities/index.astro      (list, no auth)
+  /universities/[slug]   → src/pages/universities/[slug].astro     (detail, no auth)
+  /programs              → src/pages/programs/index.astro           (list, no auth)
+  /programs/[slug]       → src/pages/programs/[slug].astro         (detail, no auth)
+  /scholarships          → src/pages/scholarships/index.astro      (list, no auth)
+  /scholarships/[slug]   → src/pages/scholarships/[slug].astro     (detail, no auth)
+  /guides                → src/pages/guides/index.astro             (list, no auth)
+  /guides/[slug]         → src/pages/guides/[slug].astro           (detail, no auth)
+  /404                   → src/pages/404.astro                      (error page, no auth)
+
+---
+
+### Columns Actually Used Per Page
+
+universities list:    id, name, slug, ranking_summary, countries(name), cities(name)
+universities detail:  + official_url, founded_year, student_count, overview,
+                        seo_title, seo_description
+
+programs list:        id, title, slug, study_mode,
+                      universities(name, slug), degree_levels(name)
+programs detail:      + degree_award, duration_months, delivery_mode,
+                        language_of_instruction, tuition_min_amount, tuition_max_amount,
+                        tuition_currency, tuition_period, tuition_notes,
+                        application_fee_amount, application_fee_currency,
+                        application_fee_notes, application_url, official_url,
+                        admission_requirements, english_requirements, gpa_requirements,
+                        curriculum_summary, career_outcomes, seo_title, seo_description,
+                        subjects(name), countries(name), cities(name)
+
+scholarships list:    id, name, slug, scholarship_type, provider_name, funding_type,
+                      amount_min, amount_max, currency, deadline
+scholarships detail:  + provider_type, application_type, overview, eligibility_summary,
+                        coverage_notes, deadline_text, official_url, application_url,
+                        provider_url, seo_title, seo_description
+
+guides list:          id, title, slug, summary, published_at, article_categories(name)
+guides detail:        + content, seo_title, seo_description, article_categories(name, slug)
+
+---
+
+### RLS / Public Filtering Strategy
+
+Every query against a content table includes .eq('content_status', 'published').
+Lookup tables (countries, cities, degree_levels, subjects, article_categories) are reached
+only as embedded joins on published parent rows — never queried independently on public pages.
+
+Embedded joins that fail RLS (e.g. city is draft) return null for that nested object.
+All templates handle nulls with optional chaining (?.) and ?? fallbacks or conditional rendering.
+
+Missing or unpublished slug → return new Response(null, { status: 404 }).
+Returns a true HTTP 404 with empty body. The 404.astro page is served by Astro/Cloudflare
+for route-not-found cases (no matching .astro file).
+
+---
+
+### Build Result
+
+npm run build: PASS
+Output: Cloudflare server build, 1.42s, zero errors, zero warnings.
+
+---
+
+### service_role Search Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role"
+→ (no output) — 0 matches across all src/ files.
+
+---
+
+### Manual Test Checklist
+
+- GET /universities → 200, table with published rows or "No results yet."
+- GET /universities/[published-slug] → 200, name, country, city, overview visible
+- GET /universities/[draft-slug] → 404 response
+- GET /universities/does-not-exist → 404 response
+- GET /programs → 200, university link renders as anchor to /universities/[slug]
+- GET /programs/[published-slug] → 200, tuition, curriculum, admission requirements visible
+- GET /programs/[slug-with-english-requirements] → JSON block visible in <pre>
+- GET /scholarships → 200, deadline column and amount range visible
+- GET /scholarships/[published-slug] → 200, eligibility summary and URLs present
+- GET /guides → 200, card list with category badge and date
+- GET /guides/[published-slug] → 200, content rendered as plain text paragraphs, no HTML tags
+- GET /guides/[slug-with-null-published-at] → 200, no date shown, no crash
+- Any list page with no published records → 200, "No results yet." message
+- GET /404 → 404 page renders with links to all public sections
+- GET /admin/ unauthenticated → redirects to /login (no admin regression)
+- GET / authenticated → shows email, admin link, and public nav links
+- GET / unauthenticated → shows "Sign in" link and public nav links
+- <title> on detail page → seo_title if set, else name/title
+- <meta name="description"> → present when seo_description or fallback exists
+- All 8 public routes accessible without auth (no redirect to /login)
+
+---
+
+### Explicit Exclusions
+
+- No search, filter, or sort UI.
+- No pagination controls (hard LIMIT 100 on all listing pages).
+- No media or Cloudinary work (logo_id, cover_image_id, featured_image_id ignored).
+- No AI features.
+- No saved items, user dashboard, or student profile.
+- No comments or report-wrong-info form.
+- No admin page changes (zero admin files touched).
+- No new npm dependencies.
+- No migrations.
+- No junction table display (scholarship_countries, article_subjects, etc.).
+- No author name display on articles (author_user_id join deferred).
+- No rich text or markdown rendering for article content.
+- No og: tags, structured data, sitemap, or robots.txt.
+- No /countries, /cities, /subjects, or /degree-levels public routes.
+
+---
+
 ## 2026-06-16 - Phase 08: Articles / Guides CRUD Foundation
 
 Tool:
