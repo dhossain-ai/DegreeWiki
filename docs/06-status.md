@@ -4,11 +4,82 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 11 — TBD.
+Phase 12 — TBD.
 
-Phase 10 — Public Program Search & Filter Foundation — implementation complete, pending manual verification.
+Phase 11 — Public Scholarship Search & Filter Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 11 — Public Scholarship Search & Filter Foundation (implementation complete):
+
+- Upgraded /scholarships from a basic published-scholarship list into a server-rendered
+  scholarship discovery page with GET-form search and filters. No admin changes, no migrations,
+  no new dependencies, no React, no client-side JS, no service_role.
+- Replaced src/pages/scholarships/index.astro — full rewrite with filter form, conditional
+  Supabase query, result cards, result count, over-limit notice, and empty states.
+
+Filters implemented (7 total, all via GET query params):
+  q               — scholarships.name ilike '%q%' OR provider_name ilike '%q%'
+  scholarship_type — scholarships.scholarship_type = <enum>
+  provider_type    — scholarships.provider_type = <enum>
+  funding_type     — scholarships.funding_type = <enum>
+  application_type — scholarships.application_type = <enum>
+  currency         — scholarships.currency ilike '%currency%'
+  deadline         — deadline=upcoming → scholarships.deadline >= today (UTC date-only ISO)
+
+Enum values confirmed from migration 007 CHECK constraints:
+  scholarship_type: full, partial, merit, need_based, government, institutional, other
+  provider_type:    government, university, private_foundation, corporate, ngo, other
+  funding_type:     full_tuition, partial_tuition, living_stipend, travel, research, full_funding, other
+  application_type: direct, university_portal, nomination, embassy, other
+
+Validation:
+  q: trim, remove commas and parentheses, max 100 chars.
+  currency: trim, uppercase, remove non A-Z chars, max 10 chars.
+  Enum params: validated against allowed set — invalid values treated as absent.
+  deadline param: only 'upcoming' is accepted; any other value treated as absent.
+  Invalid filters never crash the page; they are silently dropped before the query.
+
+Supabase query strategy:
+  Single query with { count: 'exact' } and .limit(201).
+  .eq('content_status', 'published') always applied (belt-and-suspenders + planner hint).
+  .order('deadline', { ascending: true, nullsFirst: false }) then .order('name', { ascending: true }).
+  Filters chained conditionally: if (param) query = query.eq/ilike/or/gte(...).
+  q search uses .or('name.ilike.%q%,provider_name.ilike.%q%').
+  Uses existing createClient(Astro.cookies, Astro.request) — anon key, RLS enforced.
+
+Result UI:
+  Card layout. Each card shows: name (link to /scholarships/[slug]),
+  provider_name, scholarship_type badge, provider_type badge, funding_type badge,
+  application_type badge, deadline badge, amount range (right-aligned).
+  Result count shown above results. Over-200 notice when more than 200 match.
+  Selected filter values preserved after form submit.
+  Clear filters link shown when any filter is active.
+
+noindex behavior:
+  Filtered URLs (/scholarships?...) render <meta name="robots" content="noindex, follow">.
+  Unfiltered /scholarships has no robots meta tag and remains indexable.
+  Uses existing noindex prop support from Phase 10 (BaseLayout + PublicLayout).
+
+Empty states:
+  No filters + no rows → "No scholarships have been published yet."
+  Filters active + no rows → "No scholarships match your filters." + clear filters link.
+  Neither message reveals unpublished or hidden data.
+
+npm run build: PASS (Cloudflare server build, 1.45s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No pagination (hard limit 200 with over-limit notice).
+  No amount-based filtering (cross-currency comparison unreliable without conversion).
+  No deadline_before filter.
+  No junction table filters (scholarship_countries, subjects, degree_levels, etc.).
+  No overview in q search (name + provider_name only).
+  No AI, no saved items, no user dashboard.
+  No admin page changes.
+  No new dependencies.
+  No migrations.
+  No SEO landing pages for filter combinations.
 
 Phase 10 — Public Program Search & Filter Foundation (implementation complete):
 

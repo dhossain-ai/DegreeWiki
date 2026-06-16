@@ -4,6 +4,174 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 11: Public Scholarship Search & Filter Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Upgrade /scholarships from a basic published-scholarship list into a server-rendered scholarship
+discovery page with GET-form search and filters.
+No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+no AI, no saved items, no service_role.
+
+---
+
+### Files Changed
+
+src/pages/scholarships/index.astro (full replacement):
+  Previous version: single Supabase query, 5-column table, LIMIT 100, no filters, no search.
+  New version: GET filter form, 7 conditional filters, card result list, result count,
+  over-limit notice, two empty states, noindex logic.
+
+---
+
+### Enum Values Confirmed
+
+From supabase/migrations/007_scholarships.sql CHECK constraints:
+
+  scholarship_type: full | partial | merit | need_based | government | institutional | other
+  provider_type:    government | university | private_foundation | corporate | ngo | other
+  funding_type:     full_tuition | partial_tuition | living_stipend | travel | research | full_funding | other
+  application_type: direct | university_portal | nomination | embassy | other
+
+---
+
+### Query Params Implemented
+
+  q               — scholarships.name ilike '%q%' OR provider_name ilike '%q%'
+                    (overview excluded per approved scope)
+  scholarship_type — scholarships.scholarship_type = <enum>
+  provider_type    — scholarships.provider_type = <enum>
+  funding_type     — scholarships.funding_type = <enum>
+  application_type — scholarships.application_type = <enum>
+  currency         — scholarships.currency ilike '%currency%'
+  deadline         — deadline=upcoming → scholarships.deadline >= today (UTC YYYY-MM-DD)
+
+---
+
+### Validation Behavior
+
+  q:             trim(), replace(/[,()]/g, ''), slice(0, 100). Empty string → undefined.
+                 Commas and parentheses removed to prevent breaking .or() string syntax.
+  currency:      trim(), toUpperCase(), replace(/[^A-Z]/g, ''), slice(0, 10). Empty → undefined.
+  scholarship_type, provider_type, funding_type, application_type:
+                 validated against allowlist arrays. Unknown value → undefined (filter absent).
+  deadline:      only the exact string 'upcoming' is accepted; anything else → filter absent.
+  All failures are silent — no error messages, no crashes, filter treated as absent.
+
+---
+
+### Supabase Query Strategy
+
+Scholarships query:
+  supabase.from('scholarships').select(..., { count: 'exact' })
+    .eq('content_status', 'published')
+    .order('deadline', { ascending: true, nullsFirst: false })
+    .order('name',     { ascending: true })
+    .limit(201)
+  Filters chained conditionally after the base query:
+    if (q)               query = query.or(`name.ilike.%${q}%,provider_name.ilike.%${q}%`)
+    if (scholarshipType) query = query.eq('scholarship_type', scholarshipType)
+    if (providerType)    query = query.eq('provider_type', providerType)
+    if (fundingType)     query = query.eq('funding_type', fundingType)
+    if (applicationType) query = query.eq('application_type', applicationType)
+    if (currency)        query = query.ilike('currency', `%${currency}%`)
+    if (upcomingOnly)    query = query.gte('deadline', todayISO)
+
+  { count: 'exact' } returns total count alongside data (no second round-trip).
+  .limit(201) fetches one extra row to detect over-limit without a second query.
+  allRows.slice(0, 200) used for rendering; overLimit = (count ?? allRows.length) > 200.
+  todayISO derived server-side: UTC full year + zero-padded month + zero-padded day.
+  nullsFirst: false supported by Supabase JS v2 — no deviation required.
+  Multi-column .or() syntax confirmed compatible with Supabase PostgREST client.
+
+Client: createClient(Astro.cookies, Astro.request) throughout. Anon key only. No service_role.
+No lookup queries needed — all filter options are static enum values, not DB-driven.
+
+---
+
+### Noindex Behavior
+
+  hasFilters = true when any of the 7 params resolves to a valid, non-empty value.
+  <PublicLayout noindex={hasFilters}> passes through to BaseLayout.
+  BaseLayout renders <meta name="robots" content="noindex, follow"> when noindex=true.
+  GET /scholarships (no params) → no robots meta tag, page is indexable.
+  GET /scholarships?<any-filter> → noindex, follow tag present in <head>.
+  Uses existing noindex prop wired in Phase 10 — no layout changes needed.
+  All other public pages unaffected. All admin pages unaffected.
+
+---
+
+### Build Result
+
+npm run build: PASS
+Output: Cloudflare server build, 1.45s, zero errors, zero warnings.
+
+---
+
+### service_role Search Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role"
+→ (no output) — 0 matches across all src/ files.
+
+---
+
+### Manual Test Checklist
+
+- GET /scholarships — blank form, all published scholarships listed (deadline ASC nulls last
+  then name ASC), no noindex tag in page source
+- GET /scholarships?q=merit — name/provider_name filter works, q field pre-filled,
+  noindex, follow present in page source
+- GET /scholarships?q=test%2Ccomma — comma stripped from q before query, no crash
+- GET /scholarships?scholarship_type=full — type dropdown shows "Full" selected, results filtered
+- GET /scholarships?scholarship_type=bogus — treated as no filter, all scholarships shown
+- GET /scholarships?provider_type=government — dropdown shows "Government" selected
+- GET /scholarships?funding_type=full_tuition — dropdown shows "Full Tuition" selected
+- GET /scholarships?application_type=direct — dropdown shows "Direct" selected
+- GET /scholarships?currency=USD — currency field pre-filled with "USD", results filtered
+- GET /scholarships?currency=usd123! — sanitized to "USD" (uppercase, non-alpha removed)
+- GET /scholarships?deadline=upcoming — dropdown shows "Upcoming only", deadline filter applied
+- GET /scholarships?deadline=bogus — treated as no filter (upcomingOnly = false)
+- All 7 filters active simultaneously — combined filtering works, clear link visible
+- Result count shows "N scholarships found." correctly
+- Over-200 notice appears when matching scholarships exceed 200
+- Empty result with filters → "No scholarships match your filters." + clear filters link
+- Empty result without filters → "No scholarships have been published yet."
+- Scholarship card: name link, provider_name, scholarship_type badge (blue), provider_type
+  badge (purple), funding_type badge (green), application_type badge (gray),
+  deadline badge (amber), amount range (right-aligned) all render correctly
+- Card with no provider_name — no empty line shown
+- Card with no deadline and no deadline_text — no deadline badge shown
+- Card with no amount fields — no amount shown
+- Name link goes to /scholarships/[slug] (detail page — no regression)
+- Clear filters link returns to plain /scholarships
+- Selected filter values preserved after form submit
+- GET /scholarships/[slug] — detail page loads without regression (no changes made)
+- GET /programs — programs page unaffected (no regression)
+- GET /admin/ unauthenticated — redirects to /login (no admin regression)
+
+---
+
+### Explicit Exclusions
+
+- No React or client-side JavaScript of any kind.
+- No migrations (none required — all filter columns already exist with indexes).
+- No service_role in src/ (0 matches confirmed by PowerShell search).
+- No AI features.
+- No saved items or user dashboard.
+- No SEO landing pages for filter combinations.
+- No admin page changes (zero admin files touched).
+- No new npm dependencies.
+- No pagination UI (hard limit 200 with over-limit notice).
+- No overview in q search (name + provider_name only, per approved scope).
+- No amount-based filters (cross-currency comparison unreliable without conversion).
+- No deadline_before filter.
+- No junction table filters (scholarship_countries, scholarship_subjects, etc.).
+- No /scholarships/[slug].astro changes.
+
+---
+
 ## 2026-06-16 - Phase 10: Public Program Search & Filter Foundation
 
 Tool:
