@@ -4,6 +4,192 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 10: Public Program Search & Filter Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Upgrade /programs from a basic published-program list into a server-rendered program
+discovery page with GET-form search and filters.
+No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+no AI, no saved items, no service_role.
+
+---
+
+### Files Changed
+
+src/layouts/BaseLayout.astro (modified):
+  Added optional noindex?: boolean prop to Props interface.
+  Renders <meta name="robots" content="noindex, follow"> when noindex is true.
+  Additive change — no effect on any existing page that does not pass the prop.
+
+src/layouts/PublicLayout.astro (modified):
+  Added noindex?: boolean prop to Props interface.
+  Passes noindex through to BaseLayout.
+  Additive change — all existing public and admin pages unaffected.
+
+src/pages/programs/index.astro (full replacement):
+  Previous version: single Supabase query, 4-column table, LIMIT 100, no filters.
+  New version: GET filter form, 10 conditional filters, parallel lookup queries,
+  card result list, result count, over-limit notice, two empty states, noindex logic.
+
+---
+
+### Enum Values Confirmed
+
+From supabase/migrations/006_programs.sql CHECK constraints:
+
+  study_mode:    full_time | part_time | online | hybrid
+  delivery_mode: on_campus | online | hybrid | distance
+  tuition_period: per_year | per_semester | total | per_credit
+    (used in tuition display only — not a filter)
+
+---
+
+### Query Params Implemented
+
+  q             — programs.title ilike '%q%'
+  country       — programs.country_id = <uuid>
+  city          — programs.city_id = <uuid>
+  university    — programs.university_id = <uuid>
+  degree_level  — programs.degree_level_id = <uuid>
+  subject       — programs.primary_subject_id = <uuid>
+  study_mode    — programs.study_mode = <enum>
+  delivery_mode — programs.delivery_mode = <enum>
+  language      — programs.language_of_instruction ilike '%language%'
+  tuition_max   — programs.tuition_max_amount <= value
+
+---
+
+### Validation Behavior
+
+  q:             trim(), slice(0, 100). Empty string → undefined (filter absent).
+  language:      trim(), slice(0, 80). Empty string → undefined (filter absent).
+  UUID params:   validated against /^[0-9a-f]{8}-[0-9a-f]{4}-...-[0-9a-f]{12}$/i.
+                 Non-matching values → undefined (filter absent, no crash).
+  study_mode:    validated against ['full_time','part_time','online','hybrid'].
+                 Unknown value → undefined (filter absent).
+  delivery_mode: validated against ['on_campus','online','hybrid','distance'].
+                 Unknown value → undefined (filter absent).
+  tuition_max:   parseFloat(). Must be isFinite && > 0.
+                 NaN, negative, zero → undefined (filter absent).
+  All failures are silent — no error messages, no crashes, filter treated as absent.
+
+---
+
+### Supabase Query Strategy
+
+Programs query:
+  supabase.from('programs').select(..., { count: 'exact' })
+    .eq('content_status', 'published')
+    .order('title')
+    .limit(201)
+  Filters chained conditionally after the base query:
+    if (q)              query = query.ilike('title', `%${q}%`)
+    if (countryId)      query = query.eq('country_id', countryId)
+    if (cityId)         query = query.eq('city_id', cityId)
+    if (universityId)   query = query.eq('university_id', universityId)
+    if (degreeLevelId)  query = query.eq('degree_level_id', degreeLevelId)
+    if (subjectId)      query = query.eq('primary_subject_id', subjectId)
+    if (studyMode)      query = query.eq('study_mode', studyMode)
+    if (deliveryMode)   query = query.eq('delivery_mode', deliveryMode)
+    if (language)       query = query.ilike('language_of_instruction', `%${language}%`)
+    if (tuitionMax != null) query = query.lte('tuition_max_amount', tuitionMax)
+
+  { count: 'exact' } returns total count alongside data (no second round-trip).
+  .limit(201) fetches one extra row to detect over-limit without a second query.
+  allRows.slice(0, 200) used for rendering; overLimit = (count ?? allRows.length) > 200.
+
+Lookup queries (parallel via Promise.all):
+  countries:     .select('id, name').order('name')
+  cities:        .select('id, name').order('name')
+  universities:  .select('id, name, slug').order('name')
+  degree_levels: .select('id, name').order('display_order')
+  subjects:      .select('id, name').order('name')
+  All use the anon client — RLS limits each to published/active rows automatically.
+  Failed lookups default to [] (data ?? []) — page does not crash on lookup error.
+
+Client: createClient(Astro.cookies, Astro.request) throughout. Anon key only. No service_role.
+
+---
+
+### Noindex Behavior
+
+  hasFilters = true when any of the 10 params resolves to a valid, non-empty value.
+  <PublicLayout noindex={hasFilters}> passes through to BaseLayout.
+  BaseLayout renders <meta name="robots" content="noindex, follow"> when noindex=true.
+  GET /programs (no params) → no robots meta tag, page is indexable.
+  GET /programs?<any-filter> → noindex, follow tag present in <head>.
+  All other public pages (universities, guides, scholarships, detail pages) are
+  unaffected — they never pass the noindex prop.
+  All admin pages are unaffected — they use AdminLayout, not PublicLayout.
+
+---
+
+### Build Result
+
+npm run build: PASS
+Output: Cloudflare server build, 1.32s, zero errors, zero warnings.
+
+---
+
+### service_role Search Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role"
+→ (no output) — 0 matches across all src/ files.
+
+---
+
+### Manual Test Checklist
+
+- GET /programs — blank form, all published programs listed alphabetically,
+  no noindex tag in page source
+- GET /programs?q=science — title filter works, q field pre-filled,
+  noindex, follow present in page source
+- GET /programs?country=<valid-uuid> — country dropdown shows selection, results filtered
+- GET /programs?country=not-a-uuid — treated as no filter, page renders without error
+- GET /programs?study_mode=full_time — dropdown shows "Full time" selected
+- GET /programs?study_mode=bogus — treated as no filter, all programs shown
+- GET /programs?delivery_mode=on_campus — dropdown shows "On campus" selected
+- GET /programs?tuition_max=20000 — filters correctly; note visible below input field
+- GET /programs?tuition_max=-50 — treated as no filter, tuition_max field empty
+- GET /programs?tuition_max=abc — treated as no filter
+- GET /programs?language=English — results filtered, language field pre-filled
+- All 10 filters active simultaneously — combined filtering works, clear link visible
+- Result count shows "N programs found." correctly
+- Over-200 notice appears when matching programs exceed 200
+- Empty result with filters → "No programs match your filters." + clear filters link
+- Empty result without filters → "No programs have been published yet."
+- Program card: title link, university link, country/city, degree badge, subject badge,
+  study mode badge, delivery badge, language badge, tuition range all render correctly
+- University link goes to /universities/[slug]
+- Title link goes to /programs/[slug] (detail page loads without regression)
+- Clear filters link returns to plain /programs
+- Selected filter values preserved after form submit
+- GET /programs/[slug] — detail page unaffected (no regression)
+- GET /admin/ unauthenticated — redirects to /login (no admin regression)
+
+---
+
+### Explicit Exclusions
+
+- No React or client-side JavaScript of any kind.
+- No migrations (none required — all filter columns already exist with indexes).
+- No service_role in src/ (0 matches confirmed by PowerShell search).
+- No AI features.
+- No saved items or user dashboard.
+- No SEO landing pages for filter combinations.
+- No admin page changes (zero admin files touched).
+- No new npm dependencies.
+- No pagination UI (hard limit 200 with over-limit notice).
+- No program_subjects junction for multi-subject filtering (primary_subject_id only).
+- No city-scoped-by-country dropdown dependency (global city list, deferred to Phase 11).
+- No cross-table full-text search (title ilike only — university name search deferred).
+- No /programs/[slug].astro changes.
+
+---
+
 ## 2026-06-16 - Phase 09: Public Read-Only Content Foundation
 
 Tool:

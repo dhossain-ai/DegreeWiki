@@ -4,11 +4,89 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 10 — TBD.
+Phase 11 — TBD.
 
-Phase 09 — Public Read-Only Content Foundation — implementation complete, pending manual verification.
+Phase 10 — Public Program Search & Filter Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 10 — Public Program Search & Filter Foundation (implementation complete):
+
+- Upgraded /programs from a basic published-program list into a server-rendered program
+  discovery page with GET-form search and filters. No admin changes, no migrations,
+  no new dependencies, no React, no client-side JS, no service_role.
+- Modified src/layouts/BaseLayout.astro — added optional noindex?: boolean prop.
+  Renders <meta name="robots" content="noindex, follow"> when true. Additive; no effect
+  on existing pages that do not pass the prop.
+- Modified src/layouts/PublicLayout.astro — added noindex?: boolean prop, passes through
+  to BaseLayout. Additive; all existing public pages unaffected.
+- Replaced src/pages/programs/index.astro — full rewrite with filter form, conditional
+  Supabase query, result cards, result count, over-limit notice, and empty states.
+
+Filters implemented (10 total, all via GET query params):
+  q             — programs.title ilike '%q%'
+  country       — programs.country_id = <uuid>
+  city          — programs.city_id = <uuid>
+  university    — programs.university_id = <uuid>
+  degree_level  — programs.degree_level_id = <uuid>
+  subject       — programs.primary_subject_id = <uuid>
+  study_mode    — programs.study_mode = <enum>
+  delivery_mode — programs.delivery_mode = <enum>
+  language      — programs.language_of_instruction ilike '%language%'
+  tuition_max   — programs.tuition_max_amount <= value
+
+Enum values confirmed from migration 006 CHECK constraints:
+  study_mode:    full_time, part_time, online, hybrid
+  delivery_mode: on_campus, online, hybrid, distance
+
+Validation:
+  q: trim, max 100 chars. language: trim, max 80 chars.
+  UUID params: regex validated — invalid values treated as absent.
+  Enum params: validated against allowed set — invalid values treated as absent.
+  tuition_max: parseFloat, must be finite and > 0 — invalid values treated as absent.
+  Invalid filters never crash the page; they are silently dropped before the query.
+
+Supabase query strategy:
+  Single query with { count: 'exact' } and .limit(201).
+  .eq('content_status', 'published') always applied (belt-and-suspenders + planner hint).
+  Filters chained conditionally: if (param) query = query.eq/ilike/lte(...).
+  Lookup queries (countries, cities, universities, degree_levels, subjects) run in
+  Promise.all in parallel. Failed lookups default to [] — page does not crash.
+  Uses existing createClient(Astro.cookies, Astro.request) — anon key, RLS enforced.
+
+Result UI:
+  Card layout. Each card shows: title (link to /programs/[slug]),
+  university (link to /universities/[slug]), country/city, degree level badge,
+  subject badge, study mode badge, delivery mode badge, language badge, tuition range.
+  Result count shown above results. Over-200 notice when more than 200 match.
+  Selected filter values preserved after form submit.
+  Clear filters link shown when any filter is active.
+  Tuition note: "Programs without tuition data may be excluded."
+
+noindex behavior:
+  Filtered URLs (/programs?...) render <meta name="robots" content="noindex, follow">.
+  Unfiltered /programs has no robots meta tag and remains indexable.
+
+Empty states:
+  No filters + no rows → "No programs have been published yet."
+  Filters active + no rows → "No programs match your filters." + clear filters link.
+  Neither message reveals unpublished or hidden data.
+
+npm run build: PASS (Cloudflare server build, 1.32s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No pagination (hard limit 200 with over-limit notice).
+  No program_subjects junction for multi-subject filtering (primary_subject_id only).
+  No city-scoped-by-country dropdown dependency (global city list for Phase 10).
+  No full-text search across university names (title only via ilike).
+  No media/Cloudinary.
+  No AI.
+  No saved items or user dashboard.
+  No admin page changes.
+  No new dependencies.
+  No migrations.
+  No SEO landing pages for filter combinations.
 
 Phase 09 — Public Read-Only Content Foundation (implementation complete):
 
@@ -375,22 +453,30 @@ the admin dashboard server endpoints.
 
 ## Next Steps
 
-Phase 09 manual test checklist (verify before calling done):
-1. GET /universities — 200, table renders, "No results yet." if empty.
-2. GET /universities/[published-slug] — 200, name/country/city/overview visible.
-3. GET /universities/[draft-slug] — 404 response.
-4. GET /universities/does-not-exist — 404 response.
-5. GET /programs — 200, university link works.
-6. GET /programs/[published-slug] — 200, tuition and curriculum fields present.
-7. GET /scholarships — 200, deadline and amount columns visible.
-8. GET /scholarships/[published-slug] — 200, eligibility and URLs present.
-9. GET /guides — 200, card list with category badge and date.
-10. GET /guides/[published-slug] — 200, content paragraphs render, no set:html.
-11. GET /guides/[slug-with-null-published-at] — 200, no date shown, no crash.
-12. Any list page with empty table — 200, "No results yet." message.
-13. GET /admin/ unauthenticated — redirects to /login (no regression).
-14. <title> on detail page — uses seo_title if set, else name/title.
-15. <meta name="description"> — present when seo_description or fallback exists.
-16. Unauthenticated user can view all 8 public routes without auth redirect.
+Phase 10 manual test checklist (verify before calling done):
+1. GET /programs — blank form, all published programs listed, no noindex in page source.
+2. GET /programs?q=science — title filter works, q field pre-filled, noindex in source.
+3. GET /programs?country=<valid-uuid> — country dropdown shows selection, results filtered.
+4. GET /programs?country=not-a-uuid — treated as no filter, page does not error.
+5. GET /programs?study_mode=full_time — dropdown shows "Full time" selected.
+6. GET /programs?study_mode=bogus — treated as no filter.
+7. GET /programs?delivery_mode=on_campus — dropdown shows "On campus" selected.
+8. GET /programs?tuition_max=20000 — filters correctly, note visible below input.
+9. GET /programs?tuition_max=-50 — treated as no filter (field shows empty).
+10. GET /programs?tuition_max=abc — treated as no filter.
+11. GET /programs?language=English — results filtered, field pre-filled.
+12. All 10 filters active simultaneously — combined filtering works.
+13. Result count shown correctly ("N programs found.").
+14. Over-200 notice appears if enough data exists.
+15. Empty result with filters → "No programs match your filters." + clear filters link.
+16. Empty result without filters → "No programs have been published yet."
+17. Program card: title link, university link, location, degree badge, subject badge,
+    mode badges, language badge, tuition range all render correctly.
+18. University link goes to /universities/[slug].
+19. Title link goes to /programs/[slug] (detail page — no regression).
+20. Clear filters link returns to /programs.
+21. Selected filter values preserved after form submit.
+22. GET /programs/[slug] — detail page loads without regression.
+23. GET /admin/ unauthenticated — redirects to /login (no admin regression).
 
-Begin Phase 10 after Phase 09 manual verification passes.
+Begin Phase 11 after Phase 10 manual verification passes.
