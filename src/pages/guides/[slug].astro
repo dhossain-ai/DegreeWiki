@@ -1,5 +1,6 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import SourceBox from '../../components/public/SourceBox.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -10,7 +11,7 @@ const { data: article } = await supabase
   .from('articles')
   .select(`
     id, title, slug, summary, content, published_at,
-    verification_status, updated_at,
+    verification_status, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
     article_categories(id, name, slug)
@@ -96,6 +97,13 @@ const categoryName = a.article_categories?.name ?? null
     ) : (
       !a.summary && <p class="text-gray-400 text-sm">No content available.</p>
     )}
+
+    <SourceBox
+      verificationStatus={a.verification_status}
+      lastVerifiedAt={null}
+      officialUrl={null}
+      sourceConfidenceScore={a.source_confidence_score ?? null}
+    />
 
     {updatedAt && (
       <p class="text-xs text-gray-400 mt-10 mb-6">Last updated: {updatedAt}</p>

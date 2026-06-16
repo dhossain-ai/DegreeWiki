@@ -1,5 +1,6 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import SourceBox from '../../components/public/SourceBox.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -11,7 +12,7 @@ const { data: university } = await supabase
   .select(`
     id, name, slug, official_url, founded_year, student_count,
     ranking_summary, overview,
-    verification_status, updated_at,
+    verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
     countries(name), cities(name)
@@ -40,6 +41,7 @@ function formatDate(d: string | null): string | null {
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
+const lastVerifiedAt = formatDate(u.last_verified_at)
 const pageTitle = u.seo_title || u.name
 const pageDesc  = u.seo_description || u.ranking_summary || undefined
 const canonical = u.canonical_url || `${SITE_URL}/universities/${slug}`
@@ -116,6 +118,13 @@ const updatedAt = formatDate(u.updated_at)
         </a>
       </div>
     )}
+
+    <SourceBox
+      verificationStatus={u.verification_status}
+      lastVerifiedAt={lastVerifiedAt}
+      officialUrl={u.official_url ?? null}
+      sourceConfidenceScore={u.source_confidence_score ?? null}
+    />
 
     {updatedAt && (
       <p class="text-xs text-gray-400 mb-6">Last updated: {updatedAt}</p>

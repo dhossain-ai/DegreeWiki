@@ -1,5 +1,6 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import SourceBox from '../../components/public/SourceBox.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -15,7 +16,7 @@ const { data: scholarship } = await supabase
     amount_min, amount_max, currency, coverage_notes,
     deadline, deadline_text,
     official_url, application_url, provider_url,
-    verification_status, updated_at,
+    verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description
   `)
@@ -57,8 +58,9 @@ function formatDate(d: string | null): string | null {
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-const amount    = formatAmount()
-const deadline  = formatDate(s.deadline) ?? s.deadline_text ?? null
+const amount         = formatAmount()
+const deadline       = formatDate(s.deadline) ?? s.deadline_text ?? null
+const lastVerifiedAt = formatDate(s.last_verified_at)
 const pageTitle = s.seo_title || s.name
 const pageDesc  = s.seo_description || s.eligibility_summary || undefined
 const canonical = s.canonical_url || `${SITE_URL}/scholarships/${slug}`
@@ -175,6 +177,13 @@ const updatedAt = formatDate(s.updated_at)
         )}
       </div>
     )}
+
+    <SourceBox
+      verificationStatus={s.verification_status}
+      lastVerifiedAt={lastVerifiedAt}
+      officialUrl={s.official_url ?? s.provider_url ?? null}
+      sourceConfidenceScore={s.source_confidence_score ?? null}
+    />
 
     {updatedAt && (
       <p class="text-xs text-gray-400 mb-6">Last updated: {updatedAt}</p>

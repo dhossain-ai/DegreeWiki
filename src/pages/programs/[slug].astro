@@ -1,5 +1,6 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import SourceBox from '../../components/public/SourceBox.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -16,7 +17,7 @@ const { data: program } = await supabase
     application_url, official_url,
     admission_requirements, english_requirements, gpa_requirements,
     curriculum_summary, career_outcomes,
-    verification_status, updated_at,
+    verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
     universities(name, slug),
@@ -103,6 +104,7 @@ const hasEnglishReqs = p.english_requirements != null &&
   typeof p.english_requirements === 'object' &&
   !Array.isArray(p.english_requirements)
 
+const lastVerifiedAt = formatDate(p.last_verified_at)
 const pageTitle = p.seo_title || p.title
 const pageDesc  = p.seo_description || undefined
 const canonical = p.canonical_url || `${SITE_URL}/programs/${slug}`
@@ -308,6 +310,13 @@ const updatedAt = formatDate(p.updated_at)
         )}
       </div>
     )}
+
+    <SourceBox
+      verificationStatus={p.verification_status}
+      lastVerifiedAt={lastVerifiedAt}
+      officialUrl={p.official_url ?? null}
+      sourceConfidenceScore={p.source_confidence_score ?? null}
+    />
 
     {updatedAt && (
       <p class="text-xs text-gray-400 mb-6">Last updated: {updatedAt}</p>
