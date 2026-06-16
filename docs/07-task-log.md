@@ -4,6 +4,182 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 17: Source / Verification Display Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add a lightweight Source & Verification display box to all four public detail pages using
+existing entity row fields only. No admin changes, no migrations, no new dependencies,
+no React, no client-side JS, no AI, no service_role, no set:html, no schema.org data.
+
+---
+
+### Files Changed
+
+src/components/public/SourceBox.astro (created)
+src/pages/programs/[slug].astro (modified)
+src/pages/scholarships/[slug].astro (modified)
+src/pages/universities/[slug].astro (modified)
+src/pages/guides/[slug].astro (modified)
+
+---
+
+### Source Table Decision
+
+data_sources, source_snapshots, verification_events, and data_quality_checks are
+intentionally NOT queried in any public page. All four tables (migration 009) have
+RLS policies that block anonymous and regular authenticated user access — SELECT
+requires view_data_quality, manage_data_sources, or super_admin. These tables contain
+internal admin-only provenance and data-quality data. Only entity row columns are used.
+
+---
+
+### Fields Used Per Entity
+
+programs:
+  verification_status (existing), last_verified_at (added to SELECT),
+  source_confidence_score (added to SELECT), official_url (existing, passed as officialUrl).
+
+scholarships:
+  verification_status (existing), last_verified_at (added to SELECT),
+  source_confidence_score (added to SELECT),
+  official_url ?? provider_url (existing, passed as officialUrl).
+
+universities:
+  verification_status (existing), last_verified_at (added to SELECT),
+  source_confidence_score (added to SELECT), official_url (existing, passed as officialUrl).
+
+articles (guides):
+  verification_status (existing), source_confidence_score (added to SELECT).
+  lastVerifiedAt=null — articles table (migration 008) has no last_verified_at column.
+  officialUrl=null — articles have no official URL field.
+
+data_completeness_score: NOT fetched and NOT displayed — internal editorial metric.
+
+---
+
+### SourceBox Component Behavior
+
+File: src/components/public/SourceBox.astro
+
+Props:
+  verificationStatus: string | null
+  lastVerifiedAt: string | null       (pre-formatted display string from formatDate())
+  officialUrl: string | null
+  sourceConfidenceScore: number | null
+
+Status line mapping (omitted when null/unknown):
+  verified           → "Verified by DegreeWiki"
+  partially_verified → "Partially verified"
+  source_conflict    → "Source conflict under review"
+  outdated           → "May need updating"
+  needs_review       → "Needs review"
+  unverified         → "Not yet verified"
+
+Last verified line: shown only when lastVerifiedAt is non-null.
+Source confidence line: shown only when sourceConfidenceScore > 0.
+  ≥75 → High, ≥40 → Medium, 1–39 → Low.
+Official source link: shown only when officialUrl is non-null; target="_blank" rel="noopener noreferrer".
+Disclaimer: always shown — "Always confirm important details — including deadlines, fees,
+  and eligibility requirements — directly with the official university, scholarship provider,
+  or government/source website before applying."
+No set:html used anywhere.
+
+---
+
+### Page Integration Summary
+
+All four pages:
+  SourceBox rendered after main content/CTA sections, before the "Last updated" line
+  and the bottom back-navigation link.
+  Existing near-title verification badge (green/yellow/orange badge map) unchanged.
+  Existing "Last updated:" line position unchanged.
+  The `lastVerifiedAt` value is computed from formatDate(entity.last_verified_at)
+  in each page's frontmatter before being passed to SourceBox.
+
+---
+
+### Public Wording / Disclaimer
+
+Status labels use plain English, not internal enum values.
+Source confidence signal uses plain High/Medium/Low text — no score integers exposed.
+Disclaimer is factual, non-alarming, and consistent with standard educational publishing practice.
+Official source link uses the generic label "Official source ↗" on all entities
+to keep the component entity-type-agnostic.
+
+---
+
+### SEO / 404 Preservation
+
+Phase 15 canonical/ogTitle/ogDesc computation and PublicLayout call signature: unchanged on all pages.
+content_status='published' filter preserved on all entity queries.
+All four pages still return new Response(null, { status: 404 }) when entity not found.
+SourceBox is rendered in the template body, after the 404 guard — never reached for 404 paths.
+No new Supabase queries introduced.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 1.55s, zero errors, zero warnings).
+
+---
+
+### service_role Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+1. GET /programs/[published-slug] → SourceBox renders; heading "Source & Verification" visible.
+2. Programs: verified entity → "Status: Verified by DegreeWiki" line visible.
+3. Programs: unverified entity → "Status: Not yet verified" line visible.
+4. Programs: entity with last_verified_at set → "Last verified: [date]" line visible.
+5. Programs: entity with last_verified_at null → no "Last verified" line.
+6. Programs: entity with source_confidence_score=0 → no "Source confidence" line.
+7. Programs: entity with source_confidence_score=80 → "Source confidence: High".
+8. Programs: entity with official_url set → "Official source ↗" link visible, opens in new tab.
+9. Programs: entity with official_url=null → no "Official source" link.
+10. Programs: disclaimer always visible in SourceBox regardless of entity state.
+11. GET /scholarships/[published-slug] → SourceBox renders; provider_url used as fallback
+    when official_url is null.
+12. GET /universities/[published-slug] → SourceBox renders.
+13. GET /guides/[published-slug] → SourceBox renders; no "Last verified" line;
+    no "Official source" link; disclaimer present.
+14. All pages: existing near-title verification badge unchanged (green/yellow/orange).
+15. All pages: "Last updated:" line still present below SourceBox.
+16. All pages: back links still present.
+17. GET /programs/nonexistent-slug → 404 (no regression).
+18. GET /scholarships/nonexistent-slug → 404 (no regression).
+19. GET /universities/nonexistent-slug → 404 (no regression).
+20. GET /guides/nonexistent-slug → 404 (no regression).
+21. View page source on any detail page → <link rel="canonical"> correct (SEO not regressed).
+22. GET /admin/ unauthenticated → redirects to /login (no admin regression).
+
+---
+
+### Explicit Exclusions
+
+No list/search page changes.
+No admin CRUD changes.
+No migrations.
+No new npm dependencies.
+No React or client-side JS.
+No AI.
+No data_sources, source_snapshots, verification_events, or data_quality_checks queries in public pages.
+No data_completeness_score displayed publicly.
+No schema.org / JSON-LD structured data.
+No report form, saved items, or user dashboard.
+No media/Cloudinary work.
+No markdown renderer or set:html.
+No service_role in src/ (0 matches confirmed).
+
+---
+
 ## 2026-06-16 - Phase 16: Public Detail Page Polish
 
 Tool:

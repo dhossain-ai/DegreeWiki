@@ -4,11 +4,75 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 17 — TBD.
+Phase 18 — TBD.
 
-Phase 16 — Public Detail Page Polish — implementation complete, pending manual verification.
+Phase 17 — Source / Verification Display Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 17 — Source / Verification Display Foundation (implementation complete):
+
+- Added a lightweight Source & Verification box to all four public detail pages.
+  No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+  no AI, no service_role, no set:html, no schema.org structured data.
+  Internal source/data-quality tables (data_sources, source_snapshots, verification_events,
+  data_quality_checks) intentionally not queried — all are admin-only per RLS.
+
+Files created (1):
+  src/components/public/SourceBox.astro
+
+Files modified (4):
+  src/pages/programs/[slug].astro
+  src/pages/scholarships/[slug].astro
+  src/pages/universities/[slug].astro
+  src/pages/guides/[slug].astro
+
+SourceBox component:
+  Shared Astro component with props: verificationStatus, lastVerifiedAt, officialUrl,
+  sourceConfidenceScore. Renders a small bordered gray box (border-gray-200, bg-gray-50).
+  Status line: verified → "Verified by DegreeWiki", partially_verified → "Partially verified",
+  source_conflict → "Source conflict under review", outdated → "May need updating",
+  needs_review → "Needs review", unverified → "Not yet verified", null/unknown → omitted.
+  Last verified line: shown only when lastVerifiedAt is non-null.
+  Source confidence: shown only when sourceConfidenceScore > 0.
+    ≥75 → High, ≥40 → Medium, 1–39 → Low.
+  Official source link: shown only when officialUrl is non-null; opens in _blank.
+  Disclaimer: always shown — "Always confirm important details — including deadlines, fees,
+    and eligibility requirements — directly with the official university, scholarship provider,
+    or government/source website before applying."
+  Placement: after main content/CTA sections, before existing "Last updated" line and back link.
+  Existing near-title verification badge unchanged.
+
+Entity-level fields used per entity:
+  programs:      verification_status (existing), last_verified_at (added), source_confidence_score (added)
+                 official_url (existing, passed as officialUrl)
+  scholarships:  verification_status (existing), last_verified_at (added), source_confidence_score (added)
+                 official_url ?? provider_url (existing, passed as officialUrl)
+  universities:  verification_status (existing), last_verified_at (added), source_confidence_score (added)
+                 official_url (existing, passed as officialUrl)
+  articles:      verification_status (existing), source_confidence_score (added)
+                 lastVerifiedAt=null (articles table has no last_verified_at column)
+                 officialUrl=null (articles have no official URL field)
+
+Source table decision:
+  data_sources, source_snapshots, verification_events, data_quality_checks —
+  intentionally NOT queried in public pages. All four tables have RLS policies that
+  block anonymous and regular authenticated user access. These are internal admin-only
+  data-quality tables. Only entity row fields are used.
+
+npm run build: PASS (Cloudflare server build, 1.55s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No list/search page changes.
+  No admin CRUD changes.
+  No migrations.
+  No new npm dependencies.
+  No React or client-side JS.
+  No data_sources/verification_events/data_quality_checks queries in public pages.
+  No data_completeness_score display (internal metric, not shown publicly).
+  No schema.org structured data.
+  No report form, saved items, or user dashboard.
 
 Phase 16 — Public Detail Page Polish (implementation complete):
 
