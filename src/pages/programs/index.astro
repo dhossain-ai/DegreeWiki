@@ -3,55 +3,309 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
-const { data: programs, error } = await supabase
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function parseUUID(v: string | null): string | undefined {
+  return v && UUID_RE.test(v) ? v : undefined
+}
+
+const STUDY_MODES    = ['full_time', 'part_time', 'online', 'hybrid'] as const
+const DELIVERY_MODES = ['on_campus', 'online', 'hybrid', 'distance'] as const
+
+const sp            = Astro.url.searchParams
+const q             = sp.get('q')?.trim().slice(0, 100) || undefined
+const countryId     = parseUUID(sp.get('country'))
+const cityId        = parseUUID(sp.get('city'))
+const universityId  = parseUUID(sp.get('university'))
+const degreeLevelId = parseUUID(sp.get('degree_level'))
+const subjectId     = parseUUID(sp.get('subject'))
+const rawSM         = sp.get('study_mode') ?? ''
+const studyMode     = (STUDY_MODES as readonly string[]).includes(rawSM) ? rawSM : undefined
+const rawDM         = sp.get('delivery_mode') ?? ''
+const deliveryMode  = (DELIVERY_MODES as readonly string[]).includes(rawDM) ? rawDM : undefined
+const language      = sp.get('language')?.trim().slice(0, 80) || undefined
+const rawTM         = parseFloat(sp.get('tuition_max') ?? '')
+const tuitionMax    = isFinite(rawTM) && rawTM > 0 ? rawTM : undefined
+
+const hasFilters = !!(q || countryId || cityId || universityId || degreeLevelId ||
+  subjectId || studyMode || deliveryMode || language || tuitionMax)
+
+const [
+  { data: countriesData },
+  { data: citiesData },
+  { data: universitiesData },
+  { data: degreeLevelsData },
+  { data: subjectsData },
+] = await Promise.all([
+  supabase.from('countries').select('id, name').order('name'),
+  supabase.from('cities').select('id, name').order('name'),
+  supabase.from('universities').select('id, name, slug').order('name'),
+  supabase.from('degree_levels').select('id, name').order('display_order'),
+  supabase.from('subjects').select('id, name').order('name'),
+])
+
+const countries    = countriesData ?? []
+const cities       = citiesData ?? []
+const univs        = universitiesData ?? []
+const degreeLevels = degreeLevelsData ?? []
+const subjects     = subjectsData ?? []
+
+let query = supabase
   .from('programs')
-  .select('id, title, slug, study_mode, universities(name, slug), degree_levels(name)')
+  .select(
+    `id, title, slug,
+     study_mode, delivery_mode, language_of_instruction,
+     tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+     universities(name, slug),
+     degree_levels(name),
+     countries(name),
+     cities(name),
+     subjects(name)`,
+    { count: 'exact' }
+  )
   .eq('content_status', 'published')
   .order('title')
-  .limit(100)
+  .limit(201)
 
+if (q)              query = query.ilike('title', `%${q}%`)
+if (countryId)      query = query.eq('country_id', countryId)
+if (cityId)         query = query.eq('city_id', cityId)
+if (universityId)   query = query.eq('university_id', universityId)
+if (degreeLevelId)  query = query.eq('degree_level_id', degreeLevelId)
+if (subjectId)      query = query.eq('primary_subject_id', subjectId)
+if (studyMode)      query = query.eq('study_mode', studyMode)
+if (deliveryMode)   query = query.eq('delivery_mode', deliveryMode)
+if (language)       query = query.ilike('language_of_instruction', `%${language}%`)
+if (tuitionMax != null) query = query.lte('tuition_max_amount', tuitionMax)
+
+const { data, count, error } = await query
 if (error) console.error('programs list error:', error.message)
-const rows = programs ?? []
+
+const allRows   = data ?? []
+const overLimit = (count ?? allRows.length) > 200
+const rows      = allRows.slice(0, 200)
+
+function fmtMode(v: string | null | undefined): string {
+  return v ? v.replace(/_/g, ' ') : ''
+}
+
+function fmtTuition(p: any): string | null {
+  if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
+  const fmt = (n: number) => Number(n).toLocaleString()
+  const range =
+    p.tuition_min_amount != null && p.tuition_max_amount != null
+      ? `${fmt(p.tuition_min_amount)} – ${fmt(p.tuition_max_amount)}`
+      : p.tuition_min_amount != null
+        ? fmt(p.tuition_min_amount)
+        : `up to ${fmt(p.tuition_max_amount)}`
+  const period = p.tuition_period?.replace(/_/g, ' ') ?? ''
+  return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
+}
+
+const selectClass = 'w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
+const inputClass  = 'w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
+const labelClass  = 'block text-xs font-medium text-gray-600 mb-1'
 ---
-<PublicLayout title="Programs — DegreeWiki">
+<PublicLayout title="Programs — DegreeWiki" noindex={hasFilters}>
   <div class="max-w-5xl mx-auto px-4 py-8">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">Programs</h1>
-    {rows.length === 0 ? (
-      <p class="text-gray-500 text-sm">No results yet.</p>
-    ) : (
-      <div class="overflow-x-auto rounded-lg border border-gray-200">
-        <table class="w-full text-sm text-left">
-          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
-            <tr>
-              <th class="px-4 py-3">Program</th>
-              <th class="px-4 py-3">University</th>
-              <th class="px-4 py-3">Degree Level</th>
-              <th class="px-4 py-3">Study Mode</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p: any) => (
-              <tr class="border-b border-gray-100 hover:bg-gray-50 last:border-b-0">
-                <td class="px-4 py-3">
-                  <a href={`/programs/${p.slug}`} class="text-blue-600 hover:underline font-medium">
-                    {p.title}
-                  </a>
-                </td>
-                <td class="px-4 py-3 text-gray-600">
-                  {p.universities
-                    ? <a href={`/universities/${p.universities.slug}`} class="hover:underline">{p.universities.name}</a>
-                    : '—'
-                  }
-                </td>
-                <td class="px-4 py-3 text-gray-600">{p.degree_levels?.name ?? '—'}</td>
-                <td class="px-4 py-3 text-gray-500 capitalize">
-                  {p.study_mode ? p.study_mode.replace(/_/g, ' ') : '—'}
-                </td>
-              </tr>
+
+    <form method="get" action="/programs" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+
+        <div class="sm:col-span-2 lg:col-span-3">
+          <label class={labelClass} for="q">Search titles</label>
+          <input id="q" name="q" type="search" value={q ?? ''}
+                 placeholder="e.g. Computer Science, MBA…"
+                 class={inputClass} />
+        </div>
+
+        <div>
+          <label class={labelClass} for="country">Country</label>
+          <select id="country" name="country" class={selectClass}>
+            <option value="">All countries</option>
+            {countries.map((c: any) => (
+              <option value={c.id} selected={countryId === c.id}>{c.name}</option>
             ))}
-          </tbody>
-        </table>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="city">City</label>
+          <select id="city" name="city" class={selectClass}>
+            <option value="">All cities</option>
+            {cities.map((c: any) => (
+              <option value={c.id} selected={cityId === c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="university">University</label>
+          <select id="university" name="university" class={selectClass}>
+            <option value="">All universities</option>
+            {univs.map((u: any) => (
+              <option value={u.id} selected={universityId === u.id}>{u.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="degree_level">Degree level</label>
+          <select id="degree_level" name="degree_level" class={selectClass}>
+            <option value="">All levels</option>
+            {degreeLevels.map((d: any) => (
+              <option value={d.id} selected={degreeLevelId === d.id}>{d.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="subject">Subject</label>
+          <select id="subject" name="subject" class={selectClass}>
+            <option value="">All subjects</option>
+            {subjects.map((s: any) => (
+              <option value={s.id} selected={subjectId === s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="study_mode">Study mode</label>
+          <select id="study_mode" name="study_mode" class={selectClass}>
+            <option value="">Any</option>
+            <option value="full_time"  selected={studyMode === 'full_time'}>Full time</option>
+            <option value="part_time"  selected={studyMode === 'part_time'}>Part time</option>
+            <option value="online"     selected={studyMode === 'online'}>Online</option>
+            <option value="hybrid"     selected={studyMode === 'hybrid'}>Hybrid</option>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="delivery_mode">Delivery</label>
+          <select id="delivery_mode" name="delivery_mode" class={selectClass}>
+            <option value="">Any</option>
+            <option value="on_campus" selected={deliveryMode === 'on_campus'}>On campus</option>
+            <option value="online"    selected={deliveryMode === 'online'}>Online</option>
+            <option value="hybrid"    selected={deliveryMode === 'hybrid'}>Hybrid</option>
+            <option value="distance"  selected={deliveryMode === 'distance'}>Distance</option>
+          </select>
+        </div>
+
+        <div>
+          <label class={labelClass} for="language">Language of instruction</label>
+          <input id="language" name="language" type="text" value={language ?? ''}
+                 placeholder="e.g. English"
+                 class={inputClass} />
+        </div>
+
+        <div>
+          <label class={labelClass} for="tuition_max">Max tuition</label>
+          <input id="tuition_max" name="tuition_max" type="number" min="1" step="any"
+                 value={tuitionMax ?? ''}
+                 placeholder="e.g. 20000"
+                 class={inputClass} />
+          <p class="text-xs text-gray-400 mt-0.5">Programs without tuition data may be excluded.</p>
+        </div>
+
       </div>
+
+      <div class="flex items-center gap-3 mt-4">
+        <button type="submit"
+                class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">
+          Search
+        </button>
+        {hasFilters && (
+          <a href="/programs"
+             class="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
+            Clear filters
+          </a>
+        )}
+      </div>
+    </form>
+
+    {overLimit ? (
+      <p class="text-sm text-gray-500 mb-4">
+        Showing 200 of {(count ?? 200).toLocaleString()} programs. Narrow your search to see more.
+      </p>
+    ) : rows.length > 0 ? (
+      <p class="text-sm text-gray-500 mb-4">
+        {rows.length} {rows.length === 1 ? 'program' : 'programs'} found.
+      </p>
+    ) : null}
+
+    {rows.length === 0 ? (
+      <div class="text-center py-12 text-gray-500">
+        {hasFilters ? (
+          <div>
+            <p class="text-base mb-3">No programs match your filters.</p>
+            <a href="/programs" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+          </div>
+        ) : (
+          <p class="text-base">No programs have been published yet.</p>
+        )}
+      </div>
+    ) : (
+      <ul class="space-y-3">
+        {rows.map((p: any) => {
+          const tuition  = fmtTuition(p)
+          const location = [p.countries?.name, p.cities?.name].filter(Boolean).join(', ')
+          return (
+            <li class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+
+              <div class="flex items-start justify-between gap-4 mb-1.5">
+                <a href={`/programs/${p.slug}`}
+                   class="text-base font-semibold text-blue-600 hover:underline leading-snug">
+                  {p.title}
+                </a>
+                {tuition && (
+                  <span class="text-sm text-gray-600 whitespace-nowrap shrink-0">{tuition}</span>
+                )}
+              </div>
+
+              <div class="text-sm text-gray-500 mb-2">
+                {p.universities && (
+                  <a href={`/universities/${p.universities.slug}`}
+                     class="text-gray-700 font-medium hover:underline">
+                    {p.universities.name}
+                  </a>
+                )}
+                {p.universities && location && <span class="mx-1">·</span>}
+                {location}
+              </div>
+
+              <div class="flex flex-wrap gap-2 text-xs">
+                {p.degree_levels?.name && (
+                  <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                    {p.degree_levels.name}
+                  </span>
+                )}
+                {p.subjects?.name && (
+                  <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">
+                    {p.subjects.name}
+                  </span>
+                )}
+                {p.study_mode && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">
+                    {fmtMode(p.study_mode)}
+                  </span>
+                )}
+                {p.delivery_mode && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">
+                    {fmtMode(p.delivery_mode)}
+                  </span>
+                )}
+                {p.language_of_instruction && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                    {p.language_of_instruction}
+                  </span>
+                )}
+              </div>
+
+            </li>
+          )
+        })}
+      </ul>
     )}
   </div>
 </PublicLayout>
