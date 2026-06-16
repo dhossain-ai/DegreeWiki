@@ -1,27 +1,465 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+type Profile = {
+  id: string
+  target_degree_level_id: string | null
+  budget_max: number | null
+  budget_currency: string | null
+}
+
+type PreferenceRow = {
+  subject_id?: string
+  country_id?: string
+  preference_rank: number | null
+}
+
+type ProgramSubjectRow = {
+  program_id: string
+  subject_id: string
+  is_primary: boolean
+  display_order: number
+}
+
+type Match = {
+  program: any
+  points: number
+  percentage: number
+  reasons: string[]
+  warnings: string[]
+}
+
+const DEGREE_POINTS = 35
+const SUBJECT_PRIMARY_POINTS = 30
+const SUBJECT_SECONDARY_POINTS = 24
+const SUBJECT_POSSIBLE_POINTS = 30
+const COUNTRY_POINTS = 25
+const BUDGET_POINTS = 10
+const BUDGET_PARTIAL_POINTS = 5
+
+const { data: { user } } = await supabase.auth.getUser()
+
+let profile: Profile | null = null
+let subjectPrefs: PreferenceRow[] = []
+let countryPrefs: PreferenceRow[] = []
+let matches: Match[] = []
+let possiblePoints = 0
+let pageState: 'anonymous' | 'no_profile' | 'sparse_profile' | 'ready' | 'no_matches' | 'error' = 'anonymous'
+let pageError = ''
+let deviation = ''
+
+function formatMode(value: string | null | undefined): string {
+  return value ? value.replace(/_/g, ' ') : ''
+}
+
+function formatTuition(p: any): string | null {
+  if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
+  const fmt = (n: number) => Number(n).toLocaleString()
+  const range =
+    p.tuition_min_amount != null && p.tuition_max_amount != null
+      ? `${fmt(p.tuition_min_amount)} - ${fmt(p.tuition_max_amount)}`
+      : p.tuition_min_amount != null
+        ? fmt(p.tuition_min_amount)
+        : `up to ${fmt(p.tuition_max_amount)}`
+  const period = p.tuition_period?.replace(/_/g, ' ') ?? ''
+  return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
+}
+
+function hasEnglishRequirements(value: unknown): boolean {
+  if (!value) return false
+  if (typeof value === 'string') return value.trim().length > 0
+  if (typeof value === 'object' && !Array.isArray(value)) return Object.keys(value).length > 0
+  return false
+}
+
+function uniqueById(rows: any[]): any[] {
+  const seen = new Set<string>()
+  const unique: any[] = []
+  for (const row of rows) {
+    if (!row?.id || seen.has(row.id)) continue
+    seen.add(row.id)
+    unique.push(row)
+  }
+  return unique
+}
+
+if (!user) {
+  pageState = 'anonymous'
+} else {
+  const { data: profileData, error: profileError } = await supabase
+    .from('student_profiles')
+    .select('id, target_degree_level_id, budget_max, budget_currency')
+    .eq('user_id', user.id)
+    .eq('is_anonymous', false)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('fit finder result profile load error:', profileError.message)
+    pageState = 'error'
+    pageError = 'Could not load your saved Fit Finder profile. Please try again.'
+  } else if (!profileData) {
+    pageState = 'no_profile'
+  } else {
+    profile = profileData as Profile
+
+    const [{ data: subjectRows, error: subjectError }, { data: countryRows, error: countryError }] = await Promise.all([
+      supabase
+        .from('student_profile_subjects')
+        .select('subject_id, preference_rank')
+        .eq('student_profile_id', profile.id)
+        .order('preference_rank', { ascending: true }),
+      supabase
+        .from('student_profile_countries')
+        .select('country_id, preference_rank')
+        .eq('student_profile_id', profile.id)
+        .order('preference_rank', { ascending: true }),
+    ])
+
+    if (subjectError || countryError) {
+      console.error('fit finder result preference load error:', subjectError?.message ?? countryError?.message)
+      pageState = 'error'
+      pageError = 'Could not load your saved Fit Finder preferences. Please try again.'
+    } else {
+      subjectPrefs = (subjectRows ?? []) as PreferenceRow[]
+      countryPrefs = (countryRows ?? []) as PreferenceRow[]
+
+      const preferredSubjectIds = subjectPrefs.map(row => row.subject_id).filter(Boolean) as string[]
+      const preferredCountryIds = countryPrefs.map(row => row.country_id).filter(Boolean) as string[]
+      const preferredSubjectSet = new Set(preferredSubjectIds)
+      const preferredCountrySet = new Set(preferredCountryIds)
+      const hasBudgetSignal = profile.budget_max != null && !!profile.budget_currency
+
+      possiblePoints =
+        (profile.target_degree_level_id ? DEGREE_POINTS : 0) +
+        (preferredSubjectIds.length > 0 ? SUBJECT_POSSIBLE_POINTS : 0) +
+        (preferredCountryIds.length > 0 ? COUNTRY_POINTS : 0) +
+        (hasBudgetSignal ? BUDGET_POINTS : 0)
+
+      if (possiblePoints === 0) {
+        pageState = 'sparse_profile'
+      } else {
+        const { data: programRows, error: programError } = await supabase
+          .from('programs')
+          .select(`
+            id, title, slug, university_id, country_id, city_id, degree_level_id,
+            primary_subject_id, study_mode, delivery_mode, language_of_instruction,
+            tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+            official_url, admission_requirements, english_requirements, gpa_requirements,
+            verification_status, source_confidence_score,
+            universities(id, name, slug),
+            countries(name),
+            cities(name),
+            degree_levels(name),
+            subjects(name)
+          `)
+          .eq('content_status', 'published')
+          .order('title')
+          .limit(200)
+
+        if (programError) {
+          console.error('fit finder result program query error:', programError.message)
+          pageState = 'error'
+          pageError = 'Could not load program matches right now. Please try again.'
+        } else {
+          const candidates = uniqueById(programRows ?? [])
+          const candidateIds = candidates.map(row => row.id).filter(Boolean)
+          const subjectsByProgram = new Map<string, ProgramSubjectRow[]>()
+
+          if (candidateIds.length > 0) {
+            const { data: programSubjectRows, error: programSubjectError } = await supabase
+              .from('program_subjects')
+              .select('program_id, subject_id, is_primary, display_order')
+              .in('program_id', candidateIds)
+              .order('display_order', { ascending: true })
+
+            if (programSubjectError) {
+              console.error('fit finder result program_subjects query error:', programSubjectError.message)
+              deviation = 'Subject matching used each program primary subject only because additional subject data could not be loaded.'
+            } else {
+              for (const row of (programSubjectRows ?? []) as ProgramSubjectRow[]) {
+                const existing = subjectsByProgram.get(row.program_id) ?? []
+                existing.push(row)
+                subjectsByProgram.set(row.program_id, existing)
+              }
+            }
+          }
+
+          matches = candidates
+            .map((program: any): Match => {
+              let points = 0
+              const reasons: string[] = []
+              const warnings: string[] = []
+
+              if (profile?.target_degree_level_id && program.degree_level_id === profile.target_degree_level_id) {
+                points += DEGREE_POINTS
+                reasons.push('Matches your target degree level.')
+              }
+
+              if (preferredCountrySet.size > 0 && preferredCountrySet.has(program.country_id)) {
+                points += COUNTRY_POINTS
+                reasons.push('In one of your preferred countries.')
+              }
+
+              if (preferredSubjectSet.size > 0) {
+                if (program.primary_subject_id && preferredSubjectSet.has(program.primary_subject_id)) {
+                  points += SUBJECT_PRIMARY_POINTS
+                  reasons.push('Matches one of your preferred subjects.')
+                } else {
+                  const programSubjects = subjectsByProgram.get(program.id) ?? []
+                  const hasSubjectMatch = programSubjects.some(row => preferredSubjectSet.has(row.subject_id))
+                  if (hasSubjectMatch) {
+                    points += SUBJECT_SECONDARY_POINTS
+                    reasons.push('Matches one of your preferred subjects.')
+                  }
+                }
+              }
+
+              if (hasBudgetSignal && profile?.budget_currency && profile.budget_max != null) {
+                const profileCurrency = profile.budget_currency.trim().toUpperCase()
+                const tuitionCurrency = String(program.tuition_currency ?? '').trim().toUpperCase()
+                const hasTuitionData = program.tuition_min_amount != null || program.tuition_max_amount != null
+
+                if (!hasTuitionData) {
+                  warnings.push('Tuition data is missing; confirm costs with the university.')
+                } else if (!tuitionCurrency || tuitionCurrency !== profileCurrency) {
+                  warnings.push('Tuition currency differs from your saved budget currency.')
+                } else if (program.tuition_max_amount != null && Number(program.tuition_max_amount) <= profile.budget_max) {
+                  points += BUDGET_POINTS
+                  reasons.push('Tuition appears within your saved budget.')
+                } else if (program.tuition_min_amount != null && Number(program.tuition_min_amount) <= profile.budget_max) {
+                  points += BUDGET_PARTIAL_POINTS
+                  reasons.push('Tuition may partially fit your saved budget.')
+                  warnings.push('Tuition may be above your saved budget.')
+                } else {
+                  warnings.push('Tuition may be above your saved budget.')
+                }
+              }
+
+              if (program.admission_requirements || program.gpa_requirements) {
+                warnings.push('Admission requirements should be verified with the official program source.')
+              }
+
+              if (hasEnglishRequirements(program.english_requirements)) {
+                warnings.push('English requirements should be verified with the official program source.')
+              }
+
+              return {
+                program,
+                points,
+                percentage: Math.round((points / possiblePoints) * 100),
+                reasons,
+                warnings,
+              }
+            })
+            .filter(match => match.points > 0)
+            .sort((a, b) =>
+              b.points - a.points ||
+              b.percentage - a.percentage ||
+              b.reasons.length - a.reasons.length ||
+              String(a.program.title).localeCompare(String(b.program.title))
+            )
+            .slice(0, 20)
+
+          pageState = matches.length > 0 ? 'ready' : 'no_matches'
+        }
+      }
+    }
+  }
+}
+
+const pageTitle = 'Possible program matches'
 ---
 <PublicLayout
-  title="Fit Finder Saved — DegreeWiki"
-  description="Your DegreeWiki Fit Finder preferences have been saved."
+  title={`${pageTitle} — DegreeWiki`}
+  description="Rule-based DegreeWiki Fit Finder program matches based on saved preferences."
   noindex={true}
   canonical={SITE_URL + '/fit-finder/result'}
 >
-  <div class="max-w-5xl mx-auto px-4 py-12">
-    <div class="max-w-2xl">
-      <h1 class="text-2xl font-bold text-gray-900 mb-3">Your preferences have been saved.</h1>
-      <p class="text-gray-600 mb-6">
-        Program matching will be added in the next phase.
-      </p>
-      <div class="flex flex-wrap gap-3">
-        <a href="/programs" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-          Browse programs
-        </a>
-        <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
-          Update preferences
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    {pageState === 'anonymous' ? (
+      <div class="max-w-2xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-3">Save your Fit Finder preferences</h1>
+        <p class="text-gray-600 mb-6">
+          Sign in and save your Fit Finder preferences to see rule-based program matches.
+        </p>
+        <div class="flex flex-wrap gap-3">
+          <a href="/login?redirect=/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+            Sign in to continue
+          </a>
+          <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+            Open Fit Finder
+          </a>
+        </div>
+      </div>
+    ) : pageState === 'no_profile' ? (
+      <div class="max-w-2xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-3">No saved Fit Finder profile yet.</h1>
+        <p class="text-gray-600 mb-6">
+          Save your study preferences first, then DegreeWiki can rank possible program matches.
+        </p>
+        <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Save preferences
         </a>
       </div>
-    </div>
+    ) : pageState === 'sparse_profile' ? (
+      <div class="max-w-2xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-3">Add more preferences to find matches</h1>
+        <p class="text-gray-600 mb-6">
+          Add a target degree level, preferred countries, subjects, or budget to generate stronger possible matches.
+        </p>
+        <div class="flex flex-wrap gap-3">
+          <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+            Update preferences
+          </a>
+          <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+            Browse all programs
+          </a>
+        </div>
+      </div>
+    ) : pageState === 'error' ? (
+      <div class="max-w-2xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-3">Matches are temporarily unavailable</h1>
+        <p class="text-gray-600 mb-6">{pageError || 'Something went wrong while loading your matches.'}</p>
+        <div class="flex flex-wrap gap-3">
+          <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+            Update preferences
+          </a>
+          <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+            Browse all programs
+          </a>
+        </div>
+      </div>
+    ) : (
+      <>
+        <div class="max-w-3xl mb-7">
+          <h1 class="text-2xl font-bold text-gray-900 mb-2">Possible program matches</h1>
+          <p class="text-gray-600 mb-3">Based on your saved Fit Finder preferences.</p>
+          <p class="text-sm text-gray-500">
+            These are rule-based matches, not admission guarantees. Always confirm important details with the official university source.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-3 mb-7">
+          <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+            Update preferences
+          </a>
+          <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+            Browse all programs
+          </a>
+        </div>
+
+        {deviation && (
+          <div class="mb-5 px-4 py-3 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-900">
+            {deviation}
+          </div>
+        )}
+
+        {pageState === 'no_matches' ? (
+          <div class="max-w-2xl border border-gray-200 rounded-lg p-5 bg-gray-50">
+            <h2 class="text-base font-semibold text-gray-900 mb-2">No scored matches found</h2>
+            <p class="text-sm text-gray-600 mb-4">
+              No published programs matched your saved preferences closely enough yet. Try updating your preferences or browse all programs.
+            </p>
+            <div class="flex flex-wrap gap-3">
+              <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                Update preferences
+              </a>
+              <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-white">
+                Browse all programs
+              </a>
+            </div>
+          </div>
+        ) : (
+          <ul class="space-y-4">
+            {matches.map(match => {
+              const p = match.program
+              const tuition = formatTuition(p)
+              const location = [p.countries?.name, p.cities?.name].filter(Boolean).join(', ')
+              return (
+                <li class="border border-gray-200 rounded-lg p-5 bg-white">
+                  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+                    <div>
+                      <a href={`/programs/${p.slug}`} class="text-lg font-semibold text-blue-600 hover:underline leading-snug">
+                        {p.title}
+                      </a>
+                      <div class="text-sm text-gray-500 mt-1">
+                        {p.universities && (
+                          <a href={`/universities/${p.universities.slug}`} class="text-gray-700 font-medium hover:underline">
+                            {p.universities.name}
+                          </a>
+                        )}
+                        {p.universities && location && <span class="mx-1">·</span>}
+                        {location}
+                      </div>
+                    </div>
+                    <div class="shrink-0 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-center">
+                      <div class="text-xl font-bold text-blue-700">{match.percentage}%</div>
+                      <div class="text-xs text-blue-700">match score</div>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap gap-2 text-xs mb-4">
+                    {p.degree_levels?.name && (
+                      <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{p.degree_levels.name}</span>
+                    )}
+                    {p.subjects?.name && (
+                      <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">{p.subjects.name}</span>
+                    )}
+                    {p.study_mode && (
+                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.study_mode)}</span>
+                    )}
+                    {p.delivery_mode && (
+                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.delivery_mode)}</span>
+                    )}
+                    {p.language_of_instruction && (
+                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{p.language_of_instruction}</span>
+                    )}
+                    {tuition && (
+                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{tuition}</span>
+                    )}
+                  </div>
+
+                  {match.reasons.length > 0 && (
+                    <div class="mb-3">
+                      <h2 class="text-sm font-semibold text-gray-900 mb-1">Why this may fit</h2>
+                      <ul class="list-disc pl-5 text-sm text-gray-700 space-y-0.5">
+                        {match.reasons.map(reason => <li>{reason}</li>)}
+                      </ul>
+                    </div>
+                  )}
+
+                  {match.warnings.length > 0 && (
+                    <div class="mb-3">
+                      <h2 class="text-sm font-semibold text-gray-900 mb-1">Things to verify</h2>
+                      <ul class="list-disc pl-5 text-sm text-gray-600 space-y-0.5">
+                        {match.warnings.map(warning => <li>{warning}</li>)}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div class="text-sm text-gray-500 border-t border-gray-100 pt-3">
+                    Confirm fees, deadlines, admission requirements, and eligibility directly with the official source.
+                    {p.official_url && (
+                      <>
+                        {' '}
+                        <a href={p.official_url} target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">
+                          Official program page
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </>
+    )}
   </div>
 </PublicLayout>
