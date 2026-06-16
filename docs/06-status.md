@@ -4,11 +4,97 @@ Last updated: 2026-06-17
 
 ## Current Phase
 
-Phase 19 — TBD.
+Phase 20 — Rule-Based Program Matching Engine — TBD.
 
-Phase 18 — AI Gateway + AI Safety Architecture — implementation complete, pending manual verification.
+Phase 19 — Fit Finder / Student Profile Input Foundation — complete.
 
 ## Last Completed Work
+
+Phase 19 — Fit Finder / Student Profile Input Foundation (complete):
+
+- Added a public server-rendered Fit Finder input foundation.
+  The route collects schema-backed student profile preferences for future matching,
+  but does not run AI, does not run program matching, does not create chatbot UI,
+  and does not write AI Finder result rows.
+
+Routes added:
+  /fit-finder — public SSR form for student profile preferences.
+  /fit-finder/result — noindex placeholder confirmation page.
+
+Files created:
+  src/pages/fit-finder/index.astro
+  src/pages/fit-finder/result.astro
+
+Files modified:
+  src/components/public/PublicNav.astro — added Fit Finder link.
+  docs/06-status.md
+  docs/07-task-log.md
+
+Schema/RLS findings used:
+  student_profiles supports logged-in rows with user_id set, is_anonymous=false,
+  and session_token=NULL.
+  student_profile_subjects and student_profile_countries are writable for logged-in
+  users only when the parent profile belongs to auth.uid().
+  Anonymous profile rows are supported by schema, but direct anonymous browser RLS
+  is intentionally omitted. Anonymous persistence is deferred because it requires
+  a security-reviewed privileged server endpoint.
+
+Form fields implemented:
+  current_country_id, target_degree_level_id, budget_min, budget_max,
+  budget_currency, gpa, english_score_type, english_score,
+  work_experience_years, study_start_preference, additional_notes.
+  Junction inputs: student_profile_subjects[] and student_profile_countries[].
+
+Lookup data:
+  countries: id, name.
+  degree_levels: id, name, display_order.
+  subjects: id, name.
+  Lookup query failures log server-side and default to [] so the page remains functional.
+
+Validation:
+  Server-side only. UUID values must match UUID shape and exist in loaded lookup data.
+  Numeric fields must be non-negative. work_experience_years must be a non-negative
+  integer. budget_max must be greater than or equal to budget_min when both are set.
+  Short text fields are trimmed/capped; budget_currency is normalized uppercase.
+  Invalid submissions re-render the form with entered values preserved.
+
+Logged-in persistence:
+  Uses the existing Supabase SSR client and supabase.auth.getUser().
+  POST creates or updates exactly one non-anonymous profile selected by user_id and
+  is_anonymous=false. The profile UUID is never accepted from the form, rendered to
+  the page, placed in hidden inputs, or included in the result URL.
+  Subject and country junction rows are replaced after the profile save using the
+  RLS-protected parent profile id.
+
+Anonymous behavior:
+  GET /fit-finder renders for everyone.
+  POST /fit-finder while logged out does not save anything, does not create cookies,
+  and does not create anonymous student_profiles rows. The form re-renders with a
+  sign-in required message linking to /login?redirect=/fit-finder.
+
+Result placeholder:
+  /fit-finder/result uses PublicLayout, noindex=true, and shows:
+  "Your preferences have been saved. Program matching will be added in the next phase."
+  Links point to /programs and /fit-finder.
+
+Exclusions:
+  No AI calls.
+  No matching engine.
+  No chatbot.
+  No ai_finder_results writes.
+  No ai_finder_program_matches writes.
+  No anonymous session_token cookies.
+  No service_role usage.
+  No migrations.
+  No new dependencies.
+  No React or client-side JS.
+  No admin changes.
+  No src/lib/ai changes.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 1.48s, zero errors).
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+  Get-ChildItem -Path src/pages/fit-finder -Recurse -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder_results|ai_finder_program_matches" → 0 matches.
 
 Phase 18 — AI Gateway + AI Safety Architecture (implementation complete):
 

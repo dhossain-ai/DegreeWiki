@@ -4,6 +4,209 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-17 - Phase 19: Fit Finder / Student Profile Input Foundation
+
+Tool:
+Codex
+
+Goal:
+Create the first public Fit Finder input foundation for DegreeWiki. Store structured
+student preferences for logged-in users only. No AI calls, no matching engine, no
+chatbot, no AI Finder result writes, no migrations, no new dependencies, no React,
+no client-side JS, no admin changes, and no service_role.
+
+---
+
+### Files Changed
+
+Created:
+  src/pages/fit-finder/index.astro
+  src/pages/fit-finder/result.astro
+
+Modified:
+  src/components/public/PublicNav.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Not modified:
+  src/lib/ai/*
+  supabase/migrations/*
+  src/pages/admin/*
+  package.json
+  src/lib/supabase/server.ts
+
+---
+
+### Schema / RLS Findings
+
+Migration 011 confirmed:
+  student_profiles stores schema-backed student preferences and supports two owner modes:
+    logged-in: user_id set, is_anonymous=false, session_token NULL
+    anonymous: user_id NULL, is_anonymous=true, session_token set, expires_at set
+
+Logged-in writes are supported by existing authenticated RLS:
+  student_profiles INSERT/UPDATE require user_id = auth.uid(), is_anonymous=false,
+  and session_token NULL.
+  student_profile_subjects and student_profile_countries allow logged-in users to
+  insert/update/delete rows only when the parent student_profiles row belongs to auth.uid().
+
+Anonymous rows are intentionally not browser-accessible through RLS. Anonymous persistence
+is deferred to a later security-reviewed phase because it requires a privileged server path.
+
+---
+
+### Routes Added
+
+/fit-finder:
+  Public SSR form. GET renders for everyone. POST validates server-side.
+  Logged-in users can save preferences. Anonymous users see a sign-in required message
+  and no data is saved.
+
+/fit-finder/result:
+  PublicLayout page with noindex=true. Generic placeholder only:
+  "Your preferences have been saved. Program matching will be added in the next phase."
+  Links to /programs and /fit-finder.
+
+---
+
+### Form Fields Implemented
+
+student_profiles fields:
+  current_country_id
+  target_degree_level_id
+  budget_min
+  budget_max
+  budget_currency
+  gpa
+  english_score_type
+  english_score
+  work_experience_years
+  study_start_preference
+  additional_notes
+
+Junction fields:
+  student_profile_subjects[]
+  student_profile_countries[]
+
+Lookup data:
+  countries: id, name
+  degree_levels: id, name, display_order
+  subjects: id, name
+
+The route does not collect name, email, phone, passport details, documents, address,
+date of birth, visa data, or financial documents.
+
+---
+
+### Validation Behavior
+
+Validation is server-side only.
+
+Rules:
+  UUID fields must match UUID shape and exist in loaded lookup lists.
+  budget_min and budget_max must be non-negative when provided.
+  budget_max must be greater than or equal to budget_min when both are provided.
+  gpa must be non-negative when provided.
+  english_score must be non-negative when provided.
+  work_experience_years must be a non-negative whole number when provided.
+  budget_currency is trimmed, uppercased, and capped.
+  english_score_type and study_start_preference are trimmed and capped.
+  additional_notes is trimmed/capped and the UI warns against sensitive personal data.
+
+Invalid submissions re-render /fit-finder with errors and entered values preserved.
+Lookup query failures log server-side and default to [] so the page remains renderable.
+
+---
+
+### Logged-In Insert / Update Strategy
+
+The route uses the existing Supabase SSR client and supabase.auth.getUser().
+
+On valid logged-in POST:
+  1. Select the newest existing student_profiles row for user_id = user.id and is_anonymous=false.
+  2. Update that row if it exists, otherwise insert a new row with:
+       user_id = user.id
+       is_anonymous = false
+       session_token = null
+  3. Do not accept profile_id from the form.
+  4. Do not expose the profile UUID in the URL, hidden inputs, or rendered page.
+  5. Replace student_profile_subjects rows for that profile and assign preference_rank
+     from posted order.
+  6. Replace student_profile_countries rows for that profile and assign preference_rank
+     from posted order.
+  7. Redirect to /fit-finder/result.
+
+All writes go through existing RLS with the authenticated user session.
+
+---
+
+### Anonymous Behavior
+
+GET /fit-finder renders the same form for anonymous users.
+
+POST /fit-finder while logged out:
+  Does not save.
+  Does not create a session_token.
+  Does not create cookies.
+  Does not create student_profiles rows.
+  Re-renders the form with a sign-in required message linking to /login?redirect=/fit-finder.
+
+Anonymous persistence is deferred because the existing schema intentionally requires a
+security-reviewed privileged server path for anonymous profile rows.
+
+---
+
+### Explicit Exclusions
+
+No AI calls.
+No matching engine.
+No chatbot.
+No ai_finder_results writes.
+No ai_finder_program_matches writes.
+No src/lib/ai imports.
+No migrations.
+No new dependencies.
+No React.
+No client-side JS.
+No admin changes.
+No service_role.
+
+---
+
+### Validation Results
+
+npm run build:
+  PASS (Cloudflare server build, 1.48s, zero errors)
+
+service_role search:
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE"
+  Result: 0 matches
+
+AI usage grep:
+  Get-ChildItem -Path src/pages/fit-finder -Recurse -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder_results|ai_finder_program_matches"
+  Result: 0 matches
+
+---
+
+### Manual Test Checklist
+
+1. GET /fit-finder anonymous — form renders.
+2. POST /fit-finder anonymous — no save; sign-in required message appears.
+3. Sign-in link points to /login?redirect=/fit-finder.
+4. GET /fit-finder logged in — form renders.
+5. POST valid logged-in form — profile saves and redirects to /fit-finder/result.
+6. POST valid logged-in form a second time — existing profile updates instead of creating a new one.
+7. Selected subjects replace prior student_profile_subjects rows.
+8. Selected countries replace prior student_profile_countries rows.
+9. Invalid UUID submission re-renders with an error and no save.
+10. Negative budget/GPA/English score/work experience values re-render with errors.
+11. budget_max lower than budget_min re-renders with an error.
+12. /fit-finder/result renders noindex placeholder with links to /programs and /fit-finder.
+13. Public nav shows Fit Finder and existing links still work.
+14. No profile UUID appears in the URL, hidden inputs, or rendered result page.
+
+---
+
 ## 2026-06-17 - Phase 18: AI Gateway + AI Safety Architecture
 
 Tool:
