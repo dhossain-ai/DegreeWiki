@@ -1,0 +1,199 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import { createClient } from '../../lib/supabase/server'
+
+const { slug } = Astro.params
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: program } = await supabase
+  .from('programs')
+  .select(`
+    id, title, slug, degree_award, duration_months, study_mode, delivery_mode,
+    language_of_instruction,
+    tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period, tuition_notes,
+    application_fee_amount, application_fee_currency, application_fee_notes,
+    application_url, official_url,
+    admission_requirements, english_requirements, gpa_requirements,
+    curriculum_summary, career_outcomes,
+    seo_title, seo_description,
+    universities(name, slug),
+    degree_levels(name),
+    subjects(name),
+    countries(name),
+    cities(name)
+  `)
+  .eq('slug', slug!)
+  .eq('content_status', 'published')
+  .single()
+
+if (!program) {
+  return new Response(null, { status: 404 })
+}
+
+const p = program as any
+
+function formatTuition(): string | null {
+  if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
+  const fmt = (n: number) => Number(n).toLocaleString()
+  let range: string
+  if (p.tuition_min_amount != null && p.tuition_max_amount != null) {
+    range = `${fmt(p.tuition_min_amount)} – ${fmt(p.tuition_max_amount)}`
+  } else if (p.tuition_min_amount != null) {
+    range = fmt(p.tuition_min_amount)
+  } else {
+    range = `up to ${fmt(p.tuition_max_amount)}`
+  }
+  const period = p.tuition_period ? p.tuition_period.replace(/_/g, ' ') : ''
+  return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
+}
+
+const tuition = formatTuition()
+const hasEnglishReqs = p.english_requirements != null && Object.keys(p.english_requirements).length > 0
+const pageTitle = p.seo_title || p.title
+const pageDesc  = p.seo_description || undefined
+---
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc}>
+  <div class="max-w-3xl mx-auto px-4 py-8">
+    <a href="/programs" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Programs</a>
+
+    {p.universities && (
+      <p class="text-sm text-gray-500 mb-1">
+        <a href={`/universities/${p.universities.slug}`} class="hover:underline">{p.universities.name}</a>
+      </p>
+    )}
+
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">{p.title}</h1>
+
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm mb-8 bg-gray-50 rounded-lg p-5 border border-gray-200">
+      {p.degree_levels?.name && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Degree Level</dt>
+          <dd class="text-gray-900">{p.degree_levels.name}</dd>
+        </div>
+      )}
+      {p.degree_award && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Degree Award</dt>
+          <dd class="text-gray-900">{p.degree_award}</dd>
+        </div>
+      )}
+      {p.subjects?.name && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Subject</dt>
+          <dd class="text-gray-900">{p.subjects.name}</dd>
+        </div>
+      )}
+      {p.countries?.name && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Country</dt>
+          <dd class="text-gray-900">{p.countries.name}</dd>
+        </div>
+      )}
+      {p.cities?.name && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">City</dt>
+          <dd class="text-gray-900">{p.cities.name}</dd>
+        </div>
+      )}
+      {p.study_mode && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Study Mode</dt>
+          <dd class="text-gray-900 capitalize">{p.study_mode.replace(/_/g, ' ')}</dd>
+        </div>
+      )}
+      {p.delivery_mode && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Delivery</dt>
+          <dd class="text-gray-900 capitalize">{p.delivery_mode.replace(/_/g, ' ')}</dd>
+        </div>
+      )}
+      {p.language_of_instruction && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Language</dt>
+          <dd class="text-gray-900">{p.language_of_instruction}</dd>
+        </div>
+      )}
+      {p.duration_months != null && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Duration</dt>
+          <dd class="text-gray-900">{p.duration_months} months</dd>
+        </div>
+      )}
+      {tuition && (
+        <div class="sm:col-span-2">
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Tuition</dt>
+          <dd class="text-gray-900">{tuition}</dd>
+        </div>
+      )}
+      {p.gpa_requirements && (
+        <div>
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">GPA Requirement</dt>
+          <dd class="text-gray-900">{p.gpa_requirements}</dd>
+        </div>
+      )}
+      {p.official_url && (
+        <div class="sm:col-span-2">
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Official Page</dt>
+          <dd>
+            <a href={p.official_url} target="_blank" rel="noopener noreferrer"
+               class="text-blue-600 hover:underline break-all">{p.official_url}</a>
+          </dd>
+        </div>
+      )}
+      {p.application_url && (
+        <div class="sm:col-span-2">
+          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Apply</dt>
+          <dd>
+            <a href={p.application_url} target="_blank" rel="noopener noreferrer"
+               class="text-blue-600 hover:underline break-all">{p.application_url}</a>
+          </dd>
+        </div>
+      )}
+    </dl>
+
+    {p.tuition_notes && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Tuition Notes</h2>
+        <p class="text-gray-700 text-sm">{p.tuition_notes}</p>
+      </div>
+    )}
+
+    {p.application_fee_amount != null && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Application Fee</h2>
+        <p class="text-gray-700 text-sm">
+          {[p.application_fee_currency, Number(p.application_fee_amount).toLocaleString()].filter(Boolean).join(' ')}
+          {p.application_fee_notes && ` — ${p.application_fee_notes}`}
+        </p>
+      </div>
+    )}
+
+    {p.curriculum_summary && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Curriculum</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.curriculum_summary}</p>
+      </div>
+    )}
+
+    {p.career_outcomes && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Career Outcomes</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.career_outcomes}</p>
+      </div>
+    )}
+
+    {p.admission_requirements && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Admission Requirements</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.admission_requirements}</p>
+      </div>
+    )}
+
+    {hasEnglishReqs && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">English Requirements</h2>
+        <pre class="text-xs text-gray-700 bg-gray-50 rounded p-3 border border-gray-200 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(p.english_requirements, null, 2)}</pre>
+      </div>
+    )}
+  </div>
+</PublicLayout>
