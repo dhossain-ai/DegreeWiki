@@ -4,11 +4,84 @@ Last updated: 2026-06-17
 
 ## Current Phase
 
-Phase 20 — Rule-Based Program Matching Engine — TBD.
+Phase 21 — TBD.
 
-Phase 19 — Fit Finder / Student Profile Input Foundation — complete.
+Phase 20 — Rule-Based Program Matching Engine — complete.
 
 ## Last Completed Work
+
+Phase 20 — Rule-Based Program Matching Engine (complete):
+
+- Replaced the /fit-finder/result placeholder with a deterministic server-rendered
+  program matching page.
+- The page now uses the logged-in user's latest saved non-anonymous student profile,
+  loads owned subject and country preferences through existing RLS, queries a capped
+  set of published programs, scores them in Astro server code, and renders ranked
+  possible matches.
+
+Route enhanced:
+  /fit-finder/result — noindex SSR page showing possible program matches for
+  logged-in users with usable saved preferences.
+
+Files modified:
+  src/pages/fit-finder/result.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Access behavior:
+  Anonymous users see sign-in/save guidance with links to /login?redirect=/fit-finder
+  and /fit-finder. No profile query is made for anonymous users.
+  Logged-in users without a saved profile see "No saved Fit Finder profile yet."
+  Logged-in users with sparse profiles are prompted to add degree, subject, country,
+  or budget preferences.
+  Logged-in users with usable profiles see transient ranked results.
+
+Candidate query strategy:
+  Uses the existing Supabase SSR client and supabase.auth.getUser().
+  Loads only the latest own student_profiles row where user_id = auth.uid()
+  through the authenticated session and is_anonymous=false.
+  Queries only programs where content_status='published', limited to 200 rows,
+  with display joins for universities, countries, cities, degree_levels, and subjects.
+  Fetches program_subjects for the candidate program IDs in one batch. If that query
+  fails, scoring continues with primary_subject_id only and shows a page-level note.
+
+Scoring signals:
+  target_degree_level_id match — 35 points.
+  preferred subject match — 30 points for primary_subject_id, 24 points through
+  program_subjects.
+  preferred country match — 25 points.
+  budget fit — 10 points when max tuition is within saved budget and currency matches;
+  5 points when tuition may partially fit.
+  Active possible points include only signals the user saved. Profiles with zero
+  possible points show a refine-profile state instead of arbitrary matches.
+
+Result display:
+  Shows match score percentage, program link, university link when available,
+  country/city, degree level, subject, tuition range, deterministic match reasons,
+  conservative warnings, official-source reminder, and official_url link when available.
+  Wording avoids guaranteed admission, eligibility, scholarship, or visa claims.
+
+Explicit exclusions:
+  Transient SSR only.
+  No AI calls.
+  No callAI import.
+  No Gemini/OpenAI calls.
+  No chatbot.
+  No ai_finder_results writes.
+  No ai_finder_program_matches writes.
+  No ai_usage_logs writes.
+  No service_role.
+  No migrations.
+  No new dependencies.
+  No React or client-side JS.
+  No admin changes.
+  No anonymous persistence.
+  No profile IDs in URLs or rendered output.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 1.54s, zero errors).
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+  Get-ChildItem -Path src/pages/fit-finder -Recurse -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder_results|ai_finder_program_matches|ai_usage_logs" → 0 matches.
 
 Phase 19 — Fit Finder / Student Profile Input Foundation (complete):
 

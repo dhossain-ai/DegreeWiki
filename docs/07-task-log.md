@@ -4,6 +4,254 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-17 - Phase 20: Rule-Based Program Matching Engine
+
+Tool:
+Codex
+
+Goal:
+Enhance /fit-finder/result from a placeholder into a deterministic server-rendered
+program matching page. Use the logged-in user's saved Fit Finder profile, score and
+rank published programs with rules, and render possible matches. No AI, no chatbot,
+no AI result writes, no service_role, no migrations, no dependencies, no React, no
+client-side JS, no admin changes, and no anonymous persistence.
+
+---
+
+### Files Changed
+
+Modified:
+  src/pages/fit-finder/result.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Not modified:
+  src/lib/ai/*
+  supabase/migrations/*
+  src/pages/admin/*
+  package.json
+  src/lib/supabase/server.ts
+
+---
+
+### RLS / Access Behavior
+
+The route uses the existing Supabase SSR client and supabase.auth.getUser().
+
+Anonymous /fit-finder/result:
+  Shows sign-in/save guidance with links to /login?redirect=/fit-finder and /fit-finder.
+  Does not query student_profiles or profile preference tables.
+
+Logged-in user without a saved profile:
+  Selects the latest own non-anonymous student_profiles row by user_id and
+  is_anonymous=false. If none exists, shows "No saved Fit Finder profile yet."
+  and links to /fit-finder.
+
+Logged-in user with a saved profile:
+  Loads only the latest own non-anonymous profile.
+  Loads student_profile_subjects and student_profile_countries for that profile id.
+  Existing RLS enforces parent profile ownership.
+  The profile id is never accepted from URL/form input, rendered into the page,
+  or placed in a URL.
+
+Program access:
+  Queries only programs where content_status='published'.
+  Uses public published-content RLS for programs and related display joins.
+  Draft, in_review, unpublished, and archived programs are not queried for matching.
+
+---
+
+### Candidate Query Strategy
+
+The route performs a broad capped candidate query rather than strict hard filters.
+
+Program candidate query:
+  programs.select(...)
+    .eq('content_status', 'published')
+    .order('title')
+    .limit(200)
+
+Selected program fields:
+  id, title, slug, university_id, country_id, city_id, degree_level_id,
+  primary_subject_id, study_mode, delivery_mode, language_of_instruction,
+  tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+  official_url, admission_requirements, english_requirements, gpa_requirements,
+  verification_status, source_confidence_score
+
+Display joins:
+  universities(id, name, slug)
+  countries(name)
+  cities(name)
+  degree_levels(name)
+  subjects(name)
+
+Program subjects:
+  Fetches program_subjects for all candidate program IDs in one batch:
+    program_id, subject_id, is_primary, display_order
+  If that query fails, the page logs the error, continues using primary_subject_id
+  only for subject scoring, and renders a page-level note explaining the deviation.
+
+---
+
+### Scoring Algorithm
+
+Active possible points include only signals the user saved:
+  target_degree_level_id present: +35 possible
+  at least one preferred subject: +30 possible
+  at least one preferred country: +25 possible
+  budget_max + budget_currency present: +10 possible
+
+If possible points equals 0:
+  The page shows the sparse-profile/refine-preferences state and does not rank
+  arbitrary programs.
+
+Candidate scoring:
+  Degree level match:
+    program.degree_level_id === profile.target_degree_level_id => +35
+
+  Country match:
+    program.country_id in saved preferred countries => +25
+
+  Subject match:
+    program.primary_subject_id in saved preferred subjects => +30
+    otherwise any matching program_subjects.subject_id => +24
+
+  Budget:
+    budget signal requires profile.budget_max and profile.budget_currency.
+    Program tuition currency must match the saved budget currency.
+    tuition_max_amount <= budget_max => +10
+    tuition_min_amount <= budget_max when max is missing or above budget => +5
+    Missing tuition, currency mismatch, or above-budget tuition produces warnings
+    rather than eligibility/fit claims.
+
+Percentage:
+  Math.round(points / possiblePoints * 100)
+
+Filtering and ranking:
+  Only programs with points > 0 are displayed.
+  Sort order: points desc, percentage desc, reasons count desc, title asc.
+  Renders top 20 matches.
+
+---
+
+### Match Reasons / Warnings
+
+Reasons are deterministic and field-backed:
+  Matches your target degree level.
+  In one of your preferred countries.
+  Matches one of your preferred subjects.
+  Tuition appears within your saved budget.
+  Tuition may partially fit your saved budget.
+
+Warnings are conservative:
+  Tuition data is missing; confirm costs with the university.
+  Tuition currency differs from your saved budget currency.
+  Tuition may be above your saved budget.
+  Admission requirements should be verified with the official program source.
+  English requirements should be verified with the official program source.
+
+The page does not claim admission chance, eligibility, scholarship likelihood,
+or visa outcomes.
+
+---
+
+### Result Page UX
+
+/fit-finder/result remains noindex.
+
+Logged-in usable-profile state:
+  Heading: Possible program matches.
+  Subtext: Based on your saved Fit Finder preferences.
+  Disclaimer: These are rule-based matches, not admission guarantees.
+  Links:
+    Update preferences -> /fit-finder
+    Browse all programs -> /programs
+
+Each match card shows:
+  match score percentage
+  title linked to /programs/[slug]
+  university linked to /universities/[slug] when available
+  country/city
+  degree level
+  subject
+  study mode, delivery mode, language when available
+  tuition range when available
+  match reasons
+  warnings
+  official-source reminder
+  official_url link when available
+
+Empty states:
+  Anonymous: sign-in/save guidance.
+  No saved profile: link to /fit-finder.
+  Sparse profile: asks user to add degree/country/subject/budget preferences.
+  No scored matches: suggests updating preferences or browsing all programs.
+  Query error: logs server-side and shows a generic user-facing message.
+
+---
+
+### Explicit Exclusions
+
+No AI calls.
+No callAI import.
+No Gemini/OpenAI calls.
+No chatbot.
+No ai_finder_results writes.
+No ai_finder_program_matches writes.
+No ai_usage_logs writes.
+No service_role.
+No migrations.
+No new dependencies.
+No React.
+No client-side JS.
+No admin changes.
+No anonymous persistence.
+No src/lib/ai changes.
+No profile IDs in URLs or rendered output.
+No additional_notes display.
+
+---
+
+### Validation Results
+
+npm run build:
+  PASS (Cloudflare server build, 1.54s, zero errors)
+
+service_role search:
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE"
+  Result: 0 matches
+
+AI usage search:
+  Get-ChildItem -Path src/pages/fit-finder -Recurse -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder_results|ai_finder_program_matches|ai_usage_logs"
+  Result: 0 matches
+
+---
+
+### Manual Test Checklist
+
+1. GET /fit-finder/result anonymous -> sign-in/save guidance renders.
+2. Anonymous result page links to /login?redirect=/fit-finder and /fit-finder.
+3. Logged-in user without student profile -> "No saved Fit Finder profile yet."
+4. Logged-in sparse profile -> refine-preferences state renders.
+5. Logged-in profile with target degree -> matching published programs can score degree points.
+6. Logged-in profile with preferred countries -> matching published programs can score country points.
+7. Logged-in profile with preferred subjects -> primary_subject_id can score 30 points.
+8. Logged-in profile with preferred subjects -> program_subjects can score 24 points.
+9. Matching continues if program_subjects query fails, using primary_subject_id only.
+10. budget_max + budget_currency within tuition max -> budget reason and +10 points.
+11. budget_max + budget_currency overlapping tuition min -> partial budget reason and warning.
+12. Missing tuition -> warning only, no budget points.
+13. Currency mismatch -> warning only, no budget points.
+14. No programs with points > 0 -> no scored matches state renders.
+15. Result cards link to /programs/[slug].
+16. University links point to /universities/[slug] when the joined university is visible.
+17. Draft/in_review/unpublished/archived programs do not appear.
+18. No profile id appears in the URL or rendered page.
+19. No additional_notes content appears on the result page.
+20. /fit-finder save flow still redirects to /fit-finder/result.
+
+---
+
 ## 2026-06-17 - Phase 19: Fit Finder / Student Profile Input Foundation
 
 Tool:
