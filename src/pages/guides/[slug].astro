@@ -10,9 +10,10 @@ const { data: article } = await supabase
   .from('articles')
   .select(`
     id, title, slug, summary, content, published_at,
+    verification_status, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
-    article_categories(name, slug)
+    article_categories(id, name, slug)
   `)
   .eq('slug', slug!)
   .eq('content_status', 'published')
@@ -24,36 +25,63 @@ if (!article) {
 
 const a = article as any
 
+const VERIFICATION_BADGES: Record<string, { label: string; cls: string }> = {
+  verified:           { label: 'Verified',           cls: 'bg-green-50 text-green-700 border border-green-200' },
+  partially_verified: { label: 'Partially Verified', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
+  source_conflict:    { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  outdated:           { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  needs_review:       { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+}
+const verBadge = VERIFICATION_BADGES[a.verification_status] ?? null
+
 function formatDate(d: string | null): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 const pubDate   = formatDate(a.published_at)
-const pageTitle  = a.seo_title || a.title
-const pageDesc   = a.seo_description || a.summary || undefined
-const canonical  = a.canonical_url || `${SITE_URL}/guides/${slug}`
-const ogTitle    = a.og_title || pageTitle
-const ogDesc     = a.og_description || pageDesc
+const pageTitle = a.seo_title || a.title
+const pageDesc  = a.seo_description || a.summary || undefined
+const canonical = a.canonical_url || `${SITE_URL}/guides/${slug}`
+const ogTitle   = a.og_title || pageTitle
+const ogDesc    = a.og_description || pageDesc
+const updatedAt = formatDate(a.updated_at)
 
 const contentParas: string[] = a.content
   ? a.content.split('\n\n').map((p: string) => p.trim()).filter(Boolean)
   : []
+
+const categoryId   = a.article_categories?.id ?? null
+const categoryName = a.article_categories?.name ?? null
 ---
 <PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
   <div class="max-w-2xl mx-auto px-4 py-8">
     <a href="/guides" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Guides</a>
 
     <div class="flex items-center gap-2 text-xs text-gray-400 mb-3">
-      {a.article_categories?.name && (
+      {categoryName && categoryId && (
+        <a href={`/guides?category=${categoryId}`}
+           class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium hover:bg-gray-200">
+          {categoryName}
+        </a>
+      )}
+      {categoryName && !categoryId && (
         <span class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium">
-          {a.article_categories.name}
+          {categoryName}
         </span>
       )}
       {pubDate && <span>{pubDate}</span>}
     </div>
 
-    <h1 class="text-3xl font-bold text-gray-900 mb-4">{a.title}</h1>
+    <h1 class="text-3xl font-bold text-gray-900 mb-3">{a.title}</h1>
+
+    {verBadge && (
+      <div class="mb-4">
+        <span class={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded border ${verBadge.cls}`}>
+          {verBadge.label}
+        </span>
+      </div>
+    )}
 
     {a.summary && (
       <p class="text-gray-500 text-base mb-8 border-l-2 border-gray-200 pl-4">{a.summary}</p>
@@ -68,5 +96,11 @@ const contentParas: string[] = a.content
     ) : (
       !a.summary && <p class="text-gray-400 text-sm">No content available.</p>
     )}
+
+    {updatedAt && (
+      <p class="text-xs text-gray-400 mt-10 mb-6">Last updated: {updatedAt}</p>
+    )}
+
+    <a href="/guides" class="text-sm text-blue-600 hover:underline">← All Guides</a>
   </div>
 </PublicLayout>

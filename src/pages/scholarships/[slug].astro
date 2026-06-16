@@ -15,6 +15,7 @@ const { data: scholarship } = await supabase
     amount_min, amount_max, currency, coverage_notes,
     deadline, deadline_text,
     official_url, application_url, provider_url,
+    verification_status, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description
   `)
@@ -27,6 +28,15 @@ if (!scholarship) {
 }
 
 const s = scholarship as any
+
+const VERIFICATION_BADGES: Record<string, { label: string; cls: string }> = {
+  verified:           { label: 'Verified',           cls: 'bg-green-50 text-green-700 border border-green-200' },
+  partially_verified: { label: 'Partially Verified', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
+  source_conflict:    { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  outdated:           { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  needs_review:       { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+}
+const verBadge = VERIFICATION_BADGES[s.verification_status] ?? null
 
 function formatLabel(value: string | null): string | null {
   if (!value) return null
@@ -47,19 +57,28 @@ function formatDate(d: string | null): string | null {
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-const amount   = formatAmount()
-const deadline = formatDate(s.deadline) ?? s.deadline_text ?? null
-const pageTitle  = s.seo_title || s.name
-const pageDesc   = s.seo_description || s.eligibility_summary || undefined
-const canonical  = s.canonical_url || `${SITE_URL}/scholarships/${slug}`
-const ogTitle    = s.og_title || pageTitle
-const ogDesc     = s.og_description || pageDesc
+const amount    = formatAmount()
+const deadline  = formatDate(s.deadline) ?? s.deadline_text ?? null
+const pageTitle = s.seo_title || s.name
+const pageDesc  = s.seo_description || s.eligibility_summary || undefined
+const canonical = s.canonical_url || `${SITE_URL}/scholarships/${slug}`
+const ogTitle   = s.og_title || pageTitle
+const ogDesc    = s.og_description || pageDesc
+const updatedAt = formatDate(s.updated_at)
 ---
 <PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
   <div class="max-w-3xl mx-auto px-4 py-8">
     <a href="/scholarships" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Scholarships</a>
 
-    <h1 class="text-3xl font-bold text-gray-900 mb-6">{s.name}</h1>
+    <h1 class="text-3xl font-bold text-gray-900 mb-3">{s.name}</h1>
+
+    {verBadge && (
+      <div class="mb-5">
+        <span class={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded border ${verBadge.cls}`}>
+          {verBadge.label}
+        </span>
+      </div>
+    )}
 
     <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm mb-8 bg-gray-50 rounded-lg p-5 border border-gray-200">
       {s.scholarship_type && (
@@ -104,33 +123,6 @@ const ogDesc     = s.og_description || pageDesc
           <dd class="text-gray-900">{deadline}</dd>
         </div>
       )}
-      {s.official_url && (
-        <div class="sm:col-span-2">
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Official Page</dt>
-          <dd>
-            <a href={s.official_url} target="_blank" rel="noopener noreferrer"
-               class="text-blue-600 hover:underline break-all">{s.official_url}</a>
-          </dd>
-        </div>
-      )}
-      {s.application_url && (
-        <div class="sm:col-span-2">
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Apply</dt>
-          <dd>
-            <a href={s.application_url} target="_blank" rel="noopener noreferrer"
-               class="text-blue-600 hover:underline break-all">{s.application_url}</a>
-          </dd>
-        </div>
-      )}
-      {s.provider_url && (
-        <div class="sm:col-span-2">
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Provider Website</dt>
-          <dd>
-            <a href={s.provider_url} target="_blank" rel="noopener noreferrer"
-               class="text-blue-600 hover:underline break-all">{s.provider_url}</a>
-          </dd>
-        </div>
-      )}
     </dl>
 
     {s.overview && (
@@ -154,11 +146,40 @@ const ogDesc     = s.og_description || pageDesc
       </div>
     )}
 
-    {s.deadline_text && s.deadline && (
+    {s.deadline_text && (
       <div class="mb-5">
         <h2 class="text-base font-semibold text-gray-800 mb-2">Deadline Notes</h2>
         <p class="text-gray-700 text-sm">{s.deadline_text}</p>
       </div>
     )}
+
+    {(s.application_url || s.official_url || s.provider_url) && (
+      <div class="mt-8 mb-6 flex flex-col sm:flex-row gap-3">
+        {s.application_url && (
+          <a href={s.application_url} target="_blank" rel="noopener noreferrer"
+             class="inline-block px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 text-center">
+            Apply Now ↗
+          </a>
+        )}
+        {s.official_url && (
+          <a href={s.official_url} target="_blank" rel="noopener noreferrer"
+             class="inline-block px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 text-center">
+            Official Scholarship Page ↗
+          </a>
+        )}
+        {s.provider_url && (
+          <a href={s.provider_url} target="_blank" rel="noopener noreferrer"
+             class="inline-block px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 text-center">
+            Provider Website ↗
+          </a>
+        )}
+      </div>
+    )}
+
+    {updatedAt && (
+      <p class="text-xs text-gray-400 mb-6">Last updated: {updatedAt}</p>
+    )}
+
+    <a href="/scholarships" class="text-sm text-blue-600 hover:underline">← All Scholarships</a>
   </div>
 </PublicLayout>

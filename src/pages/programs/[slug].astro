@@ -16,6 +16,7 @@ const { data: program } = await supabase
     application_url, official_url,
     admission_requirements, english_requirements, gpa_requirements,
     curriculum_summary, career_outcomes,
+    verification_status, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
     universities(name, slug),
@@ -32,7 +33,37 @@ if (!program) {
   return new Response(null, { status: 404 })
 }
 
+const { data: intakesData } = await supabase
+  .from('program_intakes')
+  .select('intake_name, intake_month, intake_year, application_open_date, application_deadline_date, deadline_text, deadline_status, is_rolling, notes')
+  .eq('program_id', program.id)
+  .order('application_deadline_date', { ascending: true, nullsFirst: false })
+  .limit(10)
+
+const intakes = intakesData ?? []
+
 const p = program as any
+
+const VERIFICATION_BADGES: Record<string, { label: string; cls: string }> = {
+  verified:           { label: 'Verified',           cls: 'bg-green-50 text-green-700 border border-green-200' },
+  partially_verified: { label: 'Partially Verified', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
+  source_conflict:    { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  outdated:           { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  needs_review:       { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+}
+const verBadge = VERIFICATION_BADGES[p.verification_status] ?? null
+
+const INTAKE_STATUS_BADGES: Record<string, { label: string; cls: string }> = {
+  open:          { label: 'Open',          cls: 'bg-green-50 text-green-700 border border-green-200' },
+  closing_soon:  { label: 'Closing Soon',  cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  closed:        { label: 'Closed',        cls: 'bg-gray-100 text-gray-500 border border-gray-200' },
+  rolling:       { label: 'Rolling',       cls: 'bg-blue-50 text-blue-700 border border-blue-200' },
+}
+
+function formatDate(d: string | null): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
 
 function formatTuition(): string | null {
   if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
@@ -49,13 +80,35 @@ function formatTuition(): string | null {
   return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
 }
 
-const tuition = formatTuition()
-const hasEnglishReqs = p.english_requirements != null && Object.keys(p.english_requirements).length > 0
-const pageTitle  = p.seo_title || p.title
-const pageDesc   = p.seo_description || undefined
-const canonical  = p.canonical_url || `${SITE_URL}/programs/${slug}`
-const ogTitle    = p.og_title || pageTitle
-const ogDesc     = p.og_description || pageDesc
+type EnglishReqEntry = { test: string; details: string }
+
+function formatEnglishReqs(reqs: unknown): EnglishReqEntry[] | null {
+  if (!reqs || typeof reqs !== 'object' || Array.isArray(reqs)) return null
+  const entries = Object.entries(reqs as Record<string, unknown>)
+  if (entries.length === 0) return null
+  return entries.map(([test, val]) => {
+    const testName = test.toUpperCase()
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const parts = Object.entries(val as Record<string, unknown>)
+        .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+      return { test: testName, details: parts.join(' · ') }
+    }
+    return { test: testName, details: String(val) }
+  })
+}
+
+const tuition     = formatTuition()
+const englishReqs = formatEnglishReqs(p.english_requirements)
+const hasEnglishReqs = p.english_requirements != null &&
+  typeof p.english_requirements === 'object' &&
+  !Array.isArray(p.english_requirements)
+
+const pageTitle = p.seo_title || p.title
+const pageDesc  = p.seo_description || undefined
+const canonical = p.canonical_url || `${SITE_URL}/programs/${slug}`
+const ogTitle   = p.og_title || pageTitle
+const ogDesc    = p.og_description || pageDesc
+const updatedAt = formatDate(p.updated_at)
 ---
 <PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
   <div class="max-w-3xl mx-auto px-4 py-8">
@@ -67,7 +120,15 @@ const ogDesc     = p.og_description || pageDesc
       </p>
     )}
 
-    <h1 class="text-3xl font-bold text-gray-900 mb-6">{p.title}</h1>
+    <h1 class="text-3xl font-bold text-gray-900 mb-3">{p.title}</h1>
+
+    {verBadge && (
+      <div class="mb-5">
+        <span class={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded border ${verBadge.cls}`}>
+          {verBadge.label}
+        </span>
+      </div>
+    )}
 
     <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm mb-8 bg-gray-50 rounded-lg p-5 border border-gray-200">
       {p.degree_levels?.name && (
@@ -136,30 +197,37 @@ const ogDesc     = p.og_description || pageDesc
           <dd class="text-gray-900">{p.gpa_requirements}</dd>
         </div>
       )}
-      {p.official_url && (
-        <div class="sm:col-span-2">
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Official Page</dt>
-          <dd>
-            <a href={p.official_url} target="_blank" rel="noopener noreferrer"
-               class="text-blue-600 hover:underline break-all">{p.official_url}</a>
-          </dd>
-        </div>
-      )}
-      {p.application_url && (
-        <div class="sm:col-span-2">
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Apply</dt>
-          <dd>
-            <a href={p.application_url} target="_blank" rel="noopener noreferrer"
-               class="text-blue-600 hover:underline break-all">{p.application_url}</a>
-          </dd>
-        </div>
-      )}
     </dl>
+
+    {p.admission_requirements && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">Admission Requirements</h2>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.admission_requirements}</p>
+      </div>
+    )}
+
+    {hasEnglishReqs && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-2">English Requirements</h2>
+        {englishReqs ? (
+          <ul class="space-y-1 text-sm text-gray-700">
+            {englishReqs.map((entry: EnglishReqEntry) => (
+              <li>
+                <span class="font-medium">{entry.test}</span>
+                {entry.details && ` — ${entry.details}`}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p class="text-gray-700 text-sm">English proficiency requirements apply. See the official program page for details.</p>
+        )}
+      </div>
+    )}
 
     {p.tuition_notes && (
       <div class="mb-5">
         <h2 class="text-base font-semibold text-gray-800 mb-2">Tuition Notes</h2>
-        <p class="text-gray-700 text-sm">{p.tuition_notes}</p>
+        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.tuition_notes}</p>
       </div>
     )}
 
@@ -170,6 +238,43 @@ const ogDesc     = p.og_description || pageDesc
           {[p.application_fee_currency, Number(p.application_fee_amount).toLocaleString()].filter(Boolean).join(' ')}
           {p.application_fee_notes && ` — ${p.application_fee_notes}`}
         </p>
+      </div>
+    )}
+
+    {intakes.length > 0 && (
+      <div class="mb-5">
+        <h2 class="text-base font-semibold text-gray-800 mb-3">Intakes & Deadlines</h2>
+        <div class="space-y-3">
+          {intakes.map((intake: any) => (
+            <div class="bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 text-sm">
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                {intake.intake_name && (
+                  <span class="font-medium text-gray-900">{intake.intake_name}</span>
+                )}
+                {intake.is_rolling && (
+                  <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">Rolling</span>
+                )}
+                {!intake.is_rolling && intake.deadline_status && INTAKE_STATUS_BADGES[intake.deadline_status] && (
+                  <span class={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded border ${INTAKE_STATUS_BADGES[intake.deadline_status].cls}`}>
+                    {INTAKE_STATUS_BADGES[intake.deadline_status].label}
+                  </span>
+                )}
+              </div>
+              {intake.application_open_date && (
+                <p class="text-gray-600">Opens: {formatDate(intake.application_open_date)}</p>
+              )}
+              {intake.application_deadline_date && (
+                <p class="text-gray-600">Deadline: {formatDate(intake.application_deadline_date)}</p>
+              )}
+              {intake.deadline_text && (
+                <p class="text-gray-600">{intake.deadline_text}</p>
+              )}
+              {intake.notes && (
+                <p class="text-gray-500 mt-1">{intake.notes}</p>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     )}
 
@@ -187,18 +292,27 @@ const ogDesc     = p.og_description || pageDesc
       </div>
     )}
 
-    {p.admission_requirements && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">Admission Requirements</h2>
-        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.admission_requirements}</p>
+    {(p.application_url || p.official_url) && (
+      <div class="mt-8 mb-6 flex flex-col sm:flex-row gap-3">
+        {p.application_url && (
+          <a href={p.application_url} target="_blank" rel="noopener noreferrer"
+             class="inline-block px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 text-center">
+            Apply Now ↗
+          </a>
+        )}
+        {p.official_url && (
+          <a href={p.official_url} target="_blank" rel="noopener noreferrer"
+             class="inline-block px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 text-center">
+            Official Program Page ↗
+          </a>
+        )}
       </div>
     )}
 
-    {hasEnglishReqs && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">English Requirements</h2>
-        <pre class="text-xs text-gray-700 bg-gray-50 rounded p-3 border border-gray-200 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(p.english_requirements, null, 2)}</pre>
-      </div>
+    {updatedAt && (
+      <p class="text-xs text-gray-400 mb-6">Last updated: {updatedAt}</p>
     )}
+
+    <a href="/programs" class="text-sm text-blue-600 hover:underline">← All Programs</a>
   </div>
 </PublicLayout>
