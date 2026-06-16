@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin/
+Disallow: /login
+Disallow: /auth/
+Disallow: /api/
+
+Sitemap: https://degreewiki.com/sitemap.xml
