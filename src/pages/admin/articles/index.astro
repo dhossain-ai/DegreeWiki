@@ -1,7 +1,7 @@
 ---
-import AdminLayout from '../../layouts/AdminLayout.astro'
-import { requireSuperAdmin } from '../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -9,32 +9,48 @@ if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin 
 
 const { user, supabase } = guard
 
-const { data, error } = await supabase
-  .from('articles')
-  .select('id, title, slug, content_status, published_at, created_at')
-  .order('created_at', { ascending: false })
-  .limit(100)
+const [articlesResult, categoriesResult] = await Promise.all([
+  supabase
+    .from('articles')
+    .select('id, title, slug, content_status, article_category_id, published_at, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100),
+  supabase
+    .from('article_categories')
+    .select('id, name'),
+])
 
 type ArticleRow = {
   id: string
   title: string
   slug: string
   content_status: string
+  article_category_id: string | null
   published_at: string | null
   created_at: string
 }
-const rows = (data ?? []) as ArticleRow[]
+type CategoryRow = { id: string; name: string }
+
+const rows = (articlesResult.data ?? []) as ArticleRow[]
+const loadError = articlesResult.error
+
+const categoryMap = new Map<string, string>(
+  ((categoriesResult.data ?? []) as CategoryRow[]).map(c => [c.id, c.name])
+)
 ---
 <AdminLayout title="Articles — DegreeWiki Admin" activePath="/admin/articles" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-bold text-gray-900">Articles</h1>
-    <span class="text-sm text-gray-400">Read-only · {rows.length} shown</span>
+    <a href="/admin/articles/new"
+      class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      + New Article
+    </a>
   </div>
 
-  {error ? (
+  {loadError ? (
     <p class="text-sm text-red-600 py-4">Could not load data.</p>
   ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No records found.</p>
+    <p class="text-sm text-gray-500 py-4">No articles found. <a href="/admin/articles/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
   ) : (
     <div class="overflow-x-auto rounded-lg border border-gray-200">
       <table class="w-full text-sm text-left">
@@ -42,9 +58,11 @@ const rows = (data ?? []) as ArticleRow[]
           <tr>
             <th class="px-4 py-3">Title</th>
             <th class="px-4 py-3">Slug</th>
+            <th class="px-4 py-3">Category</th>
             <th class="px-4 py-3">Status</th>
             <th class="px-4 py-3">Published At</th>
             <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
@@ -52,6 +70,9 @@ const rows = (data ?? []) as ArticleRow[]
             <tr class="border-b border-gray-100 hover:bg-gray-50">
               <td class="px-4 py-3 font-medium text-gray-900">{row.title}</td>
               <td class="px-4 py-3 text-gray-500 font-mono text-xs">{row.slug}</td>
+              <td class="px-4 py-3 text-gray-600 text-xs">
+                {row.article_category_id ? (categoryMap.get(row.article_category_id) ?? '—') : '—'}
+              </td>
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
                   {row.content_status}
@@ -61,6 +82,9 @@ const rows = (data ?? []) as ArticleRow[]
                 {row.published_at ? new Date(row.published_at).toLocaleDateString() : '—'}
               </td>
               <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3 text-right">
+                <a href={`/admin/articles/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+              </td>
             </tr>
           ))}
         </tbody>

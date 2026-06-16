@@ -4,13 +4,53 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 07 — Scholarships CRUD Foundation — implementation complete, pending manual verification.
+Phase 08 — Articles / Guides CRUD Foundation — implementation complete, pending manual verification.
 
-Scholarships list/new/edit built with server-side Astro form POST handling. 20 fields across
-7 form sections. No new validate.ts helpers needed (all existing helpers reused). No migrations,
-no service_role in src, no secrets committed. npm run build passed (Cloudflare output, 2.75s).
+Articles list/new/edit built with server-side Astro form POST handling. 8 fields across
+5 form sections. No new validate.ts helpers or migrations needed. No service_role in src,
+no secrets committed. npm run build passed (Cloudflare output, 6.74s, zero errors).
 
 ## Last Completed Work
+
+Phase 08 — Articles / Guides CRUD Foundation (implementation complete):
+
+- Deleted src/pages/admin/articles.astro (flat Phase 04 read-only stub).
+  Replaced with articles/ folder to allow sub-routes (same URL /admin/articles, no breakage).
+- Added src/pages/admin/articles/index.astro — list: title, slug, category name (via Map),
+  content_status badge, published_at, created_at, Edit link. "+ New Article" button.
+  Category names resolved client-side from a parallel article_categories fetch → Map<id, name>.
+- Added src/pages/admin/articles/new.astro — create form with 5 sections and 8 fields.
+- Added src/pages/admin/articles/[id].astro — edit form; loads existing record and article_categories
+  in parallel, prefills all fields.
+- AdminSidebar.astro: no change needed — Articles link already present at /admin/articles.
+- No new validate.ts helpers needed — all existing helpers reused.
+- npm run build: PASS (Cloudflare output, 6.74s, zero errors).
+- Grep service_role src/: 0 matches.
+
+Routes added:
+  /admin/articles        — list with status badges, category column, published_at
+  /admin/articles/new    — create form
+  /admin/articles/[id]   — edit form
+
+Fields implemented (8):
+  title, slug, article_category_id (select from seeded categories),
+  summary, content, content_status, indexing_status, verification_status.
+
+Special server-side behaviors:
+  author_user_id — set silently on INSERT only; not shown in UI, not modified on edit.
+  published_at — set only on first transition to content_status = 'published';
+                 never reset on subsequent saves or re-publishes.
+  article_category_id — validated against live-loaded categories before DB write;
+                        submitted as null when left empty.
+
+Exclusions (deferred):
+  No public guide/article pages.
+  No SEO fields (seo_title, seo_description, seo_h1, canonical_url, og_title, og_description).
+  No media fields (featured_image_id, og_image_id).
+  No junction tables (article_countries, article_subjects, article_degree_levels).
+  No article category CRUD.
+  No delete.
+  No service_role in src.
 
 Phase 07 — Scholarships CRUD Foundation (implementation complete):
 
@@ -227,7 +267,7 @@ Phase 01 — Database Schema v1 (complete):
 
 ## Active Branch
 
-feature/phase-07-scholarships-crud-foundation
+feature/phase-08-articles-crud-foundation
 
 ## Migration Files Created
 
@@ -278,10 +318,13 @@ the admin dashboard server endpoints.
 
 ## Next Steps
 
-1. Manually verify all three scholarship routes: anonymous redirect, student 403, super_admin access.
-2. Test scholarship create: required field errors, slug auto-gen, duplicate slug, numeric errors,
-   amount_max < amount_min error, invalid URL error, invalid date, successful create.
-3. Verify created scholarship row has all fields saved correctly in Supabase.
-4. Test scholarship edit: prefill, save changes, 404 on nonexistent ID.
-5. Merge feature/phase-07-scholarships-crud-foundation to main after manual verification.
-6. Begin Phase 08: TBD (scholarship relationship editors, articles CRUD, or public SEO pages).
+1. Manually verify all three article routes: anonymous redirect, student 403, super_admin access.
+2. Test article create: required field errors, slug auto-gen, duplicate slug, successful create.
+3. Verify created article row has all fields saved correctly in Supabase (including author_user_id set).
+4. Test create with content_status = published: confirm published_at is set in DB.
+5. Test article edit: prefill, save changes, 404 on nonexistent ID.
+6. Verify category dropdown shows all 7 seeded categories on create and edit forms.
+7. Test category validation: confirm article_category_id submitted as null when empty.
+8. Verify re-publishing a published article does not reset published_at.
+9. Merge feature/phase-08-articles-crud-foundation to main after manual verification.
+10. Begin Phase 09: TBD (SEO fields, junction table editors, or public guide pages).

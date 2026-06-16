@@ -4,6 +4,156 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 08: Articles / Guides CRUD Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Add safe admin create/edit forms for articles/guides through server-side Astro form POST handling.
+No migrations, no service_role, no React, no client-side JS.
+
+Pre-implementation column verification:
+- articles: id, slug, title, summary, content, author_user_id, article_category_id,
+  featured_image_id, og_image_id, content_status, verification_status, indexing_status,
+  data_completeness_score, source_confidence_score, published_at,
+  seo_title, seo_description, seo_h1, canonical_url, og_title, og_description,
+  created_at, updated_at (migration 008).
+- article_categories: id, name, slug, parent_category_id, display_order, created_at, updated_at.
+  7 rows seeded in migration 015:
+  Country Guides, University Guides, Program Guides, Scholarship Guides,
+  Application Advice, Visa and Work, Student Life.
+- Junction tables confirmed (all deferred): article_countries, article_subjects, article_degree_levels.
+- Existing src/pages/admin/articles.astro was a read-only stub (no create/edit, no New button).
+  AdminSidebar already listed /admin/articles — no sidebar change needed.
+
+Completed:
+
+src/pages/admin/articles.astro DELETED.
+Reason: cannot have both articles.astro (file) and articles/ (folder) in the same directory.
+Same URL /admin/articles retained via articles/index.astro.
+
+src/pages/admin/articles/index.astro (replaces stub):
+- Two parallel Supabase queries: articles list + article_categories (for name lookup).
+- Category names resolved via Map<id, name> (no join, per approved plan).
+- List table: title, slug, category name, content_status badge, published_at, created_at, Edit link.
+- "+ New Article" button (top-right).
+- Empty state with link to create first article.
+
+src/pages/admin/articles/new.astro (create form):
+- 8 fields across 5 sections: Identity, Categorisation, Content, Publishing, Verification.
+- article_categories loaded via separate query; validCategoryIds Set used for server-side validation.
+- author_user_id set to user.id on INSERT only; not shown in form.
+- published_at set to new Date().toISOString() on INSERT only if content_status === 'published'.
+- POST-redirect-GET to /admin/articles on success.
+- 23505 → "An article with this slug already exists."
+
+src/pages/admin/articles/[id].astro (edit form):
+- article record and article_categories loaded in parallel (Promise.all).
+- 404 if article not found.
+- published_at logic: isFirstPublish = (values.content_status === 'published' && record.published_at === null).
+  Only then is published_at: new Date().toISOString() included in the UPDATE payload.
+  Subsequent saves and re-publishes do not modify published_at.
+- author_user_id NOT included in update payload — never overwritten.
+- Same validation and form structure as new.astro.
+- Uses .update().eq('id', id).
+- Page title: "Edit {record.title}".
+- Button text: "Save Changes".
+
+src/lib/admin/validate.ts: NO CHANGES — all existing helpers sufficient.
+  validateRequired, validateSlug, validateIn all reused.
+
+Validation behavior:
+- Required: title, slug, content_status, indexing_status, verification_status.
+- Slug auto-generated from title via toSlug() if blank on POST.
+- Slug format: ^[a-z0-9]+(?:-[a-z0-9]+)*$.
+- content_status: required + validateIn against 5 enum values.
+- indexing_status: required + validateIn against 3 values (draft|index|noindex).
+- verification_status: required + validateIn against 6 enum values.
+- article_category_id: optional; if non-empty, validated against validCategoryIds Set
+  (loaded from article_categories before POST handling). Submitted as null when empty.
+- summary, content: optional; no length or format validation.
+- Form values preserved on validation failure.
+- Constraint errors (code 23505) surface as human-readable messages.
+
+Important decisions:
+- published_at set only once — on first transition to content_status = 'published'.
+  Not a DB trigger. Not reset on re-publish. record.published_at read from the initial
+  SELECT to detect whether this is a first publish (null → 'published').
+- author_user_id set silently on INSERT using user.id from the guard result.
+  Not displayed in the form. Not touched on UPDATE.
+- article_category_id validated server-side against the live Set of loaded category IDs.
+  Empty string submitted as null (|| null pattern, consistent with Phase 06/07).
+- SEO fields (seo_title, seo_description, seo_h1, canonical_url, og_title, og_description) — deferred.
+- Media fields (featured_image_id, og_image_id) — deferred (no upload capability).
+- Junction tables (article_countries, article_subjects, article_degree_levels) — deferred.
+- data_completeness_score, source_confidence_score — server-computed; not in form.
+- Guard: requireSuperAdmin (consistent with all Phase 05–07 admin pages).
+- No new guard functions, no new validate.ts helpers, no new npm dependencies.
+- No public guide/article pages added.
+- No delete added.
+
+Fields intentionally skipped:
+- author_user_id (auto-set on insert, never shown)
+- featured_image_id, og_image_id (no media upload)
+- data_completeness_score, source_confidence_score (server-set)
+- published_at (server-set, not a form field)
+- seo_title, seo_description, seo_h1, canonical_url, og_title, og_description (deferred)
+- All three junction tables (deferred)
+
+Build result:
+npm run build: PASS (Cloudflare output, 6.74s, zero errors)
+
+service_role search:
+Grep "service_role" in src/ → 0 matches
+
+Git status:
+- deleted: src/pages/admin/articles.astro
+- untracked: src/pages/admin/articles/
+- modified: docs/06-status.md
+- modified: docs/07-task-log.md
+
+Files created:
+- src/pages/admin/articles/index.astro
+- src/pages/admin/articles/new.astro
+- src/pages/admin/articles/[id].astro
+
+Files modified:
+- docs/06-status.md
+- docs/07-task-log.md
+
+Files deleted:
+- src/pages/admin/articles.astro (replaced by articles/index.astro)
+
+Manual test checklist:
+- Visit /admin/articles while logged out → redirect to /login
+- Visit /admin/articles as non-super-admin → 403 Forbidden
+- Visit /admin/articles as super_admin → list renders with "+ New Article" button
+- Empty list shows "No articles found. Add the first one." link
+- Submit empty create form → errors on Title, Slug, Status
+- Enter title only, leave slug blank → slug auto-generated from title
+- Create duplicate slug → server error "An article with this slug already exists."
+- Create without category → row in list shows — in category column
+- Create with category → category name appears in list
+- Create with content_status = published → published_at set in DB, date shown in list
+- Create with content_status = draft → published_at is null, — in list
+- Click Edit → form pre-populated with all saved values
+- Change title, save → list shows updated title
+- Edit published article, change title only → published_at unchanged
+- Edit draft article, change to published → published_at set for first time
+- Edit already-published article, change to unpublished then back to published → published_at not reset
+- Category dropdown shows all 7 seeded categories on create and edit forms
+- Visit /admin/articles/nonexistent-uuid → 404
+
+Next:
+- Manually verify all three article routes against the test checklist above.
+- Verify author_user_id is set correctly in Supabase after create.
+- Verify published_at behavior on first publish and re-publish.
+- Merge feature/phase-08-articles-crud-foundation to main after manual verification.
+- Begin Phase 09: TBD (SEO fields, junction table editors, or public guide pages).
+
+---
+
 ## 2026-06-16 - Phase 07: Scholarships CRUD Foundation
 
 Tool:
