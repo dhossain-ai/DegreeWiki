@@ -4,11 +4,76 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 12 — TBD.
+Phase 13 — TBD.
 
-Phase 11 — Public Scholarship Search & Filter Foundation — implementation complete, pending manual verification.
+Phase 12 — Public University Search & Filter Foundation — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 12 — Public University Search & Filter Foundation (implementation complete):
+
+- Upgraded /universities from a basic published-university list into a server-rendered
+  university discovery page with GET-form search and filters. No admin changes, no migrations,
+  no new dependencies, no React, no client-side JS, no service_role.
+- Replaced src/pages/universities/index.astro — full rewrite with filter form, conditional
+  Supabase query, result cards, result count, over-limit notice, and empty states.
+
+Filters implemented (3 total, all via GET query params):
+  q       — universities.name ilike '%q%'
+  country — universities.country_id = <uuid>
+  city    — universities.city_id = <uuid>
+
+Filters deferred (columns do not exist in current schema — no migration added):
+  institution_type — not a column on universities table in schema v1
+  ownership_type   — not a column on universities table in schema v1
+  short_name       — not a column on universities table in schema v1
+
+Validation:
+  q: trim, max 100 chars. Empty string → absent.
+  country/city: UUID regex validated — invalid values treated as absent.
+  Invalid filters never crash the page; they are silently dropped before the query.
+
+Supabase query strategy:
+  Single query with { count: 'exact' } and .limit(201).
+  .eq('content_status', 'published') always applied (belt-and-suspenders + planner hint).
+  .order('name', { ascending: true }).
+  Filters chained conditionally: if (q) ilike, if (countryId) eq, if (cityId) eq.
+  Lookup queries (countries, cities) run in Promise.all in parallel.
+  Failed lookups default to [] — page does not crash.
+  Uses existing createClient(Astro.cookies, Astro.request) — anon key, RLS enforced.
+
+Result UI:
+  Card layout. Each card shows: name (link to /universities/[slug]),
+  country/city location line, ranking_summary (truncated, if set),
+  official_url as "Official site ↗" link (if set, right-aligned).
+  Result count shown above results. Over-200 notice when more than 200 match.
+  Selected filter values preserved after form submit.
+  Clear filters link shown when any filter is active.
+
+noindex behavior:
+  Filtered URLs (/universities?...) render <meta name="robots" content="noindex, follow">.
+  Unfiltered /universities has no robots meta tag and remains indexable.
+  Uses existing noindex prop support from Phase 10 (BaseLayout + PublicLayout).
+
+Empty states:
+  No filters + no rows → "No universities have been published yet."
+  Filters active + no rows → "No universities match your filters." + clear filters link.
+  Neither message reveals unpublished or hidden data.
+
+npm run build: PASS (Cloudflare server build, 1.48s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No institution_type or ownership_type filters (columns absent from schema v1).
+  No short_name display (column absent from schema v1).
+  No pagination (hard limit 200 with over-limit notice).
+  No city-scoped-by-country cascade (global city dropdown for Phase 12).
+  No cross-table name search (country/city name search deferred).
+  No AI, no saved items, no user dashboard.
+  No admin page changes.
+  No new dependencies.
+  No migrations.
+  No SEO landing pages for filter combinations.
 
 Phase 11 — Public Scholarship Search & Filter Foundation (implementation complete):
 

@@ -4,6 +4,146 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 12: Public University Search & Filter Foundation
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Upgrade /universities from a basic published-university list into a server-rendered university
+discovery page with GET-form search and filters.
+No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+no AI, no saved items, no service_role.
+
+---
+
+### Files Changed
+
+src/pages/universities/index.astro (full replacement):
+  Previous version: single Supabase query, 4-column table, LIMIT 100, no filters, no search.
+  New version: GET filter form, 3 conditional filters, card result list, result count,
+  over-limit notice, two empty states, noindex logic, parallel lookup queries.
+
+---
+
+### Schema Finding
+
+universities table (migration 005) confirmed columns available for filtering:
+  name (text) — searchable via ilike
+  country_id (uuid FK → countries) — filterable by UUID
+  city_id (uuid FK → cities) — filterable by UUID, nullable
+
+Columns NOT present in schema v1 — no migration added:
+  institution_type — does not exist
+  ownership_type   — does not exist
+  short_name       — does not exist
+
+---
+
+### Query Params Implemented
+
+  q       — universities.name ilike '%q%' (name only; city/country name search deferred)
+  country — universities.country_id = <uuid>
+  city    — universities.city_id = <uuid>
+
+---
+
+### Validation Behavior
+
+  q:       trim(), slice(0, 100). Empty string → undefined (filter absent).
+  country: UUID regex (/^[0-9a-f]{8}-...-[0-9a-f]{12}$/i). Invalid → undefined (filter absent).
+  city:    same UUID regex as country.
+  All failures are silent — no error messages, no crashes, filter treated as absent.
+
+---
+
+### Supabase Query Strategy
+
+Lookup queries (parallel Promise.all):
+  supabase.from('countries').select('id, name').order('name')
+  supabase.from('cities').select('id, name').order('name')
+  RLS enforces published-only for both. Failed lookups default to [].
+
+Universities main query:
+  supabase.from('universities')
+    .select('id, name, slug, official_url, ranking_summary, countries(name), cities(name)',
+            { count: 'exact' })
+    .eq('content_status', 'published')
+    .order('name')
+    .limit(201)
+  Filters chained conditionally:
+    if (q)         query = query.ilike('name', `%${q}%`)
+    if (countryId) query = query.eq('country_id', countryId)
+    if (cityId)    query = query.eq('city_id', cityId)
+  overLimit = (count ?? allRows.length) > 200
+  rows = allRows.slice(0, 200)
+
+---
+
+### noindex Behavior
+
+  hasFilters = !!(q || countryId || cityId)
+  <PublicLayout noindex={hasFilters}>
+  Filtered URLs (/universities?...) → <meta name="robots" content="noindex, follow">
+  Unfiltered /universities → no robots meta tag, remains indexable.
+  Uses existing noindex prop from Phase 10 (BaseLayout + PublicLayout).
+
+---
+
+### Build Result
+
+  npm run build: PASS
+  Cloudflare server build, 1.48s, zero errors, zero warnings (Sharp warning is pre-existing).
+
+---
+
+### service_role Result
+
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+1. GET /universities — blank form, all published universities listed, no noindex in source.
+2. GET /universities?q=mit — name filter works, q field pre-filled, noindex in source.
+3. GET /universities?country=<valid-uuid> — country dropdown shows selection, results filtered.
+4. GET /universities?city=<valid-uuid> — city dropdown shows selection, results filtered.
+5. GET /universities?country=not-a-uuid — treated as no filter, page does not error.
+6. GET /universities?q=&country=&city= — all empty params treated as absent, full list shown.
+7. GET /universities?q=xyz&country=<uuid> — combined filters AND-chained correctly.
+8. Result count shown correctly ("N universities found.").
+9. Over-200 notice appears if enough data exists.
+10. Empty result with filters → "No universities match your filters." + clear filters link.
+11. Empty result without filters → "No universities have been published yet."
+12. University card: name link, location (country/city), ranking_summary, official_url link all render correctly.
+13. name link goes to /universities/[slug] (detail page — no regression).
+14. official_url opens in new tab with rel="noopener noreferrer".
+15. Clear filters link returns to /universities.
+16. Selected filter values preserved after form submit.
+17. GET /universities/[slug] — detail page loads without regression.
+18. GET /programs — no regression.
+19. GET /scholarships — no regression.
+20. GET /admin/ unauthenticated — redirects to /login (no admin regression).
+
+---
+
+### Explicit Exclusions
+
+  institution_type filter — column does not exist in schema v1.
+  ownership_type filter   — column does not exist in schema v1.
+  short_name display      — column does not exist in schema v1.
+  No city-scoped-by-country cascade (global city dropdown).
+  No cross-table name search (country/city name via ilike).
+  No pagination (hard limit 200 with over-limit notice).
+  No AI, no saved items, no user dashboard.
+  No admin page changes.
+  No new dependencies.
+  No migrations.
+  No SEO landing pages for filter combinations.
+
+---
+
 ## 2026-06-16 - Phase 11: Public Scholarship Search & Filter Foundation
 
 Tool:
