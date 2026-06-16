@@ -4,22 +4,36 @@ import { createClient } from '../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 const { data: { user } } = await supabase.auth.getUser()
+
+const publicLinks = [
+  { href: '/universities', label: 'Universities' },
+  { href: '/programs',     label: 'Programs'     },
+  { href: '/scholarships', label: 'Scholarships' },
+  { href: '/guides',       label: 'Guides'        },
+]
 ---
 <BaseLayout title="DegreeWiki">
   <main class="max-w-2xl mx-auto p-8">
     <h1 class="text-3xl font-bold mb-4">DegreeWiki</h1>
+
+    <nav class="flex flex-wrap gap-4 text-sm mb-8">
+      {publicLinks.map(link => (
+        <a href={link.href} class="text-blue-600 hover:underline">{link.label}</a>
+      ))}
+    </nav>
+
     {user ? (
-      <div>
-        <p class="mb-4">Signed in as <strong>{user.email}</strong></p>
+      <div class="text-sm text-gray-600">
+        <p class="mb-3">Signed in as <strong class="text-gray-900">{user.email}</strong></p>
         <div class="flex gap-4">
-          <a href="/admin" class="text-blue-600 underline">Admin dashboard</a>
+          <a href="/admin" class="text-blue-600 hover:underline">Admin dashboard</a>
           <form method="post" action="/api/auth/logout">
-            <button type="submit" class="text-red-600 underline">Logout</button>
+            <button type="submit" class="text-red-600 hover:underline">Logout</button>
           </form>
         </div>
       </div>
     ) : (
-      <a href="/login" class="text-blue-600 underline">Sign in</a>
+      <a href="/login" class="text-sm text-blue-600 hover:underline">Sign in</a>
     )}
   </main>
 </BaseLayout>
