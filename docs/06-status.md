@@ -4,11 +4,119 @@ Last updated: 2026-06-16
 
 ## Current Phase
 
-Phase 16 — TBD.
+Phase 17 — TBD.
 
-Phase 15 — Basic SEO System — implementation complete, pending manual verification.
+Phase 16 — Public Detail Page Polish — implementation complete, pending manual verification.
 
 ## Last Completed Work
+
+Phase 16 — Public Detail Page Polish (implementation complete):
+
+- Polished all four public detail pages (programs, scholarships, universities, guides).
+  No admin changes, no migrations, no new dependencies, no React, no client-side JS,
+  no AI, no service_role, no set:html, no markdown renderer.
+
+Files changed (4 source files):
+  src/pages/programs/[slug].astro
+  src/pages/scholarships/[slug].astro
+  src/pages/universities/[slug].astro
+  src/pages/guides/[slug].astro
+
+Route improvements:
+
+  programs/[slug]:
+    - Added verification_status and updated_at to Supabase select.
+    - Added secondary program_intakes query (runs after 404 check; defaults to [] on error).
+    - Renders "Intakes & Deadlines" section when program_intakes rows exist; omitted when empty.
+    - Intake rows show intake_name, open date, deadline date, deadline_text, deadline_status badge
+      (open/closing_soon/closed/rolling), is_rolling flag, and notes.
+    - Replaced JSON.stringify/pre block for english_requirements with a readable <ul> list:
+      Object.entries() over the JSONB — test name uppercased, nested properties joined as
+      "key: value · key: value". Falls back to plain text notice if shape is unexpected.
+    - Removed official_url and application_url from key facts <dl>; moved to CTA block.
+    - CTA block: "Apply Now ↗" (application_url, blue filled) + "Official Program Page ↗"
+      (official_url, border ghost). Shown only when at least one URL exists.
+    - Section order: Key Facts → Admission Requirements → English Requirements →
+      Tuition Notes → Application Fee → Intakes & Deadlines → Curriculum → Career Outcomes
+      → CTA block → Last updated → Back link.
+    - Added bottom back link (second ← All Programs above the footer area).
+
+  scholarships/[slug]:
+    - Added verification_status and updated_at to Supabase select.
+    - Fixed deadline_text condition: now renders whenever s.deadline_text exists,
+      even when s.deadline (structured date) is null. Previously only rendered when both were set.
+    - Removed official_url, application_url, provider_url from key facts <dl>; moved to CTA block.
+    - CTA block: "Apply Now ↗" (application_url, blue filled), "Official Scholarship Page ↗"
+      (official_url, border ghost), "Provider Website ↗" (provider_url, border ghost).
+      Shown only when at least one URL exists.
+    - Added bottom back link.
+
+  universities/[slug]:
+    - Added verification_status and updated_at to Supabase select.
+    - Removed official_url from key facts <dl>; moved to CTA block.
+    - CTA block: "Visit Official Website ↗" (official_url, border ghost).
+    - Added "Browse Programs at [name] →" text link → /programs?university={u.id}.
+    - Added bottom back link.
+
+  guides/[slug]:
+    - Added verification_status and updated_at to Supabase select.
+    - Changed article_categories(name, slug) to article_categories(id, name, slug).
+    - Category badge is now a clickable link → /guides?category={id} when category id exists.
+      Falls back to non-linked span if category exists but id is absent.
+    - Added bottom back link.
+
+Verification badge strategy (all four pages):
+  verified → "Verified" (green: bg-green-50 text-green-700 border-green-200)
+  partially_verified → "Partially Verified" (yellow: bg-yellow-50 text-yellow-700 border-yellow-200)
+  source_conflict/outdated/needs_review → "Under Review" (orange: bg-orange-50 text-orange-700 border-orange-200)
+  unverified → no badge rendered
+  All class strings are complete literals in a static lookup object — safe for Tailwind v4 scanner.
+  Placement: small badge row immediately below h1, above key facts dl.
+
+Last updated strategy (all four pages):
+  updated_at queried from DB, formatted with toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }).
+  Rendered as small muted gray text "Last updated: Month D, YYYY" near the bottom of the page,
+  above the bottom back link. Omitted entirely when updated_at is null.
+
+CTA strategy:
+  URL fields removed from key facts <dl>. A dedicated CTA block replaces them.
+  Primary CTAs (application_url) use blue filled button style.
+  Secondary CTAs (official_url, provider_url) use border ghost button style.
+  All CTAs use target="_blank" rel="noopener noreferrer".
+  CTA block omitted entirely when no URLs are present on a record.
+
+English requirements (programs):
+  Previous: JSON.stringify in <pre> — unreadable to users.
+  New: Object.entries() over JSONB → <ul> with test name (IELTS, TOEFL) and detail string.
+  Fallback to plain text notice when JSONB shape is non-object or empty.
+  No set:html. No <pre>. No raw JSON visible to users.
+
+Intakes (programs):
+  Separate Supabase query after 404 check: program_intakes for this program.id.
+  Ordered by application_deadline_date ASC nulls last, limit 10.
+  Defaults to [] on error — page never crashes.
+  Section shown only when rows exist.
+
+SEO/404 preservation:
+  All four pages preserve Phase 15 canonical/ogTitle/ogDesc computation unchanged.
+  PublicLayout call signature unchanged. All existing 404 behavior preserved.
+  content_status='published' filter preserved on all queries.
+
+npm run build: PASS (Cloudflare server build, 1.49s, zero errors).
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+Exclusions (deferred):
+  No list/search page changes.
+  No admin CRUD changes.
+  No migrations.
+  No new dependencies.
+  No React or client-side JS.
+  No markdown renderer.
+  No media/Cloudinary.
+  No junction table display (scholarship_countries, article_subjects, etc.).
+  No indexing_status noindex behavior on detail pages.
+  No author display on articles.
+  No pagination.
 
 Phase 15 — Basic SEO System (implementation complete):
 

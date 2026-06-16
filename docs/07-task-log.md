@@ -4,6 +4,176 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-16 - Phase 16: Public Detail Page Polish
+
+Tool:
+Claude Code (claude-sonnet-4-6)
+
+Goal:
+Polish all four public detail pages (programs, scholarships, universities, guides/articles)
+for improved readability, usability, and trustworthiness. No migrations, no new dependencies,
+no React, no client-side JS, no AI, no service_role, no set:html, no markdown renderer.
+
+---
+
+### Files Changed
+
+src/pages/programs/[slug].astro (modified)
+src/pages/scholarships/[slug].astro (modified)
+src/pages/universities/[slug].astro (modified)
+src/pages/guides/[slug].astro (modified)
+
+---
+
+### Route Improvements
+
+programs/[slug]:
+  - Added verification_status, updated_at to Supabase select.
+  - Added secondary program_intakes query after 404 check (defaults to [] on error).
+  - Intakes section renders when rows exist; omitted when empty. Shows intake_name,
+    open date, deadline date, deadline_text, deadline_status badge, is_rolling, notes.
+  - Intake status badges: open (green), closing_soon (orange), closed (gray), rolling (blue).
+  - Replaced JSON.stringify/<pre> block for english_requirements with a readable <ul>:
+    Object.entries() over JSONB — test name uppercased, properties joined as "key: value".
+    Falls back to plain notice if JSONB shape is unexpected.
+  - Removed official_url/application_url from key facts <dl>; moved to CTA block.
+  - CTA block: "Apply Now ↗" (blue filled) + "Official Program Page ↗" (border ghost).
+  - Section order: Key Facts → Admission Requirements → English Requirements →
+    Tuition Notes → Application Fee → Intakes & Deadlines → Curriculum → Career Outcomes
+    → CTA block → Last updated → Back link.
+  - Added bottom back link (← All Programs).
+
+scholarships/[slug]:
+  - Added verification_status, updated_at to Supabase select.
+  - Fixed deadline_text condition: now renders whenever s.deadline_text exists,
+    even when s.deadline (structured date) is null.
+  - Removed official_url/application_url/provider_url from key facts <dl>; moved to CTA block.
+  - CTA block: "Apply Now ↗" (blue), "Official Scholarship Page ↗" (ghost),
+    "Provider Website ↗" (ghost).
+  - Added bottom back link.
+
+universities/[slug]:
+  - Added verification_status, updated_at to Supabase select.
+  - Removed official_url from key facts <dl>; moved to CTA block.
+  - CTA block: "Visit Official Website ↗" (border ghost).
+  - Added "Browse Programs at [name] →" link → /programs?university={u.id}.
+  - Added bottom back link.
+
+guides/[slug]:
+  - Added verification_status, updated_at to Supabase select.
+  - Changed article_categories(name, slug) → article_categories(id, name, slug).
+  - Category badge is now a link → /guides?category={id} when category id exists.
+    Falls back to non-linked span if id absent.
+  - Added bottom back link.
+
+---
+
+### Verification / Updated_at Behavior
+
+Verification badge (programs, scholarships, universities, articles):
+  verified → "Verified" (green badge)
+  partially_verified → "Partially Verified" (yellow badge)
+  source_conflict/outdated/needs_review → "Under Review" (orange badge)
+  unverified → no badge rendered
+  All Tailwind class strings are complete literals in a static lookup object.
+  Placement: below h1, above key facts dl.
+
+Last updated (all four pages):
+  updated_at queried and formatted as "Last updated: Month D, YYYY".
+  Rendered in small muted gray text near the page bottom, above back link.
+  Omitted when updated_at is null.
+
+---
+
+### CTA Strategy
+
+URL fields moved out of key facts <dl> into dedicated CTA blocks.
+Primary CTA (apply): blue filled button. Secondary CTAs (official, provider): border ghost buttons.
+All CTA links use target="_blank" rel="noopener noreferrer".
+CTA block omitted entirely when no URLs exist on a record.
+
+---
+
+### Text / JSON Formatting
+
+english_requirements (programs): previously JSON.stringify in <pre>; now <ul> with human-readable
+test names and properties. Fallback to plain notice on unexpected shape. No set:html.
+
+Text columns (curriculum, overview, eligibility, etc.): whitespace-pre-wrap preserved.
+Date fields: toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }).
+
+---
+
+### Intakes Query Behavior
+
+Secondary query: program_intakes by program.id, ASC by deadline, limit 10.
+Runs only after main program query returns a row (after 404 check).
+Defaults to [] on error — never crashes the page.
+Section shown only when at least one row is returned.
+
+---
+
+### SEO / 404 Preservation
+
+Phase 15 canonical/ogTitle/ogDesc computation and PublicLayout call signature: unchanged.
+content_status='published' filter preserved on all queries.
+404 behavior: all four pages return new Response(null, { status: 404 }) when entity not found.
+program_intakes query only runs after the 404 check passes.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server adapter, 1.49s, zero errors, zero warnings).
+
+---
+
+### service_role Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+1. GET /programs/[published-slug] → 200, h1 renders, dl has no Official Page or Apply rows.
+2. Programs CTA block visible below Career Outcomes when official_url or application_url exist.
+3. Programs CTA block absent when both URLs are null.
+4. Programs english_requirements: <ul> list renders (not <pre>); fallback notice when null.
+5. Programs intakes section: renders when rows exist; absent when no rows.
+6. Verification badge: verified → green, unverified → no badge, partially_verified → yellow.
+7. "Last updated:" line appears at bottom of all four page types.
+8. GET /scholarships/[published-slug] → 200, dl has no URL rows; CTA block shows.
+9. Scholarship deadline_text shows when deadline_text set but deadline (date) is null.
+10. GET /universities/[published-slug] → 200; "Browse Programs at [name] →" link present.
+11. Universities CTA shows "Visit Official Website ↗" when official_url exists.
+12. GET /guides/[published-slug] → 200; category badge is an <a> tag linking to /guides?category=<uuid>.
+13. GET /programs/nonexistent-slug → 404.
+14. GET /scholarships/nonexistent-slug → 404.
+15. GET /universities/nonexistent-slug → 404.
+16. GET /guides/nonexistent-slug → 404.
+17. Page source: <link rel="canonical"> correct on all detail pages (SEO not regressed).
+18. GET /admin/ unauthenticated → redirects to /login.
+
+---
+
+### Explicit Exclusions
+
+No list/search page changes.
+No admin CRUD changes.
+No migrations.
+No new npm dependencies.
+No React or client-side JS.
+No markdown renderer or set:html.
+No media/Cloudinary.
+No junction table display (scholarship_countries, article_subjects, etc.).
+No indexing_status noindex behavior on detail pages.
+No author display on articles.
+No comments, report form, saved items, or user dashboard.
+No schema.org structured data.
+
+---
+
 ## 2026-06-16 - Phase 15: Basic SEO System
 
 Tool:
