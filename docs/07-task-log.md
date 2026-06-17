@@ -4,6 +4,151 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 24: AI Finder Explanation MVP
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add optional AI explanation section to /fit-finder/result. AI explains the top 3
+already-computed rule-based matches using only the matched program context and saved
+preference summary. Rule-based matches remain the source of truth. No chatbot, no
+free-form prompt, no AI DB writes, no service_role, no migrations, no new dependencies,
+no React, no client-side JS.
+
+---
+
+### Files Changed
+
+Modified:
+  src/pages/fit-finder/result.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+---
+
+### AI Context Payload
+
+Shape passed to callAI():
+  sessionType: 'finder'
+  userMessage: 'Explain the shortlisted programs for this student.'
+  context.source: 'programs'
+  context.records: top 3 matches from matches.slice(0, 3), each containing:
+    title, university, country, city, degreeLevel, subject,
+    tuitionRange (formatted string), officialUrl, matchPercentage,
+    matchReasons (string[]), warnings (string[])
+  context.studentProfile:
+    degreeLevel (name), targetCountries (names[]), subjects (names[]),
+    budgetMin, budgetMax, currency
+  userId: user.id (server-side only, for future rate-limit use)
+
+---
+
+### Data Minimization
+
+Excluded from AI context:
+  profile ID, user ID, email, session token, additional_notes,
+  raw admission_requirements, raw english_requirements, raw gpa_requirements,
+  internal UUIDs (program/university/country/city IDs),
+  study_mode, delivery_mode, language_of_instruction raw enum values
+
+---
+
+### callAI Integration
+
+Added to src/pages/fit-finder/result.astro frontmatter:
+  imports: callAI, getAIEnv, AIContext type
+  variable: let aiExplanation: string | null = null
+  AI call block: runs after matches are scored/sorted, inside
+    if (pageState === 'ready' && matches.length > 0) guard
+  No AI call for: anonymous, no_profile, sparse_profile, error, no_matches states
+  Entire block wrapped in try/catch — AI failure never breaks rule-based matches
+
+---
+
+### Fallback Behavior
+
+  Missing GEMINI_API_KEY → resolveProvider throws → callAI returns fallbackUsed=true
+    → aiExplanation stays null → AI section not rendered
+  Provider/network error → callAI catches and returns fallbackUsed=true → same
+  Output guardrail trip → callAI returns guardrailTripped=true → same
+  Empty text → guard (!aiResponse.fallbackUsed && !aiResponse.guardrailTripped
+    && text.trim().length > 0) prevents setting aiExplanation
+  Outer try/catch → any unexpected error silently suppressed
+
+---
+
+### Rendering Strategy
+
+  AI section renders only when aiExplanation !== null
+  Placed: between action buttons and match cards (in 'ready' state only)
+  Visual: bg-purple-50 border-purple-100 rounded-md
+  Label: "AI summary" (h2, text-sm font-semibold text-purple-900)
+  Disclaimer: rendered above AI text in text-xs text-purple-700
+  Body: aiExplanation.split(/\n\n+/).map(para => <p>{para}</p>)
+  No set:html. Astro default HTML escaping. No markdown renderer.
+
+---
+
+### Explicit Exclusions
+
+  No ai_finder_results insert
+  No ai_finder_program_matches insert
+  No ai_usage_logs write (writeUsageLog remains no-op stub)
+  No service_role
+  No migrations
+  No new npm dependencies
+  No React or client-side JS
+  No chatbot UI
+  No free-form user prompt
+  No src/lib/ai/* changes
+  No src/pages/fit-finder/index.astro changes
+  No admin changes
+  No matching algorithm changes
+  No profile ID in rendered HTML
+
+---
+
+### Build Result
+
+  npm run build: PASS (Cloudflare server build, 1.81s, zero errors)
+
+---
+
+### Safety Grep Results
+
+  service_role/SERVICE_ROLE/SUPABASE_SERVICE in src → 0 matches
+  PUBLIC_GEMINI/PUBLIC_AI in src → 0 matches
+  callAI in src/pages,src/components → 2 matches, both in
+    src/pages/fit-finder/result.astro (import + invocation only)
+  ai_finder_results/ai_finder_program_matches/ai_usage_logs in fit-finder → 0 matches
+
+---
+
+### Manual Test Checklist
+
+With GEMINI_API_KEY set:
+  [ ] Logged-in user with saved profile + matches → AI section renders with
+      "AI summary" heading and disclaimer
+  [ ] AI text renders as plain paragraphs, no raw HTML or markdown visible
+  [ ] Disclaimer text is correct and visible
+  [ ] Match cards still render correctly (no regression)
+  [ ] No profile ID or user ID in page source
+  [ ] No API key in page source or response headers
+
+Without GEMINI_API_KEY:
+  [ ] /fit-finder/result renders rule-based matches normally
+  [ ] No AI section visible
+  [ ] No error message or broken layout
+
+State regression:
+  [ ] Anonymous user → sign-in state renders, no AI call
+  [ ] No profile → "No saved profile" state renders
+  [ ] Sparse profile → "Add more preferences" state renders
+  [ ] No matches → "No preference matches found" state renders, no AI section
+
+---
+
 ## 2026-06-18 - Phase 23: AI Runtime Env + Provider Wiring
 
 Tool:

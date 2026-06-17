@@ -4,7 +4,77 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 24 — TBD.
+Phase 25 — TBD.
+
+Phase 24 — AI Finder Explanation MVP — complete.
+
+## Last Completed Work
+
+Phase 24 — AI Finder Explanation MVP (complete):
+
+- Added optional AI explanation section to /fit-finder/result for logged-in users
+  with rule-based matches. AI explains the top 3 already-computed matches using
+  only the matched program context and saved preference summary. Rule-based matches
+  remain the source of truth. No chatbot, no free-form prompt, no AI DB writes,
+  no service_role, no migrations, no new dependencies, no React, no client-side JS.
+
+Route enhanced:
+  /fit-finder/result — noindex SSR page; AI summary section added (optional, requires
+    GEMINI_API_KEY and a successful callAI response).
+
+Files modified (1 in src):
+  src/pages/fit-finder/result.astro — added callAI/getAIEnv/AIContext imports;
+    added aiExplanation variable; added AI call block inside pageState === 'ready'
+    guard after matches are computed; added AI summary UI section between action
+    buttons and match cards.
+
+AI call details:
+  sessionType: 'finder'
+  userMessage: system-constructed, not user-authored
+  context.source: 'programs'
+  context.records: top 3 rule-based matches only (slice(0, 3))
+  context.studentProfile: degreeLevel name, targetCountries names, subjects names,
+    budgetMin/budgetMax/currency from saved profile
+  userId: user.id (server-side only, not rendered, for future rate-limit use)
+
+Data minimization (included per record):
+  title, university name, country, city, degreeLevel, subject, formatted tuition
+  range, officialUrl, matchPercentage, matchReasons array, warnings array
+
+Data minimization (excluded):
+  profile ID, user ID, email, session token, additional_notes,
+  raw admission_requirements, raw english_requirements, raw gpa_requirements,
+  internal UUIDs, study_mode, delivery_mode, language_of_instruction raw fields
+
+AI rendering:
+  Output split on double newlines and rendered as <p> tags.
+  No set:html. Astro default HTML escaping applied.
+  Section only rendered when aiExplanation is non-null (callAI returned a clean
+  non-empty response with fallbackUsed=false and guardrailTripped=false).
+
+Fallback behavior:
+  Missing GEMINI_API_KEY → callAI returns fallbackUsed=true → aiExplanation=null →
+    AI section not rendered; rule-based matches render normally.
+  Provider/network error → same fallback path.
+  Output guardrail trip → guardrailTripped=true → AI section not rendered.
+  Empty response text → guard prevents setting aiExplanation.
+  Outer try/catch prevents any AI failure from breaking rule-based results.
+
+Explicit exclusions:
+  No ai_finder_results insert. No ai_finder_program_matches insert.
+  No ai_usage_logs write (writeUsageLog remains no-op stub).
+  No service_role. No migrations. No new npm dependencies.
+  No React or client-side JS. No chatbot UI. No free-form prompt.
+  No src/lib/ai/* changes. No admin changes. No src/pages/fit-finder/index.astro changes.
+  No matching algorithm changes. No profile ID in rendered HTML.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 1.81s, zero errors).
+  service_role/SERVICE_ROLE/SUPABASE_SERVICE → 0 matches.
+  PUBLIC_GEMINI/PUBLIC_AI → 0 matches.
+  callAI in src/pages,src/components → 2 matches, both in src/pages/fit-finder/result.astro
+    (import line and invocation line only).
+  ai_finder_results/ai_finder_program_matches/ai_usage_logs in fit-finder → 0 matches.
 
 Phase 23 — AI Runtime Env + Provider Wiring — complete.
 
