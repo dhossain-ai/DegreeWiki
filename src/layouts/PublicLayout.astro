@@ -1,6 +1,7 @@
 ---
 import BaseLayout from './BaseLayout.astro'
 import PublicNav from '../components/public/PublicNav.astro'
+import PublicFooter from '../components/public/PublicFooter.astro'
 
 interface Props {
   title?: string
@@ -20,5 +21,6 @@ const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescri
     <main class="flex-1">
       <slot />
     </main>
+    <PublicFooter />
   </div>
 </BaseLayout>

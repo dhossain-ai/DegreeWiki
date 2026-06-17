@@ -4,6 +4,161 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-17 - Phase 22: Legal / Trust / Disclaimer Pages Foundation
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add plain-language legal/trust/disclaimer pages and a public footer before live AI features
+are enabled. No AI calls, no database writes, no service_role, no migrations, no new
+dependencies, no React, no client-side JS, no admin changes, no auth changes.
+
+---
+
+### Files Changed
+
+Created:
+  src/components/public/PublicFooter.astro
+  src/pages/about.astro
+  src/pages/privacy.astro
+  src/pages/terms.astro
+  src/pages/disclaimer.astro
+
+Modified:
+  src/layouts/PublicLayout.astro
+  src/pages/sitemap.xml.ts
+  docs/06-status.md
+  docs/07-task-log.md
+
+Not modified:
+  src/components/public/PublicNav.astro
+  src/lib/ai/*
+  src/pages/fit-finder/*
+  src/pages/admin/*
+  supabase/migrations/*
+  package.json
+
+---
+
+### Pages Added
+
+  /about      PublicLayout. Sections: what DegreeWiki is, what it is not, data accuracy,
+              Fit Finder explanation, AI features (future), corrections placeholder.
+  /privacy    PublicLayout. Sections: what data we collect, what we do not collect,
+              AI features (future), third-party services (Supabase/Cloudflare/Cloudinary),
+              cookies, data deletion, changes to statement.
+  /terms      PublicLayout. Sections: about DegreeWiki, information accuracy, not professional
+              advice, Fit Finder and AI features, acceptable use, accounts, limitation of
+              liability, changes.
+  /disclaimer PublicLayout. Sections: independence, data accuracy, Fit Finder match scores,
+              AI features, no guarantees.
+
+All four pages: static Astro only, canonical prop set via SITE_URL, no noindex, no database
+queries, no Supabase client, no auth.
+
+---
+
+### Footer Strategy
+
+New component: src/components/public/PublicFooter.astro
+  - Minimal border-t footer below <main> in PublicLayout.
+  - Shows © {year} DegreeWiki + About / Privacy / Terms / Disclaimer links.
+  - Year evaluated at SSR time: new Date().getFullYear().
+  - Quiet styling: text-xs text-gray-400 with hover:text-gray-600.
+  - Added to PublicLayout via import + render below <main>; appears on every public page.
+  - Legal links not added to PublicNav.
+
+---
+
+### Sitemap Update
+
+src/pages/sitemap.xml.ts STATIC_PATHS updated:
+  Before: ['/', '/programs', '/scholarships', '/universities', '/guides']
+  After:  ['/', '/programs', '/scholarships', '/universities', '/guides', '/about', '/privacy', '/terms', '/disclaimer']
+
+---
+
+### Legal/Trust Wording Decisions
+
+- Plain language throughout; no legalese, no GDPR/CCPA compliance assertions.
+- No lawyer-review claims.
+- DegreeWiki described as "an education information platform" not an official source.
+- Explicitly states DegreeWiki is not: a university, scholarship provider, government agency,
+  legal advisor, financial advisor, or admissions assessor.
+- Data accuracy caveat on all pages: program details, tuition, deadlines, admission requirements,
+  scholarship eligibility, visa policies "can change without notice."
+- Official source reminder consistent across all pages: "Always confirm important details
+  directly with the official university, scholarship provider, or government website."
+- No guarantees stated explicitly: admission, scholarships, visa approval, employment, salary,
+  outcomes.
+- Fit Finder wording: "preference alignment" / "preference match" — consistent with Phase 21
+  result page. Explicitly states scores are not admission/scholarship/visa/eligibility assessments.
+- AI wording: "based on available DegreeWiki context" — future-safe; not restricted to
+  "database content" to allow for prompt-level context in future phases.
+- No invented contact email address; uses placeholder:
+  "A public contact and correction channel will be added before launch."
+- Cross-page links at bottom of each page for easy navigation between legal pages.
+
+---
+
+### Privacy Wording Decisions
+
+- Acknowledges Supabase Auth as account data provider; Cloudflare as CDN/delivery.
+- Fit Finder preferences stored for logged-in users only; not shared publicly.
+- Session cookies: functional only; no advertising or tracking cookies currently.
+- Future AI usage logs: scoped to rate limiting/cost management; not shared with third parties.
+- No GDPR/CCPA compliance claims.
+- No overpromised security; "makes a reasonable effort."
+- States the privacy statement "will be expanded as the platform grows."
+- Data deletion: placeholder wording without inventing an email address.
+
+---
+
+### Explicit Exclusions
+
+  No AI calls. No callAI import. No Gemini/OpenAI. No chatbot.
+  No ai_finder_results, ai_finder_program_matches, or ai_usage_logs.
+  No service_role. No migrations. No new dependencies. No React or client-side JS.
+  No admin changes. No auth changes. No Fit Finder logic changes. No AI gateway changes.
+  No cookie banner. No consent management. No analytics. No payment/subscription terms.
+  No PublicNav changes.
+
+---
+
+### Build Result
+
+  npm run build: PASS (Cloudflare server build, 1.97s, zero errors).
+
+### service_role Search Result
+
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+
+### AI Usage Search Result
+
+  Get-ChildItem -Path src/pages/about.astro,src/pages/privacy.astro,src/pages/terms.astro,src/pages/disclaimer.astro -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder" → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+  [ ] GET /about — renders, PublicNav visible, PublicFooter visible with 4 legal links
+  [ ] GET /privacy — renders, footer visible
+  [ ] GET /terms — renders, footer visible
+  [ ] GET /disclaimer — renders, footer visible
+  [ ] GET / (homepage) — footer now visible at bottom; auth row still shows; no regression
+  [ ] GET /programs — footer visible; filter form no regression
+  [ ] GET /fit-finder — footer visible; profile form no regression
+  [ ] GET /fit-finder/result — footer visible; match results no regression
+  [ ] GET /sitemap.xml — /about, /privacy, /terms, /disclaimer in static URL section
+  [ ] /disclaimer: explicitly states match scores are not admission/scholarship/visa assessments
+  [ ] /privacy: mentions session cookies, Supabase, Cloudflare, no ad trackers
+  [ ] No page claims GDPR/CCPA compliance
+  [ ] No page says "lawyer reviewed"
+  [ ] No page guarantees admission, scholarship, visa, employment, or salary
+
+---
+
 ## 2026-06-17 - Phase 21: Fit Finder Results UX Polish + Matching Safety Review
 
 Tool:

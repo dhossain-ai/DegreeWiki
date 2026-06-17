@@ -4,9 +4,61 @@ Last updated: 2026-06-17
 
 ## Current Phase
 
-Phase 22 — TBD.
+Phase 23 — TBD.
 
-Phase 21 — Fit Finder Results UX Polish + Matching Safety Review — complete.
+Phase 22 — Legal / Trust / Disclaimer Pages Foundation — complete.
+
+## Last Completed Work
+
+Phase 22 — Legal / Trust / Disclaimer Pages Foundation (complete):
+
+- Added plain-language legal/trust pages (/about, /privacy, /terms, /disclaimer).
+  Added PublicFooter component rendered in PublicLayout below <main>.
+  Added four static legal routes to sitemap.xml.ts static URL list.
+  No AI calls, no database writes, no service_role, no migrations, no new dependencies,
+  no React, no client-side JS, no admin changes, no auth changes, no Fit Finder logic changes,
+  no AI gateway changes, no cookie banner, no analytics, no payment/subscription terms.
+
+Routes added:
+  /about      — what DegreeWiki is, what it is not, data accuracy, Fit Finder, AI future
+  /privacy    — account data, Fit Finder preferences, session cookies, future AI logs,
+                third-party services (Supabase, Cloudflare), no ad trackers, data deletion
+  /terms      — acceptable use, information accuracy, no professional advice, limitation of liability
+  /disclaimer — independence, data accuracy, Fit Finder match score limits, AI limits, no guarantees
+
+Files created (6):
+  src/components/public/PublicFooter.astro
+  src/pages/about.astro
+  src/pages/privacy.astro
+  src/pages/terms.astro
+  src/pages/disclaimer.astro
+
+Files modified (2):
+  src/layouts/PublicLayout.astro — added PublicFooter import and render below <main>
+  src/pages/sitemap.xml.ts — added /about, /privacy, /terms, /disclaimer to STATIC_PATHS
+
+PublicFooter:
+  Minimal footer rendered on every public page via PublicLayout.
+  Shows © current year DegreeWiki + About / Privacy / Terms / Disclaimer links.
+  Uses quiet gray styling; does not compete with primary navigation.
+  Year evaluated at SSR time via new Date().getFullYear().
+
+Legal/trust wording decisions:
+  All four pages use plain language — no legalese, no GDPR/CCPA compliance claims,
+  no lawyer-review assertions.
+  AI wording: "AI-assisted features are based on available DegreeWiki context" —
+  future-safe phrasing that does not limit to "database content."
+  Fit Finder scores described as preference-alignment signals only, consistent with
+  Phase 21 result page wording.
+  No guarantees of admission, scholarships, visa approval, employment, salary, or outcomes.
+  No invented email address for contact — uses placeholder wording:
+  "A public contact and correction channel will be added before launch."
+  Privacy statement acknowledges Supabase and Cloudflare as infrastructure providers.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 1.97s, zero errors).
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+  Get-ChildItem -Path src/pages/about.astro,src/pages/privacy.astro,src/pages/terms.astro,src/pages/disclaimer.astro -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder" → 0 matches.
 
 ## Last Completed Work
 

@@ -1,0 +1,85 @@
+---
+import PublicLayout from '../layouts/PublicLayout.astro'
+import { SITE_URL } from '../lib/site'
+---
+<PublicLayout
+  title="About DegreeWiki"
+  description="Learn what DegreeWiki is, how we collect and verify education data, and how Fit Finder works."
+  canonical={SITE_URL + '/about'}
+>
+  <div class="max-w-2xl mx-auto px-4 py-12">
+
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">About DegreeWiki</h1>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">What is DegreeWiki?</h2>
+      <p class="text-gray-600 leading-relaxed">
+        DegreeWiki is an education information platform for international students. It helps you
+        discover and compare university programs, scholarships, and study-abroad guides from
+        institutions around the world.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">What DegreeWiki is not</h2>
+      <ul class="space-y-2 text-gray-600">
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Not an official university or admissions office</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Not a scholarship provider or funding body</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Not a government or immigration authority</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Not a legal, financial, or visa advisor</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Not an official admissions assessor</li>
+      </ul>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">How we collect and verify data</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        Information on DegreeWiki is gathered from official university and scholarship websites and
+        published by the DegreeWiki team. Where possible, each entry includes a verification status
+        and a link to the official source so you can check details directly.
+      </p>
+      <p class="text-gray-600 leading-relaxed">
+        Program details, tuition fees, admission requirements, deadlines, scholarship eligibility,
+        and visa policies can change without notice. Always confirm important details with the
+        official university, scholarship provider, or government website before applying.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">Fit Finder</h2>
+      <p class="text-gray-600 leading-relaxed">
+        Fit Finder is a tool that helps you explore programs that may align with your study
+        preferences. It uses rule-based matching on preferences you save — such as your target
+        degree level, subjects, preferred countries, and budget. Results show preference alignment
+        only. They are not admissions assessments, eligibility determinations, or predictions of
+        any outcome.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">AI features</h2>
+      <p class="text-gray-600 leading-relaxed">
+        DegreeWiki is building AI-assisted features to help students explore and understand
+        education options. When available, these features will be assistive tools based on
+        available DegreeWiki context. They will not replace official sources or guarantee any
+        outcome. Always verify AI-suggested information with the relevant official source.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">Corrections and feedback</h2>
+      <p class="text-gray-600 leading-relaxed">
+        We welcome corrections to outdated or inaccurate information. A public contact and
+        correction channel will be added before launch. Until then, users should verify important
+        details directly with official sources.
+      </p>
+    </section>
+
+    <div class="mt-10 pt-6 border-t border-gray-100 flex flex-wrap gap-4 text-sm">
+      <a href="/disclaimer" class="text-blue-600 hover:underline">Disclaimer</a>
+      <a href="/privacy"    class="text-blue-600 hover:underline">Privacy</a>
+      <a href="/terms"      class="text-blue-600 hover:underline">Terms of Use</a>
+    </div>
+
+  </div>
+</PublicLayout>

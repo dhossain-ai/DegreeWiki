@@ -21,7 +21,7 @@ function urlEntry(loc: string, lastmod?: string): string {
   return `  <url>\n${locLine}${lmLine}\n  </url>`
 }
 
-const STATIC_PATHS = ['/', '/programs', '/scholarships', '/universities', '/guides']
+const STATIC_PATHS = ['/', '/programs', '/scholarships', '/universities', '/guides', '/about', '/privacy', '/terms', '/disclaimer']
 
 export async function GET(context: APIContext): Promise<Response> {
   const supabase = createClient(context.cookies, context.request)

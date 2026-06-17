@@ -1,0 +1,108 @@
+---
+import PublicLayout from '../layouts/PublicLayout.astro'
+import { SITE_URL } from '../lib/site'
+---
+<PublicLayout
+  title="Terms of Use — DegreeWiki"
+  description="DegreeWiki's terms of use, data accuracy expectations, acceptable use, and limitations of liability."
+  canonical={SITE_URL + '/terms'}
+>
+  <div class="max-w-2xl mx-auto px-4 py-12">
+
+    <h1 class="text-3xl font-bold text-gray-900 mb-2">Terms of Use</h1>
+    <p class="text-sm text-gray-400 mb-8">Last updated: June 2026</p>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">1. About DegreeWiki</h2>
+      <p class="text-gray-600 leading-relaxed">
+        DegreeWiki is an education information platform for international students. By using
+        this site, you agree to these terms. These terms apply to all visitors, whether or not
+        you have a DegreeWiki account.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">2. Information accuracy</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        DegreeWiki provides education information for general guidance only. Program details,
+        tuition fees, deadlines, admission requirements, scholarship eligibility, visa policies,
+        and any other information on this site can change without notice.
+      </p>
+      <p class="text-gray-600 leading-relaxed">
+        Always verify important details — including tuition, deadlines, eligibility requirements,
+        and admission conditions — directly with the official university, scholarship provider,
+        or government/source website before applying or taking action.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">3. Not professional advice</h2>
+      <p class="text-gray-600 leading-relaxed">
+        Nothing on DegreeWiki constitutes legal advice, financial advice, immigration advice,
+        or an official admissions assessment. DegreeWiki is not a university, scholarship
+        provider, government agency, legal advisor, or financial advisor.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">4. Fit Finder and AI features</h2>
+      <p class="text-gray-600 leading-relaxed">
+        Fit Finder results and any AI-assisted suggestions are preference-alignment tools.
+        They are based on preferences you have saved or on available DegreeWiki context.
+        They do not predict or guarantee admission, scholarships, visa outcomes, employment,
+        salary, or any other result. Always verify suggested information with the relevant
+        official source.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">5. Acceptable use</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        You may use DegreeWiki to research education options for personal, non-commercial
+        purposes. You may not:
+      </p>
+      <ul class="space-y-2 text-gray-600">
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Scrape or systematically download content without written permission</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Attempt to access admin areas, private data, or systems you are not authorised to use</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Use the platform for fraud, impersonation, or any illegal purpose</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Submit false information through any form or profile on the site</li>
+      </ul>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">6. Accounts</h2>
+      <p class="text-gray-600 leading-relaxed">
+        You are responsible for maintaining the security of your account credentials.
+        DegreeWiki is not liable for unauthorised access to your account resulting from
+        your failure to keep your credentials secure.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">7. Limitation of liability</h2>
+      <p class="text-gray-600 leading-relaxed">
+        DegreeWiki is provided for general education information purposes. We do not guarantee
+        that information on this site is complete, current, or free of errors. We are not
+        responsible for any decisions, actions, or outcomes that result from using information
+        found on DegreeWiki. Use this site as a starting point for research, not as a
+        substitute for official sources.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">8. Changes</h2>
+      <p class="text-gray-600 leading-relaxed">
+        These terms may be updated as DegreeWiki grows. Continued use of DegreeWiki after
+        updates means you accept the revised terms. Significant changes will be reflected in
+        the "Last updated" date at the top of this page.
+      </p>
+    </section>
+
+    <div class="mt-10 pt-6 border-t border-gray-100 flex flex-wrap gap-4 text-sm">
+      <a href="/about"      class="text-blue-600 hover:underline">About</a>
+      <a href="/privacy"    class="text-blue-600 hover:underline">Privacy</a>
+      <a href="/disclaimer" class="text-blue-600 hover:underline">Disclaimer</a>
+    </div>
+
+  </div>
+</PublicLayout>

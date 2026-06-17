@@ -1,0 +1,87 @@
+---
+import PublicLayout from '../layouts/PublicLayout.astro'
+import { SITE_URL } from '../lib/site'
+---
+<PublicLayout
+  title="Disclaimer — DegreeWiki"
+  description="DegreeWiki is an independent information platform. Match scores and AI responses are assistive only and do not guarantee any outcome."
+  canonical={SITE_URL + '/disclaimer'}
+>
+  <div class="max-w-2xl mx-auto px-4 py-12">
+
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">Disclaimer</h1>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">Independence</h2>
+      <p class="text-gray-600 leading-relaxed">
+        DegreeWiki is an independent education information platform. It is not affiliated with,
+        endorsed by, or operated by any university, scholarship organisation, government agency,
+        or immigration authority.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">Data accuracy</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        Program details, tuition amounts, deadlines, admission requirements, scholarship
+        eligibility, and visa policies change frequently. DegreeWiki makes a reasonable effort
+        to keep information up to date, but we cannot guarantee that every page reflects the
+        most current official information.
+      </p>
+      <p class="text-gray-600 leading-relaxed font-medium">
+        Always confirm important details — including tuition, deadlines, eligibility, and
+        admission requirements — directly with the official university, scholarship provider,
+        or government website before applying.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">Fit Finder match scores</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        Fit Finder scores show how closely a program matches your saved study preferences.
+        A higher score means the program aligns more closely with your saved preferences.
+        It does not mean you are likely to be admitted, eligible for scholarships, eligible
+        for a visa, or likely to complete the program.
+      </p>
+      <p class="text-gray-600 leading-relaxed mb-3">Fit Finder results are <strong>not</strong>:</p>
+      <ul class="space-y-2 text-gray-600">
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Admissions assessments</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Eligibility determinations</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Scholarship forecasts</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Visa outcome predictions</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Career or salary guarantees</li>
+      </ul>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">AI features</h2>
+      <p class="text-gray-600 leading-relaxed">
+        When AI-assisted features are available on DegreeWiki, they are assistive tools to help
+        you explore and understand education options. AI responses are based on available
+        DegreeWiki context. They are not authoritative, legally binding, or guaranteed to be
+        correct or complete. Always verify AI-suggested information with the relevant official
+        source.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">No guarantees</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">DegreeWiki does not guarantee:</p>
+      <ul class="space-y-2 text-gray-600">
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Admission to any program</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Receipt of any scholarship</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Visa approval</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Employment after graduation</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Any specific salary or career outcome</li>
+        <li class="flex gap-2"><span class="text-gray-400 shrink-0">&mdash;</span>Completeness or currentness of any information on this site</li>
+      </ul>
+    </section>
+
+    <div class="mt-10 pt-6 border-t border-gray-100 flex flex-wrap gap-4 text-sm">
+      <a href="/about"   class="text-blue-600 hover:underline">About</a>
+      <a href="/privacy" class="text-blue-600 hover:underline">Privacy</a>
+      <a href="/terms"   class="text-blue-600 hover:underline">Terms of Use</a>
+    </div>
+
+  </div>
+</PublicLayout>
