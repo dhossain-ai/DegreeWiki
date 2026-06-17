@@ -8,14 +8,22 @@ const supabase = createClient(Astro.cookies, Astro.request)
 type Profile = {
   id: string
   target_degree_level_id: string | null
+  budget_min: number | null
   budget_max: number | null
   budget_currency: string | null
+  degree_levels?: { name: string } | null
 }
 
-type PreferenceRow = {
+type SubjectPreferenceRow = {
   subject_id?: string
+  preference_rank: number | null
+  subjects?: { name: string } | null
+}
+
+type CountryPreferenceRow = {
   country_id?: string
   preference_rank: number | null
+  countries?: { name: string } | null
 }
 
 type ProgramSubjectRow = {
@@ -44,13 +52,20 @@ const BUDGET_PARTIAL_POINTS = 5
 const { data: { user } } = await supabase.auth.getUser()
 
 let profile: Profile | null = null
-let subjectPrefs: PreferenceRow[] = []
-let countryPrefs: PreferenceRow[] = []
+let subjectPrefs: SubjectPreferenceRow[] = []
+let countryPrefs: CountryPreferenceRow[] = []
 let matches: Match[] = []
 let possiblePoints = 0
 let pageState: 'anonymous' | 'no_profile' | 'sparse_profile' | 'ready' | 'no_matches' | 'error' = 'anonymous'
 let pageError = ''
 let deviation = ''
+let degreeLevelName: string | null = null
+let subjectNames: string[] = []
+let countryNames: string[] = []
+let budgetSummary: string | null = null
+let savedSignalCount = 0
+let candidatesChecked = 0
+let missingSignals: string[] = []
 
 function formatMode(value: string | null | undefined): string {
   return value ? value.replace(/_/g, ' ') : ''
@@ -92,7 +107,7 @@ if (!user) {
 } else {
   const { data: profileData, error: profileError } = await supabase
     .from('student_profiles')
-    .select('id, target_degree_level_id, budget_max, budget_currency')
+    .select('id, target_degree_level_id, budget_min, budget_max, budget_currency, degree_levels(name)')
     .eq('user_id', user.id)
     .eq('is_anonymous', false)
     .order('updated_at', { ascending: false })
@@ -111,12 +126,12 @@ if (!user) {
     const [{ data: subjectRows, error: subjectError }, { data: countryRows, error: countryError }] = await Promise.all([
       supabase
         .from('student_profile_subjects')
-        .select('subject_id, preference_rank')
+        .select('subject_id, preference_rank, subjects(name)')
         .eq('student_profile_id', profile.id)
         .order('preference_rank', { ascending: true }),
       supabase
         .from('student_profile_countries')
-        .select('country_id, preference_rank')
+        .select('country_id, preference_rank, countries(name)')
         .eq('student_profile_id', profile.id)
         .order('preference_rank', { ascending: true }),
     ])
@@ -126,14 +141,28 @@ if (!user) {
       pageState = 'error'
       pageError = 'Could not load your saved Fit Finder preferences. Please try again.'
     } else {
-      subjectPrefs = (subjectRows ?? []) as PreferenceRow[]
-      countryPrefs = (countryRows ?? []) as PreferenceRow[]
+      subjectPrefs = (subjectRows ?? []) as SubjectPreferenceRow[]
+      countryPrefs = (countryRows ?? []) as CountryPreferenceRow[]
+
+      degreeLevelName = (profile.degree_levels as any)?.name ?? null
+      subjectNames = subjectPrefs.map(r => (r.subjects as any)?.name).filter(Boolean) as string[]
+      countryNames = countryPrefs.map(r => (r.countries as any)?.name).filter(Boolean) as string[]
+      if (profile.budget_max != null && profile.budget_currency) {
+        budgetSummary = `Up to ${Number(profile.budget_max).toLocaleString()} ${profile.budget_currency}`
+      }
 
       const preferredSubjectIds = subjectPrefs.map(row => row.subject_id).filter(Boolean) as string[]
       const preferredCountryIds = countryPrefs.map(row => row.country_id).filter(Boolean) as string[]
       const preferredSubjectSet = new Set(preferredSubjectIds)
       const preferredCountrySet = new Set(preferredCountryIds)
       const hasBudgetSignal = profile.budget_max != null && !!profile.budget_currency
+
+      savedSignalCount = [
+        !!profile.target_degree_level_id,
+        preferredSubjectIds.length > 0,
+        preferredCountryIds.length > 0,
+        hasBudgetSignal,
+      ].filter(Boolean).length
 
       possiblePoints =
         (profile.target_degree_level_id ? DEGREE_POINTS : 0) +
@@ -142,6 +171,12 @@ if (!user) {
         (hasBudgetSignal ? BUDGET_POINTS : 0)
 
       if (possiblePoints === 0) {
+        missingSignals = [
+          !profile.target_degree_level_id ? 'target degree level' : '',
+          preferredSubjectIds.length === 0 ? 'subjects of interest' : '',
+          preferredCountryIds.length === 0 ? 'preferred countries' : '',
+          !hasBudgetSignal ? 'budget' : '',
+        ].filter(Boolean)
         pageState = 'sparse_profile'
       } else {
         const { data: programRows, error: programError } = await supabase
@@ -168,6 +203,7 @@ if (!user) {
           pageError = 'Could not load program matches right now. Please try again.'
         } else {
           const candidates = uniqueById(programRows ?? [])
+          candidatesChecked = candidates.length
           const candidateIds = candidates.map(row => row.id).filter(Boolean)
           const subjectsByProgram = new Map<string, ProgramSubjectRow[]>()
 
@@ -198,7 +234,8 @@ if (!user) {
 
               if (profile?.target_degree_level_id && program.degree_level_id === profile.target_degree_level_id) {
                 points += DEGREE_POINTS
-                reasons.push('Matches your target degree level.')
+                const levelLabel = degreeLevelName ? `: ${degreeLevelName}` : ''
+                reasons.push(`Matches your target degree level${levelLabel}.`)
               }
 
               if (preferredCountrySet.size > 0 && preferredCountrySet.has(program.country_id)) {
@@ -241,12 +278,8 @@ if (!user) {
                 }
               }
 
-              if (program.admission_requirements || program.gpa_requirements) {
-                warnings.push('Admission requirements should be verified with the official program source.')
-              }
-
-              if (hasEnglishRequirements(program.english_requirements)) {
-                warnings.push('English requirements should be verified with the official program source.')
+              if (program.admission_requirements || program.gpa_requirements || hasEnglishRequirements(program.english_requirements)) {
+                warnings.push('Admission and language requirements must be verified with the official source.')
               }
 
               return {
@@ -310,9 +343,14 @@ const pageTitle = 'Possible program matches'
     ) : pageState === 'sparse_profile' ? (
       <div class="max-w-2xl">
         <h1 class="text-2xl font-bold text-gray-900 mb-3">Add more preferences to find matches</h1>
-        <p class="text-gray-600 mb-6">
-          Add a target degree level, preferred countries, subjects, or budget to generate stronger possible matches.
+        <p class="text-gray-600 mb-3">
+          To generate possible program matches, save at least one of the following:
         </p>
+        {missingSignals.length > 0 && (
+          <ul class="list-disc pl-5 text-sm text-gray-700 mb-5 space-y-0.5">
+            {missingSignals.map(s => <li>{s}</li>)}
+          </ul>
+        )}
         <div class="flex flex-wrap gap-3">
           <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
             Update preferences
@@ -337,13 +375,53 @@ const pageTitle = 'Possible program matches'
       </div>
     ) : (
       <>
-        <div class="max-w-3xl mb-7">
+        <div class="max-w-3xl mb-5">
           <h1 class="text-2xl font-bold text-gray-900 mb-2">Possible program matches</h1>
-          <p class="text-gray-600 mb-3">Based on your saved Fit Finder preferences.</p>
-          <p class="text-sm text-gray-500">
-            These are rule-based matches, not admission guarantees. Always confirm important details with the official university source.
-          </p>
+          <p class="text-gray-600">Based on your saved Fit Finder preferences.</p>
         </div>
+
+        <div class="max-w-3xl mb-5 bg-blue-50 border border-blue-100 rounded-md px-4 py-3 text-sm text-blue-800">
+          <p>Match scores show how many of your saved preferences a program aligned with. A higher score means more of your preferences were matched — it does not indicate your chances of admission, eligibility, or scholarship likelihood.</p>
+          <p class="mt-2">These are rule-based preference matches only. Match scores do not assess your eligibility, academic qualifications, admission chances, scholarship prospects, or visa outcomes. Always verify fees, deadlines, admission requirements, and eligibility directly with the official university source before applying.</p>
+        </div>
+
+        {(degreeLevelName || countryNames.length > 0 || subjectNames.length > 0 || budgetSummary) && (
+          <div class="max-w-3xl mb-5 bg-gray-50 border border-gray-200 rounded-md p-4">
+            <h2 class="text-sm font-semibold text-gray-900 mb-3">Your saved preferences used for matching</h2>
+            <dl class="space-y-1 text-sm">
+              {degreeLevelName && (
+                <div class="flex gap-2">
+                  <dt class="text-gray-500 shrink-0 w-36">Degree level</dt>
+                  <dd class="text-gray-900">{degreeLevelName}</dd>
+                </div>
+              )}
+              {countryNames.length > 0 && (
+                <div class="flex gap-2">
+                  <dt class="text-gray-500 shrink-0 w-36">Countries</dt>
+                  <dd class="text-gray-900">{countryNames.join(', ')}</dd>
+                </div>
+              )}
+              {subjectNames.length > 0 && (
+                <div class="flex gap-2">
+                  <dt class="text-gray-500 shrink-0 w-36">Subjects</dt>
+                  <dd class="text-gray-900">{subjectNames.join(', ')}</dd>
+                </div>
+              )}
+              {budgetSummary && (
+                <div class="flex gap-2">
+                  <dt class="text-gray-500 shrink-0 w-36">Budget</dt>
+                  <dd class="text-gray-900">{budgetSummary}</dd>
+                </div>
+              )}
+            </dl>
+            {savedSignalCount < 2 && (
+              <p class="text-xs text-gray-500 mt-3">
+                Adding more preferences can improve match quality.{' '}
+                <a href="/fit-finder" class="underline hover:text-gray-700">Update preferences</a>
+              </p>
+            )}
+          </div>
+        )}
 
         <div class="flex flex-wrap gap-3 mb-7">
           <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
@@ -362,9 +440,16 @@ const pageTitle = 'Possible program matches'
 
         {pageState === 'no_matches' ? (
           <div class="max-w-2xl border border-gray-200 rounded-lg p-5 bg-gray-50">
-            <h2 class="text-base font-semibold text-gray-900 mb-2">No scored matches found</h2>
+            <h2 class="text-base font-semibold text-gray-900 mb-2">No preference matches found</h2>
+            {candidatesChecked > 0 && (
+              <p class="text-sm text-gray-600 mb-2">
+                {candidatesChecked} published program{candidatesChecked === 1 ? '' : 's'} checked against your preferences.
+              </p>
+            )}
             <p class="text-sm text-gray-600 mb-4">
-              No published programs matched your saved preferences closely enough yet. Try updating your preferences or browse all programs.
+              {savedSignalCount === 1
+                ? 'No programs matched your single saved preference. Try adding a target degree level, preferred countries, subjects, or a budget to widen your results.'
+                : 'No programs matched all of your preferences. Try broadening your subject or country choices, or browse all programs to explore.'}
             </p>
             <div class="flex flex-wrap gap-3">
               <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
@@ -400,7 +485,7 @@ const pageTitle = 'Possible program matches'
                     </div>
                     <div class="shrink-0 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-center">
                       <div class="text-xl font-bold text-blue-700">{match.percentage}%</div>
-                      <div class="text-xs text-blue-700">match score</div>
+                      <div class="text-xs text-blue-700">preference match</div>
                     </div>
                   </div>
 
