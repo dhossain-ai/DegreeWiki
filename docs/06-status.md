@@ -4,9 +4,91 @@ Last updated: 2026-06-17
 
 ## Current Phase
 
-Phase 21 — TBD.
+Phase 22 — TBD.
 
-Phase 20 — Rule-Based Program Matching Engine — complete.
+Phase 21 — Fit Finder Results UX Polish + Matching Safety Review — complete.
+
+## Last Completed Work
+
+Phase 21 — Fit Finder Results UX Polish + Matching Safety Review (complete):
+
+- Polished /fit-finder/result UX and safety wording. No scoring algorithm changes.
+  No AI calls, no database writes, no service_role, no migrations, no new dependencies,
+  no React, no client-side JS, no admin changes, no anonymous persistence,
+  no profile IDs exposed.
+
+Route enhanced:
+  /fit-finder/result — existing SSR page; UX/safety polished.
+
+Files modified:
+  src/pages/fit-finder/result.astro
+  src/pages/fit-finder/index.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Preference summary:
+  A compact saved-preferences panel now appears in the ready and no_matches states,
+  showing only scoring signals: target degree level name, preferred country names
+  (in preference_rank order), subject names (in preference_rank order), and budget
+  summary. Non-scoring profile fields (gpa, english_score, work_experience_years,
+  current_country_id, study_start_preference, additional_notes) are never shown.
+  Names are fetched via Supabase PostgREST joins added to existing queries:
+    profile query adds degree_levels(name)
+    subject preference query adds subjects(name)
+    country preference query adds countries(name)
+  No additional round-trips. If fewer than 2 signals are present, a soft hint
+  encourages adding more preferences.
+
+Score explanation:
+  A blue info box (bg-blue-50 border-blue-100) is rendered once per page in the
+  ready and no_matches states. It explains that match scores show preference
+  alignment only, and explicitly states that scores do not assess eligibility,
+  academic qualifications, admission chances, scholarship prospects, or visa outcomes.
+
+Score badge label:
+  Per-card badge label changed from "match score" to "preference match".
+
+Degree reason specificity:
+  When degreeLevelName is available from the join, the degree match reason reads
+  "Matches your target degree level: [Name]." rather than the generic form.
+
+Warning consolidation:
+  The two separate warnings for admission_requirements/gpa_requirements and
+  english_requirements are merged into one:
+  "Admission and language requirements must be verified with the official source."
+  Tuition warnings are unchanged.
+
+No-match state:
+  Now shows a count of how many published programs were checked against the user's
+  preferences. Guidance message is targeted: single-signal profiles get a prompt to
+  add more preferences; multi-signal profiles get advice to broaden subject/country
+  choices or browse all programs.
+
+Sparse-profile state:
+  Now explicitly lists which scoring signals are missing (target degree level,
+  subjects of interest, preferred countries, budget) so the user knows exactly
+  what to add to generate matches.
+
+Stale copy fix:
+  /fit-finder description updated from "Program matching will be added in the next
+  phase." to "Save your study preferences to see possible program matches based on
+  your inputs."
+
+Algorithm stability:
+  Scoring weights unchanged: degree 35, subject primary 30, subject secondary 24,
+  country 25, budget 10/5. possiblePoints computation unchanged. Candidate cap 200
+  unchanged. Top result cap 20 unchanged. Deterministic sort unchanged.
+
+Explicit exclusions:
+  No AI calls. No callAI import. No Gemini/OpenAI. No chatbot.
+  No ai_finder_results, ai_finder_program_matches, or ai_usage_logs.
+  No service_role. No migrations. No new dependencies. No React or client-side JS.
+  No admin changes. No anonymous persistence. No profile IDs in rendered output.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 5.14s, zero errors).
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+  Get-ChildItem -Path src/pages/fit-finder -Recurse -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder_results|ai_finder_program_matches|ai_usage_logs" → 0 matches.
 
 ## Last Completed Work
 

@@ -4,6 +4,178 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-17 - Phase 21: Fit Finder Results UX Polish + Matching Safety Review
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Polish /fit-finder/result UX and safety wording. Add saved-preferences summary,
+score explanation, stronger caveats, improved empty/sparse states, and warning
+consolidation. Fix stale copy in /fit-finder. No scoring algorithm changes, no AI,
+no writes, no service_role, no migrations, no new dependencies, no React.
+
+---
+
+### Files Changed
+
+Modified:
+  src/pages/fit-finder/result.astro
+  src/pages/fit-finder/index.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Not modified:
+  src/lib/ai/*
+  supabase/migrations/*
+  src/pages/admin/*
+  package.json
+  src/lib/supabase/server.ts
+
+---
+
+### Algorithm Preserved
+
+Scoring weights unchanged:
+  DEGREE_POINTS = 35
+  SUBJECT_PRIMARY_POINTS = 30
+  SUBJECT_SECONDARY_POINTS = 24
+  SUBJECT_POSSIBLE_POINTS = 30
+  COUNTRY_POINTS = 25
+  BUDGET_POINTS = 10
+  BUDGET_PARTIAL_POINTS = 5
+
+possiblePoints computation unchanged.
+Candidate cap 200 unchanged.
+Top result cap 20 unchanged.
+Deterministic sort unchanged (points DESC, percentage DESC, reasons.length DESC, title ASC).
+
+---
+
+### UX Changes
+
+Preference summary:
+  New compact panel shown in ready and no_matches states.
+  Shows only the four scoring signals: target degree level name, country names,
+  subject names, budget summary. Non-scoring fields excluded.
+  Names fetched via PostgREST joins on existing queries (no extra round-trips):
+    student_profiles: added degree_levels(name)
+    student_profile_subjects: added subjects(name)
+    student_profile_countries: added countries(name)
+  If fewer than 2 signals present, a soft hint encourages adding more.
+
+Score explanation:
+  Blue info box (bg-blue-50) rendered once per page in ready/no_matches states.
+  Explains preference-alignment semantics and explicitly disclaims admission,
+  eligibility, scholarship, and visa claims.
+
+Score badge label:
+  Changed from "match score" to "preference match" on each result card.
+
+Degree reason:
+  Now includes degree level name when available:
+  "Matches your target degree level: Master's."
+  Falls back to generic wording when name join returns null.
+
+Warning consolidation:
+  Merged admission_requirements/gpa_requirements and english_requirements warnings
+  into one: "Admission and language requirements must be verified with the official source."
+  Tuition warnings unchanged.
+
+No-match state:
+  Now shows count of published programs checked.
+  Single-signal profile: suggests adding more preferences.
+  Multi-signal profile: suggests broadening subject/country choices.
+
+Sparse-profile state:
+  Now lists specific missing signals (target degree level, subjects of interest,
+  preferred countries, budget) so user knows exactly what to add.
+
+Stale copy fix (index.astro):
+  "Program matching will be added in the next phase."
+  → "Save your study preferences to see possible program matches based on your inputs."
+
+---
+
+### Preference Summary Behavior
+
+Displayed signals: target degree level, preferred countries, preferred subjects, budget.
+Not displayed: gpa, english_score, work_experience_years, current_country_id,
+  study_start_preference, additional_notes.
+Location: below blue info box, above action buttons, in ready and no_matches states only.
+Graceful handling: if a join returns null for a name, that row is omitted from the list.
+
+---
+
+### Score / Caveat Wording
+
+Info box text (exact):
+  Para 1: "Match scores show how many of your saved preferences a program aligned
+  with. A higher score means more of your preferences were matched — it does not
+  indicate your chances of admission, eligibility, or scholarship likelihood."
+  Para 2: "These are rule-based preference matches only. Match scores do not assess
+  your eligibility, academic qualifications, admission chances, scholarship prospects,
+  or visa outcomes. Always verify fees, deadlines, admission requirements, and
+  eligibility directly with the official university source before applying."
+
+Card footer (unchanged):
+  "Confirm fees, deadlines, admission requirements, and eligibility directly with
+  the official source." + optional Official program page link.
+
+---
+
+### Explicit Exclusions
+
+No AI calls.
+No callAI import.
+No Gemini/OpenAI references.
+No chatbot.
+No ai_finder_results writes.
+No ai_finder_program_matches writes.
+No ai_usage_logs writes.
+No service_role.
+No migrations.
+No new npm dependencies.
+No React or client-side JS.
+No admin changes.
+No anonymous persistence.
+No profile IDs in rendered HTML or URLs.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 5.14s, zero errors).
+
+### service_role Search Result
+
+Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+
+### AI Usage Search Result
+
+Get-ChildItem -Path src/pages/fit-finder -Recurse -File | Select-String -Pattern "callAI|Gemini|OpenAI|ai_finder_results|ai_finder_program_matches|ai_usage_logs" → 0 matches.
+
+### Manual Test Checklist
+
+1. npm run build: PASS.
+2. service_role grep: 0 matches.
+3. AI usage grep: 0 matches.
+4. Logged out → anonymous state renders, no profile query.
+5. Logged in, no profile → "No saved Fit Finder profile yet." state renders.
+6. Logged in, sparse profile → lists specific missing signals.
+7. Logged in, full profile → preferences summary shows degree level name, country names, subject names, budget.
+8. Fewer than 2 signals → "Adding more preferences" hint shown.
+9. Degree match reason includes level name when available.
+10. Warning consolidation: single warning for admission/language requirements.
+11. No-match: candidate count shown, targeted guidance shown.
+12. Score badge label: "preference match" (not "match score").
+13. Blue info box visible in ready and no_matches states.
+14. index.astro stale text no longer visible.
+15. Profile UUID not present in rendered HTML.
+16. Scoring unchanged: same programs, same order, same percentages as Phase 20.
+
+---
+
 ## 2026-06-17 - Phase 20: Rule-Based Program Matching Engine
 
 Tool:
