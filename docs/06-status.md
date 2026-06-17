@@ -1,10 +1,88 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 23 — TBD.
+Phase 24 — TBD.
+
+Phase 23 — AI Runtime Env + Provider Wiring — complete.
+
+## Last Completed Work
+
+Phase 23 — AI Runtime Env + Provider Wiring (complete):
+
+- Wired server-only AI runtime env extraction, implemented Gemini REST provider,
+  and connected the gateway to a live provider. No public AI feature, no public
+  AI endpoint, no Fit Finder AI output, no chatbot, no AI database writes,
+  no service_role, no migrations, no new dependencies, no React, no client-side JS,
+  no public page changes, no admin UI changes.
+
+Files created (1):
+  src/lib/ai/env.ts — getAIEnv(locals) helper: extracts AIRuntimeEnv from
+    Cloudflare Workers locals.runtime.env using a safe cast (src/env.d.ts
+    does not exist in this project). Call once per server endpoint, pass
+    result to callAI().
+
+Files modified (4 in src):
+  src/lib/ai/providers/gemini.ts — replaced Phase 18 stub with live
+    GeminiProvider.complete() using fetch-based REST call to Gemini
+    generateContent v1beta endpoint. system_instruction + contents request
+    shape. Parses text from candidates[0].content.parts[], promptTokens
+    and completionTokens from usageMetadata, modelUsed from modelVersion.
+    Controlled throws for non-ok HTTP (status only, no response body),
+    empty candidates, finishReason SAFETY/RECITATION, missing text.
+    createGeminiProvider(apiKey) factory updated to accept apiKey.
+
+  src/lib/ai/gateway.ts — replaced Phase 18 TODO block and static fallback
+    with live Steps 3–8:
+    Step 3: resolveProvider(env) — reads env.AI_PROVIDER (default: gemini),
+      checks GEMINI_API_KEY, throws on misconfiguration (no key/provider in
+      error message). callAI catches and returns fallback.
+    Step 4: buildFinderPrompt for sessionType=finder, buildChatPrompt for chat.
+    Step 5: provider.complete() with model env.AI_MODEL ?? 'gemini-2.5-flash',
+      temperature 0.2, maxOutputTokens 2048. Catch → safe fallback.
+    Step 6: checkOutput() on provider text. Guardrail trip → fallback with
+      guardrailTripped=true; blocked text is never returned.
+    Step 7: writeUsageLog() fire-and-forget no-op (DB writes deferred to Phase 24+).
+    Step 8: return AIResponse with provider text, token counts, guardrailTripped=false.
+    _env parameter renamed to env (was prefixed because unused in Phase 18).
+
+  .env.example — updated AI_MODEL default from gemini-2.0-flash to
+    gemini-2.5-flash (gemini-2.0-flash is shut down).
+
+  docs/04-ai-system.md — updated Phase 18 architecture section to Phase 23:
+    added getAIEnv helper, Gemini REST provider shape, Phase 23 behaviour
+    notes, updated default model.
+
+Explicit exclusions:
+  No public AI endpoint.
+  No smoke endpoint.
+  No Fit Finder AI output.
+  No chatbot.
+  No ai_usage_logs writes (writeUsageLog remains no-op stub).
+  No rate-limit enforcement (checkRateLimit remains always-allowed stub).
+  No service_role.
+  No migrations.
+  No new npm dependencies.
+  No React or client-side JS.
+  No public page changes.
+  No admin UI changes.
+  No src/lib/ai/types.ts changes.
+  No src/lib/ai/providers/interface.ts changes.
+  No src/lib/ai/prompts/* changes.
+  No src/lib/ai/safety/guardrails.ts changes.
+  No src/lib/ai/usage/logging.ts changes.
+  No src/lib/ai/usage/limits.ts changes.
+  No src/pages/fit-finder/* changes.
+  No src/pages/api/ai/smoke.ts created.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 2.14s, zero errors).
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "PUBLIC_GEMINI|PUBLIC_AI" → 0 matches.
+  Get-ChildItem -Path src -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE" → 0 matches.
+  Get-ChildItem -Path src\pages,src\components -Recurse -File | Select-String -Pattern "callAI" → 0 matches.
+  Test-Path src\pages\api\ai\smoke.ts → False.
 
 Phase 22 — Legal / Trust / Disclaimer Pages Foundation — complete.
 

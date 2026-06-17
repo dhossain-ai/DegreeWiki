@@ -4,6 +4,193 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 23: AI Runtime Env + Provider Wiring
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Wire server-only AI runtime env extraction, implement Gemini REST provider behind
+the existing AIProvider interface, and connect the gateway to resolve and call a
+live provider. No public AI surface, no Fit Finder AI output, no chatbot, no AI
+database writes, no service_role, no migrations, no new dependencies, no React,
+no client-side JS.
+
+---
+
+### Files Changed
+
+Created:
+  src/lib/ai/env.ts
+
+Modified:
+  src/lib/ai/providers/gemini.ts
+  src/lib/ai/gateway.ts
+  .env.example
+  docs/04-ai-system.md
+  docs/06-status.md
+  docs/07-task-log.md
+
+Not modified:
+  src/lib/ai/types.ts
+  src/lib/ai/providers/interface.ts
+  src/lib/ai/prompts/finder-summary.ts
+  src/lib/ai/prompts/chat-answer.ts
+  src/lib/ai/safety/guardrails.ts
+  src/lib/ai/usage/logging.ts
+  src/lib/ai/usage/limits.ts
+  src/pages/fit-finder/*
+  src/pages/admin/*
+  src/pages/ (all public routes)
+  src/components/*
+  package.json
+  astro.config.mjs
+
+---
+
+### Runtime Env Strategy
+
+In @astrojs/cloudflare, Cloudflare secrets and bindings are available at
+locals.runtime.env — not import.meta.env and not process.env. src/env.d.ts
+does not exist in this project, so a safe cast is required.
+
+getAIEnv(locals) in src/lib/ai/env.ts performs the cast once and returns a
+typed AIRuntimeEnv object. Future server endpoints that call callAI() import
+getAIEnv and pass Astro.locals cast as Record<string, unknown>. This keeps
+the unsafe cast in one place.
+
+AI env vars extracted:
+  AI_PROVIDER              (active provider name)
+  AI_MODEL                 (model string)
+  GEMINI_API_KEY           (server-only secret — never PUBLIC_ prefix)
+  AI_RATE_LIMIT_ANON_DAILY (rate limit — deferred)
+  AI_RATE_LIMIT_USER_DAILY (rate limit — deferred)
+
+---
+
+### Provider Strategy
+
+resolveProvider(env) added inside gateway.ts (not a separate file — one provider,
+no premature abstraction). Reads env.AI_PROVIDER (default: gemini). For gemini:
+checks env.GEMINI_API_KEY — throws if absent (no key value in error message).
+callAI() catches resolveProvider errors and returns a safe fallback AIResponse.
+
+Unknown provider name → throws → caught by callAI → safe fallback.
+
+---
+
+### Gemini REST Provider
+
+Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}
+
+Request shape:
+  system_instruction.parts[0].text = prompt.system
+  contents[0] = { role: 'user', parts: [{ text: prompt.user }] }
+  generationConfig.temperature = config.temperature ?? 0.2
+  generationConfig.maxOutputTokens = config.maxOutputTokens ?? 2048
+
+Response parsing:
+  text = candidates[0].content.parts[].text joined (all parts, not just first)
+  promptTokens = usageMetadata.promptTokenCount ?? 0
+  completionTokens = usageMetadata.candidatesTokenCount ?? 0
+  modelUsed = response.modelVersion ?? config.model
+
+Error handling in provider (all throw — caught by gateway):
+  HTTP !ok → throws "Gemini API returned status {N}" (no response body)
+  empty candidates → throws controlled message
+  finishReason SAFETY or RECITATION → throws with finishReason
+  missing/empty text → throws controlled message
+
+---
+
+### Gateway Behavior
+
+callAI(request, env) now executes all 8 steps:
+  1. checkInput guardrail (unchanged)
+  2. checkRateLimit (unchanged stub)
+  3. resolveProvider — try/catch → fallback on misconfiguration
+  4. buildFinderPrompt or buildChatPrompt based on sessionType
+  5. provider.complete() — try/catch → fallback on provider error
+  6. checkOutput guardrail — guardrailTripped=true on failure, no blocked text returned
+  7. writeUsageLog() fire-and-forget no-op
+  8. return AIResponse with provider text and token counts
+
+Every failure path returns a valid AIResponse — callAI never throws to its caller.
+
+---
+
+### Model Decision
+
+Default changed from gemini-2.0-flash to gemini-2.5-flash (gemini-2.0-flash is shut
+down). Applied in:
+  gateway.ts fallback default: env.AI_MODEL ?? 'gemini-2.5-flash'
+  .env.example: AI_MODEL=gemini-2.5-flash
+  docs/04-ai-system.md: updated example
+
+---
+
+### Usage Logging (deferred)
+
+writeUsageLog() in usage/logging.ts remains a no-op stub. Writing to ai_usage_logs
+requires service_role (table RLS design requires privileged write per Phase 18 notes).
+Gateway calls it correctly as fire-and-forget; when Phase 24+ wires logging, only
+logging.ts changes.
+
+### Rate Limiting (deferred)
+
+checkRateLimit() in usage/limits.ts remains always-allowed stub. Enforcement requires
+querying ai_usage_logs, which is deferred with usage logging. Gateway short-circuit on
+!allowed is live and correct.
+
+---
+
+### Explicit Exclusions
+
+No public AI endpoint.
+No smoke/test endpoint.
+No Fit Finder AI output.
+No chatbot.
+No ai_usage_logs writes.
+No rate-limit enforcement.
+No service_role.
+No migrations.
+No new npm dependencies.
+No React or client-side JS.
+No public page changes.
+No admin UI changes.
+No src/pages/api/ai/smoke.ts.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 2.14s, zero errors).
+
+---
+
+### Safety Grep Results
+
+PUBLIC_GEMINI|PUBLIC_AI in src/ → 0 matches.
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/ → 0 matches.
+callAI in src/pages/, src/components/ → 0 matches.
+src/pages/api/ai/smoke.ts → does not exist.
+
+---
+
+### Manual Test Checklist (for future smoke verification with real GEMINI_API_KEY)
+
+1. Set GEMINI_API_KEY in .env.local and confirm npm run dev starts without error.
+2. Create a temporary server-only script or admin endpoint to call callAI() with
+   a fixed AIRequest and log the AIResponse — verify text is non-empty and
+   fallbackUsed is false.
+3. Remove GEMINI_API_KEY from .env.local — confirm callAI returns fallbackUsed=true
+   and "AI is not available at this time." without crashing.
+4. Set AI_PROVIDER=unknown — confirm callAI returns fallbackUsed=true.
+5. Confirm /fit-finder/result still works as before (no AI output, no regression).
+6. Confirm all public pages load without error (no callAI import in any page).
+
+---
+
 ## 2026-06-17 - Phase 22: Legal / Trust / Disclaimer Pages Foundation
 
 Tool:
