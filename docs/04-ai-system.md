@@ -135,7 +135,7 @@ Do not use:
 
 "This visa will be approved."
 
-## AI Gateway Architecture (Phase 18)
+## AI Gateway Architecture (Phase 23)
 
 The AI module lives in src/lib/ai/ and is server-only.
 
@@ -147,18 +147,21 @@ src/lib/ai/
                         AIPrompt, AIProviderConfig, AIProviderResponse,
                         AIUsageEntry, AIGuardrailResult, AIRuntimeEnv,
                         StudentProfileSummary, AISessionType, AIRole
-  gateway.ts            callAI() — single entry point for all LLM calls
+  env.ts                getAIEnv(locals) — extracts AIRuntimeEnv from
+                        Cloudflare Workers locals.runtime.env safely
+  gateway.ts            callAI() — single entry point for all LLM calls;
+                        resolveProvider() — maps AI_PROVIDER to a live provider
   providers/
     interface.ts        AIProvider interface contract
-    gemini.ts           Gemini implementation (stub in Phase 18)
+    gemini.ts           Gemini REST implementation (live in Phase 23)
   prompts/
     finder-summary.ts   buildFinderPrompt() for AI Finder explanation
     chat-answer.ts      buildChatPrompt() for chatbot responses
   safety/
     guardrails.ts       checkInput() and checkOutput() — first-pass safety
   usage/
-    logging.ts          writeUsageLog() — placeholder, wired in Phase 19
-    limits.ts           checkRateLimit() — placeholder, enforced in Phase 19
+    logging.ts          writeUsageLog() — no-op stub; DB writes deferred to Phase 24+
+    limits.ts           checkRateLimit() — always-allowed stub; enforcement deferred
 ```
 
 ### callAI() Contract
@@ -168,23 +171,72 @@ callAI(request: AIRequest, env: AIRuntimeEnv): Promise<AIResponse>
 ```
 
 - Input guardrails run first (checkInput).
-- Rate limit is checked second (checkRateLimit).
-- AIContext.records must be pre-fetched by the caller — never empty by accident.
-- Provider is resolved from env.AI_PROVIDER.
-- Output guardrails run on provider response (checkOutput) in Phase 19+.
-- Usage is logged to ai_usage_logs in Phase 19+.
+- Rate limit is checked second (checkRateLimit — currently stub, always allowed).
+- Provider is resolved from env.AI_PROVIDER (default: gemini).
+- Prompt is built: buildFinderPrompt for finder sessions, buildChatPrompt for chat.
+- Provider.complete() is called with model, temperature 0.2, maxOutputTokens 2048.
+- Output guardrails run on provider response (checkOutput) before returning.
+- writeUsageLog() is called fire-and-forget (no-op stub — DB writes deferred).
+- Every failure path returns a valid AIResponse — callAI never throws.
 - callAI must only be called from server endpoints.
 
-### Phase 18 Behaviour
+### Phase 23 Behaviour
 
-No live provider is enabled in Phase 18.
+The Gemini provider is live. callAI() makes a real REST call to Gemini when
+GEMINI_API_KEY is present in the Cloudflare Workers runtime env.
 
-callAI() returns a controlled fallback response instead of calling any external API.
+No public AI surface is enabled. callAI() is wired but not called from any
+public page, Fit Finder page, or admin page in Phase 23.
 
-The Gemini provider stub throws "Gemini provider is not enabled in Phase 18."
-if instantiated directly.
+No ai_usage_logs rows are written (deferred to Phase 24+).
 
-No external API calls are made. No ai_usage_logs rows are written.
+Rate limit enforcement is deferred to Phase 24+ (stub always returns allowed).
+
+### getAIEnv Helper
+
+```
+getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv
+```
+
+Extracts AI env vars from Cloudflare Workers locals.runtime.env.
+Call once per server endpoint, pass result to callAI().
+
+In @astrojs/cloudflare, Cloudflare secrets and bindings are available at
+locals.runtime.env — not import.meta.env. A safe cast is required because
+src/env.d.ts does not exist in this project.
+
+Usage in a server endpoint:
+```
+import { getAIEnv } from '../lib/ai/env'
+const aiEnv = getAIEnv(Astro.locals as Record<string, unknown>)
+const response = await callAI(request, aiEnv)
+```
+
+### Gemini REST Provider
+
+GeminiProvider.complete() calls:
+```
+POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}
+```
+
+Request body:
+- system_instruction.parts[0].text = prompt.system
+- contents[0].role = 'user', parts[0].text = prompt.user
+- generationConfig.temperature = config.temperature ?? 0.2
+- generationConfig.maxOutputTokens = config.maxOutputTokens ?? 2048
+
+Response parsing:
+- text: all candidates[0].content.parts[].text joined
+- promptTokens: usageMetadata.promptTokenCount ?? 0
+- completionTokens: usageMetadata.candidatesTokenCount ?? 0
+- modelUsed: response.modelVersion ?? config.model
+
+Error handling:
+- non-ok HTTP status → throws with status code only (no response body logged)
+- empty candidates → throws controlled error
+- finishReason SAFETY or RECITATION → throws controlled error
+- missing text → throws controlled error
+All throws are caught by callAI(), which returns a safe fallback.
 
 ## LLM Provider Strategy
 
@@ -218,7 +270,7 @@ Environment variables for the AI module:
 ```
 GEMINI_API_KEY          # Server/worker only. Set via: wrangler secret put GEMINI_API_KEY
 AI_PROVIDER             # Active provider name: gemini | openrouter
-AI_MODEL                # Model string passed to provider, e.g. gemini-2.0-flash
+AI_MODEL                # Model string passed to provider, e.g. gemini-2.5-flash
 AI_RATE_LIMIT_ANON_DAILY    # Max AI calls per anonymous session per day (default 5)
 AI_RATE_LIMIT_USER_DAILY    # Max AI calls per logged-in user per day (default 20)
 ```
