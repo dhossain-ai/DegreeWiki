@@ -9,10 +9,11 @@ export function getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv {
   const runtime = locals.runtime as { env?: Record<string, string | undefined> } | undefined
   const raw = runtime?.env ?? {}
   return {
-    AI_PROVIDER:              raw['AI_PROVIDER'],
-    AI_MODEL:                 raw['AI_MODEL'],
-    GEMINI_API_KEY:           raw['GEMINI_API_KEY'],
-    AI_RATE_LIMIT_ANON_DAILY: raw['AI_RATE_LIMIT_ANON_DAILY'],
-    AI_RATE_LIMIT_USER_DAILY: raw['AI_RATE_LIMIT_USER_DAILY'],
+    AI_PROVIDER:                raw['AI_PROVIDER'],
+    AI_MODEL:                   raw['AI_MODEL'],
+    GEMINI_API_KEY:             raw['GEMINI_API_KEY'],
+    AI_RATE_LIMIT_ANON_DAILY:   raw['AI_RATE_LIMIT_ANON_DAILY'],
+    AI_RATE_LIMIT_USER_DAILY:   raw['AI_RATE_LIMIT_USER_DAILY'],
+    SUPABASE_SERVICE_ROLE_KEY:  raw['SUPABASE_SERVICE_ROLE_KEY'],
   }
 }

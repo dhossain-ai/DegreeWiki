@@ -64,12 +64,13 @@ export interface AIProviderResponse {
   modelUsed: string
 }
 
-// Usage audit entry written to ai_usage_logs (Phase 19+).
+// Usage audit entry written to ai_usage_logs (Phase 25+).
 export interface AIUsageEntry {
   userId: string | null
   sessionType: AISessionType
   tokensUsed: number
   modelUsed: string
+  costEstimateUsd?: number | null
 }
 
 // Result of a guardrail check.
@@ -87,4 +88,7 @@ export interface AIRuntimeEnv {
   GEMINI_API_KEY?: string
   AI_RATE_LIMIT_ANON_DAILY?: string
   AI_RATE_LIMIT_USER_DAILY?: string
+  // Server-only. Never expose with PUBLIC_ prefix. Used only by AI logging
+  // and rate-limit infrastructure via src/lib/supabase/service.ts.
+  SUPABASE_SERVICE_ROLE_KEY?: string
 }

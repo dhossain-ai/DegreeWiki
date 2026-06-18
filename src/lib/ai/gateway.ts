@@ -6,6 +6,7 @@ import { buildChatPrompt } from './prompts/chat-answer'
 import { checkInput, checkOutput } from './safety/guardrails'
 import { checkRateLimit } from './usage/limits'
 import { writeUsageLog } from './usage/logging'
+import { createServiceClient } from '../supabase/service'
 
 // callAI is the single server-only entry point for all LLM calls.
 //
@@ -34,11 +35,27 @@ export async function callAI(
     }
   }
 
-  // Step 2: rate limit check (currently a stub — enforcement deferred to Phase 24+).
-  const { allowed } = await checkRateLimit(request.userId ?? null, request.sessionType)
+  // Resolve the service role client for rate limiting and usage logging.
+  // Null when SUPABASE_SERVICE_ROLE_KEY is absent — both operations fail closed.
+  const serviceClient = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createServiceClient(env.SUPABASE_SERVICE_ROLE_KEY)
+    : null
+
+  const dailyLimit = Math.max(1, parseInt(env.AI_RATE_LIMIT_USER_DAILY ?? '20', 10) || 20)
+
+  // Step 2: rate limit check — fail closed.
+  // No service client → denied. Anonymous user → denied. Query error → denied.
+  const { allowed, reason: limitReason } = await checkRateLimit(
+    request.userId ?? null,
+    request.sessionType,
+    { serviceClient, dailyLimit },
+  )
   if (!allowed) {
+    const text = limitReason === 'limit_exceeded'
+      ? "You have reached today's AI usage limit. Your rule-based matches are still available."
+      : 'AI is temporarily unavailable.'
     return {
-      text: 'You have reached the daily AI usage limit. Please try again tomorrow.',
+      text,
       modelUsed: 'none',
       promptTokens: 0,
       completionTokens: 0,
@@ -101,14 +118,18 @@ export async function callAI(
     }
   }
 
-  // Step 7: usage log — no-op stub; DB writes deferred to Phase 24+.
-  // fire-and-forget: a failed log must never break the AI response.
-  writeUsageLog({
-    userId: request.userId ?? null,
-    sessionType: request.sessionType,
-    tokensUsed: providerResponse.promptTokens + providerResponse.completionTokens,
-    modelUsed: providerResponse.modelUsed,
-  }).catch(() => {
+  // Step 7: usage log — fire-and-forget; a failed log must never break the response.
+  // Only session metadata and token counts are logged. No prompt or response text.
+  writeUsageLog(
+    {
+      userId:           request.userId ?? null,
+      sessionType:      request.sessionType,
+      tokensUsed:       providerResponse.promptTokens + providerResponse.completionTokens,
+      modelUsed:        providerResponse.modelUsed,
+      costEstimateUsd:  null,
+    },
+    serviceClient,
+  ).catch(() => {
     // intentionally silent
   })
 

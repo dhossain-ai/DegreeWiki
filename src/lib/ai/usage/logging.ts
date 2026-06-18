@@ -1,12 +1,33 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIUsageEntry } from '../types'
 
-// Phase 18: placeholder — no database writes yet.
-// Phase 19 will wire a Supabase service role client and insert into ai_usage_logs.
-// writeUsageLog is fire-and-forget; a failed log must never break the AI response.
+// writeUsageLog inserts one row into ai_usage_logs via the service role client.
+//
+// Fire-and-forget contract: this function must never throw. A logging failure
+// must never interrupt or affect the AI response returned to the caller.
+//
+// Only session metadata and token counts are logged. Prompt text, AI response
+// text, profile IDs, emails, session tokens, and raw profile data are never
+// included in the log entry.
 export async function writeUsageLog(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _entry: AIUsageEntry,
+  entry: AIUsageEntry,
+  serviceClient: SupabaseClient | null,
 ): Promise<void> {
-  // TODO Phase 19: insert _entry into ai_usage_logs via service role client.
-  // Do not import a service role client here in Phase 18.
+  if (serviceClient === null) {
+    return
+  }
+
+  const { error } = await serviceClient
+    .from('ai_usage_logs')
+    .insert({
+      user_id:           entry.userId,
+      session_type:      entry.sessionType,
+      tokens_used:       entry.tokensUsed,
+      model_used:        entry.modelUsed,
+      cost_estimate_usd: entry.costEstimateUsd ?? null,
+    })
+
+  if (error) {
+    console.error('ai_usage_logs write failed:', error.message)
+  }
 }
