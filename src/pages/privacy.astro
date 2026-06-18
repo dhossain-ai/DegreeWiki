@@ -50,12 +50,21 @@ import { SITE_URL } from '../lib/site'
     </section>
 
     <section class="mb-8">
-      <h2 class="text-lg font-semibold text-gray-800 mb-3">AI features (future)</h2>
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">AI features</h2>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        When you use AI-assisted features on DegreeWiki (such as the Fit Finder AI summary),
+        your query is logged server-side with your user ID, session type, model used, and
+        token count. This data is used for rate limiting and cost management only.
+      </p>
+      <p class="text-gray-600 leading-relaxed mb-3">
+        Fit Finder match results are saved to your account so you can review them later.
+        Saved results include the ranked program matches and, if generated, the AI summary
+        from that session. You can delete saved results from your account at any time.
+      </p>
       <p class="text-gray-600 leading-relaxed">
-        When live AI-assisted features are enabled, AI-assisted queries will be logged
-        server-side with your user ID, session type, model used, and token count. This data
-        is used for rate limiting and cost management only. AI usage logs are not shared with
-        third parties.
+        AI-assisted features send relevant session context to an external AI provider
+        (currently Google Gemini) to generate summaries. We do not sell this data or use
+        it for advertising.
       </p>
     </section>
 

@@ -71,6 +71,7 @@ let savedSignalCount = 0
 let candidatesChecked = 0
 let missingSignals: string[] = []
 let aiExplanation: string | null = null
+let aiUnavailable = false
 let savedResultId: string | null = null
 let persistAttempted = false
 
@@ -355,9 +356,11 @@ if (!user) {
                 aiModelUsed = aiResponse.modelUsed
                 promptTokenCount = aiResponse.promptTokens
                 completionTokenCount = aiResponse.completionTokens
+              } else {
+                aiUnavailable = true
               }
             } catch {
-              // AI failure must never break rule-based matches
+              aiUnavailable = true
             }
 
             try {
@@ -555,6 +558,11 @@ const pageTitle = 'Possible program matches'
               ))}
             </div>
           </div>
+        )}
+        {!aiExplanation && aiUnavailable && (
+          <p class="max-w-3xl mb-5 text-sm text-gray-500">
+            AI summary is unavailable right now. Your rule-based matches are still shown.
+          </p>
         )}
 
         {deviation && (
