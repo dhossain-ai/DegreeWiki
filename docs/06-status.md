@@ -4,7 +4,9 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 29 — TBD.
+Phase 30 — TBD.
+
+Phase 29 — Fit Finder History Polish — complete.
 
 Phase 28 — AI Finder Production Hardening — complete.
 
@@ -13,6 +15,96 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 29 — Fit Finder History Polish (complete):
+
+- Polished the saved Fit Finder results list and history experience. No AI calls, no
+  service_role, no schema changes, no matching algorithm changes, no new dependencies,
+  no React, no client-side JS, no admin UI, no public sharing.
+
+Saved-results list (/fit-finder/results):
+  Added top-program preview via a second SSR client query on ai_finder_program_matches
+  filtered to rank=1 and ai_finder_result_id IN (current result IDs). Joins programs,
+  universities(name, slug), countries(name), cities(name). Maps previews by result ID
+  into a Map<string, TopProgram>. RLS ai_finder_program_matches_select_own enforces
+  ownership via grandparent join (ai_finder_results → student_profiles.user_id =
+  auth.uid()). If preview query fails: console.error server-side only; list renders
+  without previews; no user-facing error shown.
+
+  Card badge logic:
+    complete + ai_explanation → purple "AI summary" pill
+    complete + no ai_explanation → gray "No AI summary" pill
+    pending → yellow "Incomplete" pill
+    failed → red "Failed" pill
+  Previously: only a yellow badge for non-complete, no label for no-AI case.
+
+  Top match preview block (when rank-1 match exists):
+    Program title (text-sm font-medium text-gray-800)
+    University name · Country, City (text-xs text-gray-500)
+    Omitted gracefully when preview is unavailable.
+
+  Top action row: added "Browse programs" CTA (third link → /programs).
+
+  Empty state: updated copy from "No saved results yet" to "No saved Fit Finder results
+    yet." with expanded explanation: "Results are saved automatically after you run Fit
+    Finder. Your matched programs and any AI summary are stored so you can review them
+    later." Added "Browse programs" as third CTA.
+
+Detail page (/fit-finder/results/[id]):
+  Added status/AI badge row next to saved date:
+    complete + ai_explanation → purple "AI summary"
+    complete + no ai_explanation → gray "No AI summary"
+    pending → yellow "Incomplete"
+    failed → red "Failed"
+  Existing failed warning paragraph kept below badge row. No logic changes, no new queries.
+
+Navigation links:
+  /fit-finder: added "View saved results →" plain text link in submit button row,
+    rendered only when user is logged in (user variable already available from
+    Promise.all auth.getUser() call).
+  /fit-finder/result: added "View all saved results →" plain text link in action
+    buttons row, rendered only when user is logged in AND pageState === 'ready'.
+    Not shown in no_matches, sparse_profile, error, or anonymous states.
+
+Delete behavior (unchanged from Phase 27):
+  POST handler, UUID validation, SSR client delete on ai_finder_results, RLS
+  ai_finder_results_delete_own enforces ownership. ON DELETE CASCADE removes
+  ai_finder_program_matches automatically. No user_id or student_profile_id accepted.
+
+Files created: 0
+
+Files modified (4 in src):
+  src/pages/fit-finder/results/index.astro — preview query, TopProgram type, previews
+    Map, badge logic function, improved card template, improved empty state, Browse
+    programs CTA
+  src/pages/fit-finder/results/[id].astro — badge row added to metadata section
+  src/pages/fit-finder/index.astro — "View saved results →" link for logged-in users
+  src/pages/fit-finder/result.astro — "View all saved results →" link in ready state only
+
+Service-role/AI boundary:
+  No service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts.
+  No createServiceClient in src/pages,src/components,src/layouts.
+  No callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient|Gemini|OpenAI in
+    src/pages/fit-finder/results.
+  callAI only in src/pages/fit-finder/result.astro (import + invocation, unchanged).
+
+Explicit exclusions:
+  No AI calls. No callAI in saved-results routes. No getAIEnv in saved-results routes.
+  No service_role. No createServiceClient. No migrations. No new dependencies.
+  No React or client-side JS. No admin UI. No public sharing. No matching algorithm changes.
+  No persistence logic changes. No rate-limit changes. No prompt changes.
+  No chatbot. No new AI endpoint. No Gemini/OpenAI code references in results routes.
+  ai_model_used fetched in results/index.astro but not rendered to users.
+  user_id and student_profile_id not accepted in forms or rendered to page.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 3.52s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient|Gemini|OpenAI in
+    src/pages/fit-finder/results → 0 matches.
+  callAI in src/pages,src/components → 2 matches, both in src/pages/fit-finder/result.astro
+    (import + invocation only, unchanged from Phase 28).
 
 Phase 28 — AI Finder Production Hardening (complete):
 

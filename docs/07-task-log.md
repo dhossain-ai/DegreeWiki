@@ -4,6 +4,187 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 29: Fit Finder History Polish
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Polish the saved Fit Finder results/history experience — improved list cards with top-program
+preview, clearer AI/no-AI status badges, better empty state, and lightweight navigation links
+between Fit Finder flow pages. No AI calls, no service_role, no schema changes, no matching
+changes, no new dependencies, no React, no client-side JS.
+
+---
+
+### Files Modified
+
+src/pages/fit-finder/results/index.astro:
+
+  Added TopProgram type:
+    { title, slug, universityName, universitySlug, countryName, cityName }
+
+  Added top-program preview query (after main results list loads):
+    Uses SSR client (createClient). Queries ai_finder_program_matches, filters rank=1,
+    ai_finder_result_id IN (result IDs from main query). Joins programs(title, slug,
+    universities(name, slug), countries(name), cities(name)). RLS
+    ai_finder_program_matches_select_own enforces ownership via grandparent join
+    (ai_finder_results → student_profiles.user_id = auth.uid()).
+    Builds Map<string, TopProgram> keyed by ai_finder_result_id.
+    On error: console.error server-side only; previews Map stays empty; list renders
+    normally without previews; no user-facing error banner.
+
+  Added getCardBadge() helper function:
+    Returns 'failed' | 'incomplete' | 'ai' | 'no-ai' based on result_status and
+    ai_explanation presence.
+
+  Card template updated:
+    Header row: date + badge pill(s).
+      ai → purple "AI summary" pill (bg-purple-50 text-purple-700 border-purple-100)
+      no-ai → gray "No AI summary" pill (bg-gray-100 text-gray-500 border-gray-200)
+      incomplete → yellow "Incomplete" pill (bg-yellow-50 text-yellow-800 border-yellow-200)
+      failed → red "Failed" pill (bg-red-50 text-red-700 border-red-200)
+    Program count: unchanged.
+    Top match preview block (new, shown when previews.get(r.id) exists):
+      program title in text-sm font-medium text-gray-800
+      university name · country, city in text-xs text-gray-500
+      Both lines omitted when no preview for this result.
+    Actions: unchanged (View result link, Delete form button).
+
+  Top action row: added "Browse programs" → /programs as third CTA.
+
+  Empty state improved:
+    Title: "No saved Fit Finder results yet."
+    Body: "Results are saved automatically after you run Fit Finder. Your matched programs
+      and any AI summary are stored so you can review them later."
+    Three CTAs: Run Fit Finder, Update preferences, Browse programs.
+
+  Delete handler: unchanged (POST, UUID validation, SSR client delete, RLS, cascade).
+
+src/pages/fit-finder/results/[id].astro:
+  Added status/AI badge row below h1, next to "Saved on [date]" text:
+    complete + ai_explanation → purple "AI summary" pill
+    complete + no ai_explanation → gray "No AI summary" pill
+    pending → yellow "Incomplete" pill
+    failed → red "Failed" pill
+  Existing failed warning paragraph kept below badge row unchanged.
+  No logic changes. No new imports. No new queries.
+
+src/pages/fit-finder/index.astro:
+  Added "View saved results →" plain text link in submit button row.
+  Rendered only when user is truthy (user variable already available from
+  Promise.all supabase.auth.getUser() call at page top).
+  Styled as text-sm text-gray-500 hover:text-gray-700 — unobtrusive.
+
+src/pages/fit-finder/result.astro:
+  Added "View all saved results →" plain text link in action buttons row.
+  Rendered only when user is truthy AND pageState === 'ready'.
+  Not shown in no_matches, sparse_profile, error, no_profile, or anonymous states.
+  Styled as text-sm text-gray-500 hover:text-gray-700 — unobtrusive.
+  No changes to matching logic, AI call block, persistence, or dedupe behavior.
+
+---
+
+### Query Strategy
+
+Top-program preview uses a second SSR client query (not nested select on ai_finder_results):
+  Rationale: PostgREST nested select on a one-to-many (ai_finder_results →
+  ai_finder_program_matches) would return an array per result requiring client-side
+  filter for rank=1. Two-query approach is explicit, type-safe, and consistent with
+  existing patterns in [id].astro.
+  Query runs only when pageState === 'list' and results.length > 0.
+  RLS is the authoritative ownership check — no page-level user_id filter needed.
+
+---
+
+### Empty/Navigation Improvements
+
+  /fit-finder/results empty state: improved title, two-sentence explanation, three CTAs.
+  /fit-finder/results top action row: added Browse programs as third CTA.
+  /fit-finder: added View saved results link for logged-in users (simple, no counts).
+  /fit-finder/result ready state: added View all saved results link for logged-in users.
+
+---
+
+### Delete Behavior
+
+  Unchanged from Phase 27:
+  POST to /fit-finder/results, UUID regex validation, SSR client delete on ai_finder_results,
+  RLS ai_finder_results_delete_own (student_profiles.user_id = auth.uid()),
+  ON DELETE CASCADE removes ai_finder_program_matches automatically.
+  No JS confirmation. No user_id or student_profile_id in forms.
+  Non-owner UUID: RLS no-ops (0 rows affected); redirect to list; no disclosure.
+
+---
+
+### RLS/Security Behavior
+
+  All reads use SSR client (createClient). No service_role, no createServiceClient.
+  ai_finder_results SELECT: RLS scopes to auth.uid() through student_profiles.
+  ai_finder_program_matches SELECT (preview): RLS scopes via grandparent join.
+  No user_id, student_profile_id, prompt text, or AI internals rendered to page.
+  ai_model_used selected in results/index.astro for server logic (badge detection)
+    but never rendered to HTML.
+  Delete form contains only result UUID (hidden id field).
+
+---
+
+### Explicit Exclusions
+
+  No AI calls. No callAI import in saved-results routes. No getAIEnv in saved-results routes.
+  No service_role. No createServiceClient. No migrations. No new dependencies.
+  No React or client-side JS. No admin UI. No public sharing. No matching algorithm changes.
+  No persistence logic changes. No rate-limit changes. No prompt changes.
+  No chatbot. No new AI endpoint. No Gemini/OpenAI code in results routes.
+  No changes to src/lib/ai/*, src/lib/supabase/service.ts, supabase/migrations/*.
+  No changes to package.json or admin pages.
+
+---
+
+### Build Result
+
+  npm run build: PASS (Cloudflare server build, 3.52s, zero errors).
+
+---
+
+### Safety Grep Results
+
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient|Gemini|OpenAI in
+    src/pages/fit-finder/results → 0 matches.
+  callAI in src/pages,src/components → 2 matches, both in src/pages/fit-finder/result.astro
+    (import line and invocation line only; unchanged from Phase 28).
+
+---
+
+### Manual Test Checklist
+
+- [ ] Anonymous /fit-finder/results redirects to /login?redirect=/fit-finder/results
+- [ ] Logged-in empty state shows "No saved Fit Finder results yet." with 3 CTAs
+- [ ] Logged-in saved-results list shows results newest first
+- [ ] Each card shows date, program count, and correct badge
+- [ ] Complete result with AI explanation shows purple "AI summary" badge
+- [ ] Complete result without AI explanation shows gray "No AI summary" badge
+- [ ] Failed result shows red "Failed" badge
+- [ ] Pending/incomplete result shows yellow "Incomplete" badge
+- [ ] Top-program preview appears when rank-1 match exists (title, university, location)
+- [ ] Card renders normally when preview is absent or preview query fails
+- [ ] "View result" navigates to /fit-finder/results/[id]
+- [ ] Delete from list works (POST, redirect, result removed)
+- [ ] User B cannot see User A results (RLS)
+- [ ] /fit-finder/results/[id] shows status/AI badge near saved date
+- [ ] /fit-finder/results/[id] "Back to saved results" link works
+- [ ] /fit-finder/results/[id] delete form still works
+- [ ] /fit-finder logged-in page shows "View saved results →" link
+- [ ] /fit-finder logged-out page does not show "View saved results →" link
+- [ ] /fit-finder/result ready state shows "View all saved results →" link for logged-in users
+- [ ] /fit-finder/result no_matches state does not show "View all saved results →" link
+- [ ] /fit-finder/result anonymous/no_profile/sparse_profile/error states do not show that link
+- [ ] No AI calls fired from any saved-results route
+
+---
+
 ## 2026-06-18 - Phase 27: Saved Finder Results Management
 
 Tool:
