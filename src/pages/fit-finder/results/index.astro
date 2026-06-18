@@ -1,0 +1,175 @@
+---
+import PublicLayout from '../../../layouts/PublicLayout.astro'
+import { createClient } from '../../../lib/supabase/server'
+import { SITE_URL } from '../../../lib/site'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: { user } } = await supabase.auth.getUser()
+
+if (!user) {
+  return Astro.redirect('/login?redirect=/fit-finder/results')
+}
+
+let deleteError = ''
+
+// Handle POST (delete) before rendering the list
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData()
+  const rawId = formData.get('id')
+
+  if (typeof rawId !== 'string' || !UUID_RE.test(rawId)) {
+    deleteError = 'Invalid request.'
+  } else {
+    const { error } = await supabase
+      .from('ai_finder_results')
+      .delete()
+      .eq('id', rawId)
+
+    if (error) {
+      console.error('ai_finder_results delete error:', error.message)
+      deleteError = 'Could not delete this result. Please try again.'
+    } else {
+      return Astro.redirect('/fit-finder/results')
+    }
+  }
+}
+
+type SavedResult = {
+  id: string
+  created_at: string
+  result_status: string
+  shortlist_count: number
+  ai_explanation: string | null
+  ai_model_used: string | null
+}
+
+let results: SavedResult[] = []
+let pageState: 'list' | 'empty' | 'error' = 'empty'
+
+const { data: rows, error: listError } = await supabase
+  .from('ai_finder_results')
+  .select('id, created_at, result_status, shortlist_count, ai_explanation, ai_model_used')
+  .order('created_at', { ascending: false })
+
+if (listError) {
+  console.error('ai_finder_results list error:', listError.message)
+  pageState = 'error'
+} else if (rows && rows.length > 0) {
+  results = rows as SavedResult[]
+  pageState = 'list'
+} else {
+  pageState = 'empty'
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+---
+<PublicLayout
+  title="Saved Fit Finder results — DegreeWiki"
+  description="Your saved DegreeWiki Fit Finder program match results."
+  noindex={true}
+  canonical={SITE_URL + '/fit-finder/results'}
+>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="max-w-3xl mb-6">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">Saved Fit Finder results</h1>
+      <p class="text-sm text-gray-500">Your saved program match results, newest first.</p>
+    </div>
+
+    <div class="flex flex-wrap gap-3 mb-7">
+      <a href="/fit-finder/result" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+        Run Fit Finder again
+      </a>
+      <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+        Update preferences
+      </a>
+    </div>
+
+    {deleteError && (
+      <div class="max-w-3xl mb-5 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800">
+        {deleteError}
+      </div>
+    )}
+
+    {pageState === 'error' ? (
+      <div class="max-w-2xl">
+        <p class="text-gray-600 mb-4">Could not load your saved results. Please try again.</p>
+        <a href="/fit-finder/result" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Run Fit Finder
+        </a>
+      </div>
+    ) : pageState === 'empty' ? (
+      <div class="max-w-2xl border border-gray-200 rounded-lg p-6 bg-gray-50">
+        <h2 class="text-base font-semibold text-gray-900 mb-2">No saved results yet</h2>
+        <p class="text-sm text-gray-600 mb-4">
+          Run the Fit Finder and your results will be saved automatically.
+        </p>
+        <div class="flex flex-wrap gap-3">
+          <a href="/fit-finder/result" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+            Run Fit Finder
+          </a>
+          <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-white">
+            Update preferences
+          </a>
+        </div>
+      </div>
+    ) : (
+      <ul class="space-y-4 max-w-3xl">
+        {results.map(r => (
+          <li class="border border-gray-200 rounded-lg p-5 bg-white">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  <span class="text-sm font-medium text-gray-900">
+                    {formatDate(r.created_at)}
+                  </span>
+                  {r.result_status !== 'complete' && (
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 border border-yellow-200 capitalize">
+                      {r.result_status}
+                    </span>
+                  )}
+                  {r.ai_explanation && (
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
+                      AI summary
+                    </span>
+                  )}
+                </div>
+                <p class="text-sm text-gray-500">
+                  {r.shortlist_count === 1
+                    ? '1 program matched'
+                    : `${r.shortlist_count} programs matched`}
+                </p>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 shrink-0">
+                <a
+                  href={`/fit-finder/results/${r.id}`}
+                  class="px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-md hover:bg-blue-50"
+                >
+                  View result
+                </a>
+                <form method="post" action="/fit-finder/results">
+                  <input type="hidden" name="id" value={r.id} />
+                  <button
+                    type="submit"
+                    class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                </form>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+</PublicLayout>
