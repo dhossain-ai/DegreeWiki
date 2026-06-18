@@ -229,6 +229,7 @@ function formatDeadline(d: string | null, dt: string | null): string | null {
     {user ? (
       <div class="flex flex-wrap items-center gap-4 text-xs text-gray-400">
         <span>Signed in as <span class="text-gray-600">{user.email}</span></span>
+        <a href="/account" class="text-blue-400 hover:underline">Account</a>
         <a href="/admin" class="text-blue-400 hover:underline">Admin dashboard</a>
         <form method="post" action="/api/auth/logout" class="inline">
           <button type="submit" class="text-red-400 hover:underline cursor-pointer">Logout</button>
