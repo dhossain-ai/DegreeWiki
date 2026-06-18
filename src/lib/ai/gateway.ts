@@ -83,7 +83,7 @@ export async function callAI(
   const prompt =
     request.sessionType === 'finder'
       ? buildFinderPrompt(request.context)
-      : buildChatPrompt(request.userMessage, request.context)
+      : buildChatPrompt(request.userMessage, request.context, request.chatMode)
 
   // Step 5: call provider.
   const model = env.AI_MODEL ?? 'gemini-2.5-flash'
