@@ -135,7 +135,7 @@ Do not use:
 
 "This visa will be approved."
 
-## AI Gateway Architecture (Phase 23)
+## AI Gateway Architecture (Phase 25)
 
 The AI module lives in src/lib/ai/ and is server-only.
 
@@ -148,9 +148,11 @@ src/lib/ai/
                         AIUsageEntry, AIGuardrailResult, AIRuntimeEnv,
                         StudentProfileSummary, AISessionType, AIRole
   env.ts                getAIEnv(locals) — extracts AIRuntimeEnv from
-                        Cloudflare Workers locals.runtime.env safely
+                        Cloudflare Workers locals.runtime.env safely;
+                        includes SUPABASE_SERVICE_ROLE_KEY (Phase 25)
   gateway.ts            callAI() — single entry point for all LLM calls;
-                        resolveProvider() — maps AI_PROVIDER to a live provider
+                        resolveProvider() — maps AI_PROVIDER to a live provider;
+                        creates service client per-call for rate limit + logging
   providers/
     interface.ts        AIProvider interface contract
     gemini.ts           Gemini REST implementation (live in Phase 23)
@@ -160,8 +162,15 @@ src/lib/ai/
   safety/
     guardrails.ts       checkInput() and checkOutput() — first-pass safety
   usage/
-    logging.ts          writeUsageLog() — no-op stub; DB writes deferred to Phase 24+
-    limits.ts           checkRateLimit() — always-allowed stub; enforcement deferred
+    logging.ts          writeUsageLog(entry, serviceClient) — live in Phase 25;
+                        inserts into ai_usage_logs; fire-and-forget, never throws
+    limits.ts           checkRateLimit(userId, sessionType, opts) — live in Phase 25;
+                        fail-closed daily per-user limit via ai_usage_logs count
+
+src/lib/supabase/
+  server.ts             createClient(cookies, request) — SSR client, anon key + RLS
+  service.ts            createServiceClient(key) — service role client, no cookies;
+                        SERVER-ONLY; used only by AI logging/rate-limit code
 ```
 
 ### callAI() Contract
@@ -171,26 +180,77 @@ callAI(request: AIRequest, env: AIRuntimeEnv): Promise<AIResponse>
 ```
 
 - Input guardrails run first (checkInput).
-- Rate limit is checked second (checkRateLimit — currently stub, always allowed).
-- Provider is resolved from env.AI_PROVIDER (default: gemini).
-- Prompt is built: buildFinderPrompt for finder sessions, buildChatPrompt for chat.
-- Provider.complete() is called with model, temperature 0.2, maxOutputTokens 2048.
+- Service client created from env.SUPABASE_SERVICE_ROLE_KEY (null if absent).
+- Daily limit read from env.AI_RATE_LIMIT_USER_DAILY (default 20).
+- Rate limit checked second (checkRateLimit) — fail closed:
+    no userId → denied; no service client → denied; query error → denied.
+- Provider resolved from env.AI_PROVIDER (default: gemini).
+- Prompt built: buildFinderPrompt for finder sessions, buildChatPrompt for chat.
+- Provider.complete() called with model, temperature 0.2, maxOutputTokens 2048.
 - Output guardrails run on provider response (checkOutput) before returning.
-- writeUsageLog() is called fire-and-forget (no-op stub — DB writes deferred).
+- writeUsageLog() called fire-and-forget after output guardrail passes.
 - Every failure path returns a valid AIResponse — callAI never throws.
 - callAI must only be called from server endpoints.
 
-### Phase 23 Behaviour
+### Phase 25 Behaviour — Usage Logging and Rate Limits
 
-The Gemini provider is live. callAI() makes a real REST call to Gemini when
-GEMINI_API_KEY is present in the Cloudflare Workers runtime env.
+#### Server-Only Supabase Service Client
 
-No public AI surface is enabled. callAI() is wired but not called from any
-public page, Fit Finder page, or admin page in Phase 23.
+src/lib/supabase/service.ts exports createServiceClient(serviceRoleKey: string).
 
-No ai_usage_logs rows are written (deferred to Phase 24+).
+Uses @supabase/supabase-js createClient with persistSession: false and
+autoRefreshToken: false — no cookies, no session side effects.
 
-Rate limit enforcement is deferred to Phase 24+ (stub always returns allowed).
+The service key is read from locals.runtime.env via getAIEnv() (same pattern as
+GEMINI_API_KEY). It is never hardcoded, never logged, never passed to client code,
+and never uses the PUBLIC_ prefix.
+
+The client is created once inside callAI() per request and passed into
+checkRateLimit and writeUsageLog. It is never stored at module scope.
+
+#### Rate Limit Algorithm (fail-closed)
+
+checkRateLimit(userId, sessionType, { serviceClient, dailyLimit }):
+
+1. userId null → denied (no anonymous AI calls exist yet).
+2. serviceClient null → denied (SUPABASE_SERVICE_ROLE_KEY not configured).
+3. Query ai_usage_logs: count rows where user_id = userId AND
+   created_at >= UTC day start (midnight). Count is across all session_type values.
+4. Query error → denied.
+5. count >= dailyLimit → denied, reason: 'limit_exceeded'.
+6. Otherwise → allowed, remaining: dailyLimit - count.
+
+Default daily limit: 20 (from AI_RATE_LIMIT_USER_DAILY env var).
+
+Fallback messages in callAI:
+  limit_exceeded → "You have reached today's AI usage limit. Your rule-based
+                    matches are still available."
+  service_unavailable → "AI is temporarily unavailable."
+
+The Fit Finder result page treats any fallbackUsed=true response the same way:
+the AI section is not rendered, rule-based matches render normally.
+
+#### Usage Logging
+
+writeUsageLog(entry, serviceClient):
+
+Inserts one row into ai_usage_logs after a successful AI call (after output
+guardrail passes). Called fire-and-forget — a logging failure never affects
+the AI response.
+
+Fields written:
+  user_id           — auth user UUID (same as user_profiles.id FK)
+  session_type      — 'finder' or 'chat'
+  tokens_used       — promptTokens + completionTokens from provider
+  model_used        — model string from provider response
+  cost_estimate_usd — null (Phase 25; cost map deferred to later phase)
+
+Fields never written:
+  Prompt text, AI response text, profile UUID, user email, session token,
+  additional_notes, raw admission/English/GPA requirements.
+
+If serviceClient is null, writeUsageLog returns immediately (no-op).
+Insert errors are logged server-side via console.error and never re-thrown.
 
 ### getAIEnv Helper
 
