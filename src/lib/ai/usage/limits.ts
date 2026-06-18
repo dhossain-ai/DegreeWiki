@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AISessionType } from '../types'
+import type { AIRuntimeEnv, AISessionType } from '../types'
+import { createServiceClient } from '../../supabase/service'
 
 export interface RateLimitResult {
   allowed: boolean
@@ -56,4 +57,21 @@ export async function checkRateLimit(
   }
 
   return { allowed: true, remaining: opts.dailyLimit - used }
+}
+
+// checkAIRateLimit is a server-only convenience wrapper used by API routes.
+// It creates the service role client from AIRuntimeEnv internally, so the
+// caller does not need to read service-role secrets directly.
+// API routes under src/pages/ must use this function rather than calling
+// checkRateLimit directly with a manually constructed service client.
+export async function checkAIRateLimit(
+  userId: string | null,
+  sessionType: AISessionType,
+  env: AIRuntimeEnv,
+): Promise<RateLimitResult> {
+  const serviceClient = env.SUPABASE_SERVICE_ROLE_KEY
+    ? createServiceClient(env.SUPABASE_SERVICE_ROLE_KEY)
+    : null
+  const dailyLimit = Math.max(1, parseInt(env.AI_RATE_LIMIT_USER_DAILY ?? '20', 10) || 20)
+  return checkRateLimit(userId, sessionType, { serviceClient, dailyLimit })
 }
