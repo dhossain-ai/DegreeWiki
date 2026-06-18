@@ -4,7 +4,81 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 26 — TBD.
+Phase 27 — TBD.
+
+Phase 26 — AI Finder Result Persistence — complete.
+
+## Last Completed Work
+
+Phase 26 — AI Finder Result Persistence (complete):
+
+- Persists each logged-in user's Fit Finder run in the existing ai_finder_results and
+  ai_finder_program_matches tables. Persistence uses the service role client inside a
+  server-only lib helper (src/lib/ai/finder/persist.ts); no service role usage in pages,
+  components, or layouts. No chatbot, no public share links, no anonymous persistence,
+  no matching algorithm changes, no AI prompt changes, no migrations, no new dependencies,
+  no React, no client-side JS.
+
+Files created (2):
+  src/lib/ai/finder/persist.ts — server-only persistence helper. Exports
+    persistFinderResult(input, env: AIRuntimeEnv). Accepts the full AIRuntimeEnv
+    and extracts SUPABASE_SERVICE_ROLE_KEY internally (key string never referenced in
+    pages). Creates service client, inserts ai_finder_results row (result_status=complete,
+    shortlist_count, optional ai_explanation/ai_model_used/token counts, expires_at=null),
+    then batch-inserts ai_finder_program_matches (rank, score, match_reasons, warnings,
+    program_id). If match insert fails: marks result_status=failed and returns null.
+    Returns result UUID on success, null on any failure. Never throws.
+
+  src/pages/fit-finder/results/[id].astro — private saved-result page. SSR, noindex=true.
+    Anonymous users redirect to /login?redirect=/fit-finder/results/{id}. Validates id as
+    UUID (invalid → 404). Queries ai_finder_results via SSR client — RLS enforces owner
+    access (student_profiles.user_id = auth.uid()); non-owner or missing → 404. Queries
+    ai_finder_program_matches with programs join ordered by rank. Shows heading, saved date,
+    stale-data note, optional AI explanation, match cards (rank badge, stored match_reasons
+    and warnings, current program data from FK join), action buttons. No callAI, no
+    getAIEnv, no service client, no re-running matching on the view page.
+
+Files modified (1 in src):
+  src/pages/fit-finder/result.astro — added persistFinderResult import. Added
+    savedResultId/persistAttempted variables. Hoisted getAIEnv call out of AI try/catch
+    so aiEnv is available for both AI call and persist call. Captures aiModelUsed,
+    promptTokenCount, completionTokenCount from successful aiResponse. After AI block:
+    60-second dedupe check via SSR client (ai_finder_results for this profile,
+    result_status=complete, created_at >= 60s ago); if found, reuses existing id; if
+    not found, calls persistFinderResult(input, aiEnv). On success: shows green "Your
+    matches have been saved. View saved result →" link. On persist failure (persistAttempted
+    && !savedResultId): shows muted "Results could not be saved this time." If service key
+    absent: no attempt, no failure note. Persistence wrapped in try/catch — failure never
+    affects transient match rendering or AI summary.
+
+Persistence strategy:
+  ai_finder_results: student_profile_id, result_status='complete', shortlist_count,
+    ai_explanation (null when AI unavailable), ai_model_used/token counts (0 when
+    AI unavailable), expires_at=null.
+  ai_finder_program_matches: program_id FK (RESTRICT), rank (1-based), score (raw points),
+    match_reasons (jsonb string[]), warnings (jsonb string[]).
+  Not persisted: prompt text, raw AI response, user email, session token, additional_notes,
+    raw admission/english/gpa requirements, profile scoring signal IDs.
+
+Dedupe: 60-second window via SSR client read on ai_finder_results (RLS-enforced). Prevents
+  duplicate rows on page refresh without suppressing intentional re-runs.
+
+Ownership: ai_finder_results RLS (student_profiles.user_id = auth.uid()) enforces read
+  access in both result.astro dedupe check and [id].astro saved-result view. Non-owner
+  access returns 404 with no information leak.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 1.58s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/ → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI in src/pages,src/components → 2 matches, both in src/pages/fit-finder/result.astro
+    (import + invocation only, unchanged from Phase 25).
+  callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient in
+    src/pages/fit-finder/results → 0 matches.
+  ai_finder_results|ai_finder_program_matches in src/pages → 4 matches:
+    src/pages/fit-finder/result.astro (dedupe check only) and
+    src/pages/fit-finder/results/[id].astro (read queries only).
 
 Phase 25 — AI Usage Logging + Rate Limit Enforcement — complete.
 

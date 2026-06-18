@@ -4,6 +4,266 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 26: AI Finder Result Persistence
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Persist each logged-in user's Fit Finder run in the existing ai_finder_results and
+ai_finder_program_matches tables. Add a private saved-result route at
+/fit-finder/results/[id]. No chatbot, no public share links, no anonymous persistence,
+no matching algorithm changes, no AI prompt changes, no migrations, no new dependencies,
+no React, no client-side JS, no admin changes.
+
+---
+
+### Files Created
+
+src/lib/ai/finder/persist.ts (new):
+  Server-only persistence helper. Exports persistFinderResult(input, env: AIRuntimeEnv).
+  Imports AIRuntimeEnv from ../types and createServiceClient from ../../supabase/service.
+  Extracts SUPABASE_SERVICE_ROLE_KEY from env internally — key string never appears in
+  calling pages. Returns null immediately if key is absent. Creates service client,
+  inserts ai_finder_results row with result_status='complete', then batch-inserts
+  ai_finder_program_matches. If match insert fails: updates result_status='failed' and
+  returns null. Returns result UUID on success, null on any failure. Never throws.
+
+src/pages/fit-finder/results/[id].astro (new):
+  Private saved-result page. SSR, noindex=true. Anonymous users redirect to
+  /login?redirect=/fit-finder/results/{id}. Validates params.id against UUID regex
+  (invalid → 404). Uses SSR client for all reads — no service client, no callAI,
+  no getAIEnv. Queries ai_finder_results by id; RLS (student_profiles.user_id = auth.uid())
+  enforces ownership — null result means not found or non-owner, both return 404 (no
+  information leak). Queries ai_finder_program_matches with programs FK join (universities,
+  countries, cities, degree_levels, subjects, tuition fields, official_url) ordered by rank.
+  Renders: heading, saved date, result_status='failed' warning if applicable, blue
+  disclaimer box, stale-data note, optional AI explanation (purple box), action buttons
+  (Update preferences / Run Fit Finder again / Browse all programs), match cards with
+  rank badge (#N), stored match_reasons and warnings (jsonb parsed back to string[]),
+  current program data from FK join. Does not re-run matching or call AI.
+
+---
+
+### Files Modified
+
+src/pages/fit-finder/result.astro:
+  Added import: persistFinderResult from ../../lib/ai/finder/persist.
+  Added variables: savedResultId (string | null = null), persistAttempted (bool = false).
+  Hoisted getAIEnv(Astro.locals) call outside AI try/catch to top of the
+    `pageState === 'ready' && matches.length > 0` block so aiEnv is available for
+    both the AI call and the persist call.
+  Added variables: aiModelUsed, promptTokenCount, completionTokenCount (captured from
+    aiResponse when AI call succeeds, for persistence).
+  After AI try/catch: added persist try/catch block:
+    1. Dedupe check via SSR client: query ai_finder_results WHERE student_profile_id =
+       profile.id AND result_status='complete' AND created_at >= (now - 60s); if found,
+       set savedResultId = existing id, skip persist.
+    2. If no recent result: set persistAttempted = true, call persistFinderResult(input, aiEnv).
+       aiEnv is passed whole — SUPABASE_SERVICE_ROLE_KEY is extracted inside persist.ts,
+       never referenced in the page.
+    3. savedResultId = returned UUID or null.
+  Persist try/catch is outer; any exception is silent — never affects match rendering.
+  Template: after action buttons, added:
+    - Green banner with "Your matches have been saved. View saved result →" link when
+      savedResultId is non-null.
+    - Muted "Results could not be saved this time." text when persistAttempted && !savedResultId.
+    - No note when service key is absent (persistAttempted stays false).
+
+---
+
+### Persistence Strategy
+
+ai_finder_results row inserted:
+  student_profile_id   = profile.id
+  result_status        = 'complete'
+  shortlist_count      = matches.length (max 20)
+  ai_explanation       = aiExplanation (null when AI unavailable)
+  ai_model_used        = aiModelUsed (null when AI unavailable)
+  prompt_token_count   = promptTokenCount (0 when AI unavailable)
+  completion_token_count = completionTokenCount (0 when AI unavailable)
+  expires_at           = null (logged-in user; permanent)
+
+ai_finder_program_matches rows (one per top match, up to 20):
+  ai_finder_result_id  = inserted result id
+  program_id           = match.program.id (FK → programs, RESTRICT)
+  rank                 = index + 1 (1-based)
+  score                = match.points
+  match_reasons        = match.reasons (jsonb string array)
+  warnings             = match.warnings (jsonb string array)
+
+Not persisted:
+  prompt text, raw AI model response, user email, session token, additional_notes,
+  raw admission_requirements, english_requirements, gpa_requirements, profile scoring
+  signal IDs (degree level id, subject ids, country ids, budget values).
+
+---
+
+### Dedupe Strategy
+
+60-second window via SSR client. Before calling persistFinderResult, result.astro queries
+ai_finder_results for the current profile_id with result_status='complete' and
+created_at >= (now - 60 seconds). If found, reuses that result's UUID and skips the
+persist call. If not found, proceeds with persistence. Prevents duplicate rows on page
+refresh without suppressing intentional re-runs after profile updates or long sessions.
+RLS enforces the dedupe query is scoped to the current user's own results.
+
+---
+
+### Saved-Result Route
+
+/fit-finder/results/[id]:
+  Auth: anonymous → redirect to /login?redirect=... UUID validation: invalid format → 404.
+  Ownership: ai_finder_results SELECT RLS uses EXISTS on student_profiles.user_id = auth.uid().
+    Non-owner access returns the same 404 as a missing result. No separate ownership check
+    needed in page code — RLS handles it. No information leak about other users' results.
+  Program data: fetched via ai_finder_program_matches → programs FK join (current DB state).
+    Match scores and reasons are from stored jsonb (historical). Stale-data note shown.
+  No service client, no AI calls, no matching engine.
+
+---
+
+### RLS / Ownership Behavior
+
+ai_finder_results INSERT: no authenticated policy → service client only (inside persist.ts).
+ai_finder_results SELECT: authenticated RLS (student_profiles.user_id = auth.uid()) →
+  SSR client works for dedupe check and [id].astro reads.
+ai_finder_program_matches INSERT: no authenticated policy → service client only (inside persist.ts).
+ai_finder_program_matches SELECT: authenticated RLS (via parent result owner chain) →
+  SSR client works for [id].astro reads.
+Non-owner access to [id].astro: RLS returns null → page returns 404.
+Anonymous access to [id].astro: SSR client has no session → redirect to login.
+
+---
+
+### Data Not Persisted
+
+Prompt text. Raw AI model response text (only post-guardrail ai_explanation stored).
+User email. Session token. additional_notes. Raw admission_requirements,
+english_requirements, gpa_requirements. Profile scoring signal IDs (degree_level_id,
+preferred subject UUIDs, preferred country UUIDs, budget_min, budget_max, budget_currency).
+Program display details other than program_id FK and match scoring data.
+
+---
+
+### Failure Behavior
+
+Service key absent: persistFinderResult returns null immediately; persistAttempted stays
+  false; no failure note shown; transient matches render normally.
+ai_finder_results INSERT fails: returns null; persistAttempted=true; muted failure note shown;
+  matches still render.
+ai_finder_program_matches INSERT fails: updates result_status='failed'; returns null;
+  same failure note; matches still render.
+Dedupe check fails (exception): outer catch; persistAttempted stays false; no persist
+  attempt; no failure note; matches still render.
+Any unexpected persist error: outer try/catch; savedResultId=null; persistAttempted depends
+  on where the exception occurred.
+Saved-result page: result_status='failed' shows yellow "may be incomplete" banner; renders
+  whatever match rows exist.
+All failures: transient /fit-finder/result page continues to render matches and AI summary.
+
+---
+
+### Explicit Exclusions
+
+No public share links.
+No anonymous persistence.
+No automatic redirect to saved result.
+No chatbot.
+No free-form prompt.
+No migrations (schema supported this already).
+No new npm dependencies.
+No React or client-side JS.
+No admin UI for viewing user results.
+No AI calls on the saved-result view page.
+No re-running matching on the saved-result view page.
+No email, session token, additional_notes, or raw requirements stored.
+No prompt text or raw model response text beyond ai_explanation.
+No matching algorithm changes.
+No AI prompt changes.
+No admin page changes.
+No src/lib/ai/gateway.ts changes.
+No src/lib/ai/env.ts changes.
+No src/lib/ai/types.ts changes.
+No src/lib/ai/prompts/* changes.
+No src/lib/ai/safety/* changes.
+No src/lib/ai/providers/* changes.
+No src/lib/ai/usage/* changes.
+No supabase/migrations/* changes.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 1.58s, zero errors).
+
+---
+
+### Safety Grep Results
+
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts
+  → 0 matches.
+
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/
+  → 0 matches.
+
+createServiceClient in src/pages,src/components,src/layouts
+  → 0 matches.
+
+callAI in src/pages,src/components
+  → 2 matches, both in src/pages/fit-finder/result.astro (import + invocation, unchanged
+    from Phase 25).
+
+callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient in src/pages/fit-finder/results
+  → 0 matches.
+
+ai_finder_results|ai_finder_program_matches in src/pages
+  → src/pages/fit-finder/result.astro (dedupe check — SSR client read only)
+  → src/pages/fit-finder/results/[id].astro (saved-result reads only).
+
+---
+
+### Manual Test Checklist
+
+Persistence:
+  [ ] Logged-in user with profile + matches → /fit-finder/result → green "Your matches
+      have been saved. View saved result →" link appears.
+  [ ] Click "View saved result →" → /fit-finder/results/{uuid} renders with match list,
+      rank badges, reasons, warnings, program details from FK join.
+  [ ] Refresh /fit-finder/result within 60 seconds → same saved result link shown
+      (no new row created — dedupe fired).
+  [ ] Visit /fit-finder/result after 60 seconds → new row created, new link shown.
+  [ ] With SUPABASE_SERVICE_ROLE_KEY absent → transient matches render, no save link,
+      no failure note, no error.
+  [ ] With DB unavailable during persist → transient matches render, muted failure note,
+      no crash.
+
+Ownership isolation:
+  [ ] User A visits /fit-finder/results/{A-uuid} → 200, sees their result.
+  [ ] User B visits /fit-finder/results/{A-uuid} → 404.
+  [ ] Anonymous visits /fit-finder/results/{any-uuid} → redirect to /login?redirect=...
+  [ ] /fit-finder/results/not-a-uuid → 404.
+  [ ] /fit-finder/results/00000000-0000-0000-0000-000000000000 (valid UUID, wrong id) → 404.
+
+AI explanation persistence:
+  [ ] When AI explanation generated → ai_explanation stored in DB, shown on saved-result page.
+  [ ] When AI unavailable → ai_explanation null in DB, no AI section on saved-result page.
+
+Saved-result page:
+  [ ] result_status='failed' row → yellow "may be incomplete" banner shown.
+  [ ] Stale-data note always visible.
+  [ ] Action buttons: Update preferences, Run Fit Finder again, Browse all programs.
+  [ ] Program links point to /programs/[slug], university links to /universities/[slug].
+  [ ] noindex confirmed in page source.
+
+Regression:
+  [ ] /fit-finder/result transient matches still render correctly (scores, reasons, warnings).
+  [ ] AI explanation still renders on /fit-finder/result when available.
+  [ ] Anonymous, no_profile, sparse_profile, error, no_matches states: no regression.
+  [ ] No profile ID or service key in any rendered HTML.
+
+---
+
 ## 2026-06-18 - Phase 25: AI Usage Logging + Rate Limit Enforcement
 
 Tool:
