@@ -4,6 +4,8 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
+Phase 34 — Saved Result Chat API Endpoint Foundation — complete.
+
 Phase 33 — Context-Bound Chat Prompt + Server Helper Foundation — complete.
 
 Phase 32 — AI Chat Schema Foundation — complete.
@@ -21,6 +23,59 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 34 — Saved Result Chat API Endpoint Foundation (complete):
+
+- Authenticated JSON API endpoint for saved-result-bound AI chat.
+  No chat UI, no chat page, no migrations, no new dependencies,
+  no service-key expansion in pages/components/layouts.
+
+Files created (1):
+
+  src/pages/api/ai/chat.ts:
+    Authenticated POST handler for /api/ai/chat.
+    Accepts: { ai_finder_result_id: uuid, message: string (1–1000 chars) }
+    Success: { ok: true, answer: string, conversation_id: uuid }
+    Errors: 400 (invalid_body, invalid_request, invalid_message, message_rejected),
+            401 (unauthenticated), 404 (not_found), 429 (rate_limit_exceeded),
+            503 (ai_unavailable), 500 (internal_error).
+    Flow: parse → validate → getUser() → checkAIRateLimit → loadChatContext (RLS) →
+          getOrCreateConversation → callAI(chat/saved_result) → guardrail check →
+          persistChatTurn → return answer.
+    No service-key strings in this file. All privileged ops delegated to src/lib/.
+    callAI called with sessionType: 'chat', chatMode: 'saved_result'.
+
+Files modified (1):
+
+  src/lib/ai/usage/limits.ts:
+    Added checkAIRateLimit(userId, sessionType, env: AIRuntimeEnv): Promise<RateLimitResult>.
+    Wraps checkRateLimit with internal service-client creation from AIRuntimeEnv.
+    Allows API routes to pre-check rate limits without directly reading service-role secrets.
+
+Security boundary confirmed:
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts: 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts: 0 matches.
+  callAI in src/pages,src/components: chat.ts (import + call) + result.astro (unchanged).
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+
+Persistence failure handling:
+  getOrCreateConversation null → 500, no AI call made.
+  AI fallbackUsed → no persistChatTurn call.
+  persistChatTurn false → server-side console.error; answer still returned (200).
+  Usage logging (inside callAI) is fire-and-forget; failure silently ignored.
+
+Explicit exclusions:
+  No chat UI. No chat page (src/pages/fit-finder/results/[id]/chat.astro not created).
+  No migration. No new npm dependency. No React. No client-side JS. No anonymous chat.
+  No service-key usage in pages/components/layouts.
+  No AI calls outside saved-result context (chatMode: 'saved_result' + RLS-enforced programs).
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  callAI in pages/components: chat.ts + result.astro only (both approved).
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
 
 Phase 33 — Context-Bound Chat Prompt + Server Helper Foundation (complete):
 

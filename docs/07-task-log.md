@@ -4,6 +4,93 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 34: Saved Result Chat API Endpoint Foundation
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Create the server-side JSON API endpoint for saved-result-bound AI chat.
+Wire Phase 33 helpers (loadChatContext, getOrCreateConversation, persistChatTurn)
+into a complete authenticated POST handler. No chat UI, no chat page, no migrations,
+no new dependencies, no service-key expansion in pages/components/layouts.
+
+---
+
+### Files Created
+
+src/pages/api/ai/chat.ts:
+  Authenticated POST handler for /api/ai/chat.
+  Method guard (POST only via Astro named export).
+  JSON body parsing with safe try/catch — 400 on failure.
+  Validates ai_finder_result_id (UUID regex) and message (1–1000 chars trimmed).
+  Creates authenticated SSR Supabase client: createClient(cookies, request).
+  getUser() — 401 if no user.
+  getAIEnv(locals) for Cloudflare Worker bindings.
+  checkAIRateLimit(user.id, 'chat', aiEnv) — 429 on limit_exceeded; 503 on unavailable.
+  loadChatContext(resultId, supabase) — RLS-scoped, no privileged access. 404 if null.
+  getOrCreateConversation({ userId, finderResultId }, aiEnv) — 500 if null.
+  Builds AIContext from chatContext.programs (allowlisted public fields only).
+  callAI({ sessionType: 'chat', chatMode: 'saved_result', userMessage, context,
+    userId, conversationId }, aiEnv).
+  guardrailTripped → 400 message_rejected with aiResponse.text as answer.
+  fallbackUsed (non-guardrail) → 503 ai_unavailable.
+  Builds ContextUsedSnapshot: chatMode, promptTemplateVersion, safetyPolicyVersion,
+    aiFinderResultId, conversationId, programsUsed, warningsIncluded, missingTuitionCount.
+  persistChatTurn(...) — failure logged server-side; answer still returned (200).
+  Returns { ok: true, answer: aiResponse.text, conversation_id: conversationId }.
+  No service-key strings in this file. No createServiceClient import.
+  All privileged operations delegated to approved src/lib/ helpers.
+
+### Files Modified
+
+src/lib/ai/usage/limits.ts:
+  Added import: AIRuntimeEnv from ../types; createServiceClient from ../../supabase/service.
+  Added checkAIRateLimit(userId, sessionType, env: AIRuntimeEnv): Promise<RateLimitResult>.
+  Wraps checkRateLimit with internal service-client creation from env.SUPABASE_SERVICE_ROLE_KEY
+  and dailyLimit extraction from env.AI_RATE_LIMIT_USER_DAILY.
+  Allows API routes to pre-check rate limits without reading service-role secrets directly.
+
+docs/09-ai-chat-architecture.md:
+  Section 7: added Phase 34 update note; renamed page-route subsection as deferred;
+  replaced "same-page POST (preferred for MVP)" with JSON API endpoint description.
+  Section 16: replaced Phase 34 (Chat route MVP) with Phase 34 complete entry;
+  added Phase 35 (Chat page MVP planned) and renumbered Phase 36 (multi-turn upgrade).
+
+docs/06-status.md:
+  Updated Current Phase to Phase 34.
+  Added Phase 34 entry with files, security boundary, and validation results.
+
+docs/07-task-log.md:
+  This entry.
+
+### Corrections applied to original plan
+
+1. No service-role access directly in the API route. Added checkAIRateLimit helper to
+   src/lib/ai/usage/limits.ts so the API route never reads SUPABASE_SERVICE_ROLE_KEY.
+2. Initial file-level comments mentioned forbidden strings — rewritten to avoid grep matches.
+3. Rate limit pre-check uses checkAIRateLimit: returns 429 for limit_exceeded, 503 for
+   service_unavailable (lets callAI handle service issues consistently).
+
+### Validation
+
+npm run build: PASS (Cloudflare server build, zero errors).
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts: 0 matches.
+createServiceClient in src/pages,src/components,src/layouts: 0 matches.
+callAI in src/pages,src/components: chat.ts (import + call) + result.astro (unchanged).
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+
+### Explicit Exclusions
+
+No chat UI. No chat page (src/pages/fit-finder/results/[id]/chat.astro not created).
+No migration. No new npm dependency. No React. No client-side JS. No anonymous chat.
+No service-key usage in pages/components/layouts.
+No AI answers outside saved-result context (chatMode enforced; programs from RLS query only).
+No changes to gateway.ts, types.ts, persist.ts, context.ts, guardrails.ts, logging.ts,
+  providers, env.ts, or any src/pages/fit-finder/* file.
+
+---
+
 ## 2026-06-18 - Phase 33: Context-Bound Chat Prompt + Server Helper Foundation
 
 Tool:
