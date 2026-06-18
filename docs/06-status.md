@@ -4,6 +4,8 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
+Phase 35 — Saved Result Chat UI Foundation — complete.
+
 Phase 34 — Saved Result Chat API Endpoint Foundation — complete.
 
 Phase 33 — Context-Bound Chat Prompt + Server Helper Foundation — complete.
@@ -23,6 +25,73 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 35 — Saved Result Chat UI Foundation (complete):
+
+- Minimal client-side chat UI added to the saved Fit Finder result detail page.
+  No new route, no streaming, no chat history loading, no schema changes, no migrations,
+  no new dependencies, no React, no service-role expansion in pages/components/layouts.
+
+Files created (1):
+
+  src/components/ai/SavedResultChat.astro:
+    Astro component. Props: resultId (server-embedded UUID from result.id).
+    Renders: "Ask about this result" heading, scope disclaimer, initially hidden
+    transcript area, initially hidden error/status area, labeled textarea, submit button.
+    Inline script (define:vars={{ resultId }}):
+      Blocks empty and >1000 char messages client-side.
+      Disables submit + shows "Asking..." during in-flight request.
+      POST to /api/ai/chat with { ai_finder_result_id: resultId, message }.
+      On ok: true — appends user and assistant turns via DOM textContent (no innerHTML).
+      On error — maps data.error to a safe user-facing string; shows in status area.
+      Clears textarea on successful send. Re-enables button in finally block.
+      Transcript persists for the page session; cleared on page reload.
+    No chat history loading. No streaming. No React. No external dependencies.
+
+Files modified (1 in src):
+
+  src/pages/fit-finder/results/[id].astro:
+    Added import SavedResultChat.
+    Mounted below match list, conditionally:
+      result.result_status === 'complete' && matches.length > 0.
+    No other logic changes. No AI calls added to this file.
+
+Error mapping (data.error):
+  invalid_message     → "Please enter a valid question between 1 and 1000 characters."
+  message_rejected    → data.answer (if present), else safe generic rejection string.
+  unauthenticated     → "Please sign in again to continue."
+  not_found           → "This result is not available. It may have been deleted..."
+  rate_limit_exceeded → "You've reached today's AI usage limit. Please try again tomorrow."
+  ai_unavailable      → "AI is temporarily unavailable. Please try again in a few minutes."
+  internal_error      → "Something went wrong. Please try again."
+  (any other)         → "Something went wrong. Please try again."
+
+Safety boundary:
+  Client sends only ai_finder_result_id (server-embedded) and message (user text).
+  No program IDs, user IDs, or AI context records in page HTML.
+  No model name, token counts, or system prompt text exposed.
+  No service_role, createServiceClient, or callAI in component or [id].astro.
+  Transcript built with DOM textContent — no HTML injection.
+  Scope disclaimer shown on every page load above the input.
+
+Explicit exclusions:
+  No new route (src/pages/fit-finder/results/[id]/chat.astro not created).
+  No chat history loading from ai_messages.
+  No streaming. No WebSocket.
+  No schema changes. No migrations. No new npm dependencies.
+  No React or client-side framework.
+  No service_role in pages/components/layouts.
+  No createServiceClient in pages/components/layouts.
+  No callAI in pages/components (except existing approved chat.ts and result.astro).
+  No changes to src/lib/ai/* or src/pages/api/ai/chat.ts.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  callAI in pages/components: chat.ts + result.astro only (unchanged; not in new files).
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  innerHTML|set:html in src/components/ai: 0 matches.
 
 Phase 34 — Saved Result Chat API Endpoint Foundation (complete):
 

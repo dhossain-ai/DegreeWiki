@@ -2,6 +2,7 @@
 import PublicLayout from '../../../layouts/PublicLayout.astro'
 import { createClient } from '../../../lib/supabase/server'
 import { SITE_URL } from '../../../lib/site'
+import SavedResultChat from '../../../components/ai/SavedResultChat.astro'
 
 const { id } = Astro.params
 
@@ -262,6 +263,10 @@ const aiExplanation = result.ai_explanation as string | null
           )
         })}
       </ul>
+    )}
+
+    {result.result_status === 'complete' && matches.length > 0 && (
+      <SavedResultChat resultId={result.id} />
     )}
   </div>
 </PublicLayout>

@@ -866,13 +866,58 @@ token counts, prompt text, or raw provider error details.
 - `persistChatTurn` returns false → server-side log only; answer still returned (200).
 - Usage logging inside `callAI` is fire-and-forget; failure silently ignored.
 
-### Phase 35 — Chat page MVP (planned)
+### Phase 35 — Saved Result Chat UI Foundation (complete)
 
-- Create `src/pages/fit-finder/results/[id]/chat.astro`
-- SSR GET page: load conversation history from `ai_messages`, render message list + form
-- Form calls `POST /api/ai/chat` (Phase 34 endpoint)
-- Entry point on `/fit-finder/results/[id]` shown for `result_status === 'complete'`
-- Privacy page update (`/privacy` must mention stored chat sessions) bundled here
+Minimal client-side chat UI embedded on the saved result detail page. No new route,
+no streaming, no chat history loading, no migrations, no new dependencies, no React.
+
+#### Files created (1)
+
+- `src/components/ai/SavedResultChat.astro` — Astro component. Props: `resultId: string`.
+  Renders: "Ask about this result" heading, scope disclaimer, transcript area (initially
+  hidden), error/status area (initially hidden), labeled textarea, submit button.
+  Inline script via `define:vars={{ resultId }}`:
+    - Reads trimmed message from textarea.
+    - Blocks empty and >1000 char messages client-side.
+    - Disables button and shows "Asking..." while in flight.
+    - POST to `/api/ai/chat` with `{ ai_finder_result_id: resultId, message }`.
+    - On `ok: true`: appends user + assistant turns to transcript using DOM text nodes.
+    - On error: maps `data.error` to a safe user-facing string; shows in status area.
+    - Clears textarea on successful send. Re-enables button in `finally`.
+    - No `innerHTML`. No `set:html`. No React. No external dependencies.
+
+#### Files modified (1 in src)
+
+- `src/pages/fit-finder/results/[id].astro` — imports `SavedResultChat`; mounts it below
+  the match list, conditionally: `result.result_status === 'complete' && matches.length > 0`.
+
+#### Error mapping (data.error)
+
+| `data.error` | User-facing message |
+|---|---|
+| `invalid_message` | "Please enter a valid question between 1 and 1000 characters." |
+| `message_rejected` | `data.answer` if present, else safe generic rejection |
+| `unauthenticated` | "Please sign in again to continue." |
+| `not_found` | "This result is not available. It may have been deleted or is no longer accessible." |
+| `rate_limit_exceeded` | "You've reached today's AI usage limit. Please try again tomorrow." |
+| `ai_unavailable` | "AI is temporarily unavailable. Please try again in a few minutes." |
+| `internal_error` | "Something went wrong. Please try again." |
+| (any other) | "Something went wrong. Please try again." |
+
+#### Safety boundary
+
+- Client sends only `ai_finder_result_id` (server-embedded UUID) and `message` (user text).
+- No program IDs, user IDs, or context records in page HTML.
+- No model name, token counts, or system prompt text exposed.
+- No `service_role`, `createServiceClient`, or `callAI` in component or `[id].astro`.
+- Transcript uses DOM `textContent` — no HTML injection possible.
+- Scope disclaimer rendered on every page load above the input.
+
+#### Session and history
+
+- Transcript is in-memory only (page session). Cleared on reload.
+- No chat history loading in this phase.
+- Server persists messages via Phase 34 endpoint as before.
 
 ### Phase 36 (optional) — Provider native multi-turn upgrade
 

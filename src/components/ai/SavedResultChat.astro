@@ -1,0 +1,151 @@
+---
+interface Props {
+  resultId: string
+}
+const { resultId } = Astro.props
+---
+
+<div class="max-w-3xl mt-8 pt-6 border-t border-gray-100">
+  <h2 class="text-sm font-semibold text-gray-900 mb-3">Ask about this result</h2>
+
+  <div class="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-4 py-3 mb-4">
+    This chat is scoped to the programs in this saved result. It cannot search for new
+    programs or provide admission, visa, or scholarship guarantees. Verify important
+    details directly with official sources before applying.
+  </div>
+
+  <div id="chat-transcript" class="space-y-3 mb-4" style="display:none"></div>
+
+  <div id="chat-status" class="text-sm mb-3" style="display:none"></div>
+
+  <label for="chat-input" class="block text-sm font-medium text-gray-700 mb-1">
+    Your question
+  </label>
+  <textarea
+    id="chat-input"
+    rows="3"
+    maxlength="1000"
+    class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+    placeholder="Ask a question about these programs..."
+  ></textarea>
+
+  <button
+    id="chat-submit"
+    type="button"
+    class="mt-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+  >
+    Ask
+  </button>
+</div>
+
+<script define:vars={{ resultId }}>
+  const transcriptEl = document.getElementById('chat-transcript')
+  const statusEl = document.getElementById('chat-status')
+  const inputEl = document.getElementById('chat-input')
+  const submitBtn = document.getElementById('chat-submit')
+
+  function appendTurn(role, text) {
+    const wrapper = document.createElement('div')
+    wrapper.className =
+      role === 'user'
+        ? 'bg-gray-100 rounded-md px-3 py-2 text-sm'
+        : 'bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-sm'
+
+    const label = document.createElement('span')
+    label.className =
+      'block text-xs font-medium mb-1 ' +
+      (role === 'user' ? 'text-gray-500' : 'text-purple-700')
+    label.textContent = role === 'user' ? 'You' : 'Assistant'
+
+    const body = document.createElement('p')
+    body.className = 'text-gray-700'
+    body.textContent = text
+
+    wrapper.appendChild(label)
+    wrapper.appendChild(body)
+    transcriptEl.appendChild(wrapper)
+    transcriptEl.style.display = ''
+  }
+
+  function showError(msg) {
+    statusEl.textContent = msg
+    statusEl.style.color = '#dc2626'
+    statusEl.style.display = ''
+  }
+
+  function hideStatus() {
+    statusEl.style.display = 'none'
+    statusEl.textContent = ''
+  }
+
+  function mapError(data) {
+    const err = data && data.error ? data.error : ''
+    if (err === 'invalid_message') {
+      return 'Please enter a valid question between 1 and 1000 characters.'
+    }
+    if (err === 'message_rejected') {
+      return data && data.answer
+        ? data.answer
+        : "This question can't be answered here. Please ask about the programs in your saved result."
+    }
+    if (err === 'unauthenticated') {
+      return 'Please sign in again to continue.'
+    }
+    if (err === 'not_found') {
+      return 'This result is not available. It may have been deleted or is no longer accessible.'
+    }
+    if (err === 'rate_limit_exceeded') {
+      return "You've reached today's AI usage limit. Please try again tomorrow."
+    }
+    if (err === 'ai_unavailable') {
+      return 'AI is temporarily unavailable. Please try again in a few minutes.'
+    }
+    if (err === 'internal_error') {
+      return 'Something went wrong. Please try again.'
+    }
+    return 'Something went wrong. Please try again.'
+  }
+
+  submitBtn.addEventListener('click', async () => {
+    const message = inputEl.value.trim()
+    if (!message) return
+    if (message.length > 1000) {
+      showError('Please enter a valid question between 1 and 1000 characters.')
+      return
+    }
+
+    submitBtn.disabled = true
+    submitBtn.textContent = 'Asking...'
+    hideStatus()
+
+    appendTurn('user', message)
+    inputEl.value = ''
+
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_finder_result_id: resultId, message }),
+      })
+
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        showError('Something went wrong. Please try again.')
+        return
+      }
+
+      if (data.ok) {
+        appendTurn('assistant', data.answer)
+      } else {
+        showError(mapError(data))
+      }
+    } catch {
+      showError('Something went wrong. Please try again.')
+    } finally {
+      submitBtn.disabled = false
+      submitBtn.textContent = 'Ask'
+    }
+  })
+</script>
