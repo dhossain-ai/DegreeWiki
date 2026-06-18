@@ -4,6 +4,84 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 35: Saved Result Chat UI Foundation
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add first user-facing saved-result chat UI on the saved Fit Finder result detail page.
+UI calls Phase 34's /api/ai/chat endpoint. No new route, no streaming, no history loading,
+no schema changes, no new dependencies, no React.
+
+---
+
+### Files Created
+
+src/components/ai/SavedResultChat.astro:
+  Astro component. Props: resultId (server-embedded UUID).
+  Renders heading, disclaimer, transcript div, status div, labeled textarea, submit button.
+  Inline script via define:vars={{ resultId }}:
+    Client-side message validation (empty / >1000 chars blocked before fetch).
+    Disables submit + changes text to "Asking..." during fetch.
+    POST /api/ai/chat with { ai_finder_result_id: resultId, message }.
+    On success (ok: true): appends user + assistant turns via DOM textContent (no innerHTML).
+    On error: maps data.error to safe user-facing string; displays in status area.
+    Clears textarea on success. Re-enables button in finally.
+  No innerHTML. No set:html. No React. No external dependencies.
+
+---
+
+### Files Modified
+
+src/pages/fit-finder/results/[id].astro:
+  Added import SavedResultChat.
+  Mounted below match list:
+    result.result_status === 'complete' && matches.length > 0
+  No other logic changes. No callAI added to this file.
+
+docs/09-ai-chat-architecture.md:
+  Phase 35 section updated from "Chat page MVP (planned)" to
+  "Saved Result Chat UI Foundation (complete)" with full boundary documentation.
+  Phase 36 retains the optional multi-turn upgrade description.
+
+docs/06-status.md:
+  Phase 35 completion entry prepended.
+
+docs/07-task-log.md:
+  This entry.
+
+---
+
+### Key Decisions
+
+define:vars used to pass resultId (server UUID) to the inline script. Astro serializes
+  it as a JS string literal. Safe because resultId matches UUID regex and cannot
+  contain HTML/JS injection content.
+
+Transcript uses DOM createElement + textContent only. No innerHTML on any path.
+
+Error mapping uses data.error (not data.code) — matching the actual Phase 34 API shape.
+  message_rejected shows data.answer (safe AI-generated rejection text) when present.
+
+Chat section not shown for result_status !== 'complete' or matches.length === 0.
+
+No chat history loaded from ai_messages. Transcript is session-only (cleared on reload).
+  History loading deferred to a future phase.
+
+---
+
+### Validation
+
+npm run build: PASS (Cloudflare server build, zero errors).
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+createServiceClient in pages/components/layouts: 0 matches.
+callAI in pages/components: chat.ts + result.astro only (not in new files).
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+innerHTML|set:html in src/components/ai: 0 matches.
+
+---
+
 ## 2026-06-18 - Phase 34: Saved Result Chat API Endpoint Foundation
 
 Tool:
