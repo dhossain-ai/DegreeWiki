@@ -1,5 +1,8 @@
 import type { AIGuardrailResult } from '../types'
 
+// Version string embedded in ContextUsedSnapshot.safetyPolicyVersion for audit.
+export const GUARDRAILS_VERSION = 'guardrails-v2'
+
 // First-pass deterministic guardrails.
 // These regex checks are conservative — they catch clearly prohibited content
 // before and after LLM calls using exact phrase matching only.
@@ -27,6 +30,17 @@ const FORBIDDEN_INPUT_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string 
     pattern: /how\s+to\s+(cheat|bypass|fake)\s+(the\s+)?visa/i,
     reason: 'Visa fraud assistance is not supported.',
   },
+  // Prompt injection: attempts to override the assistant's instructions via user input.
+  // Handled at input so the LLM never receives injection attempts.
+  // The saved-result system prompt also includes an anti-injection rule as a second layer.
+  {
+    pattern: /ignore\s+(all\s+)?(previous|prior|your)\s+(instructions|rules|context|guidelines|constraints)/i,
+    reason: 'This type of message cannot be processed.',
+  },
+  {
+    pattern: /disregard\s+(all\s+)?(previous|prior|your)\s+(instructions|rules|context|guidelines|constraints)/i,
+    reason: 'This type of message cannot be processed.',
+  },
 ]
 
 const FORBIDDEN_OUTPUT_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
@@ -53,6 +67,15 @@ const FORBIDDEN_OUTPUT_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string
   {
     pattern: /your\s+application\s+will\s+succeed/i,
     reason: 'Output guarantees application success.',
+  },
+  // Additional patterns for scholarship certainty and eligibility confirmation.
+  {
+    pattern: /you\s+will\s+(receive|get|be\s+awarded)\s+the\s+scholarship/i,
+    reason: 'Output implies certain scholarship receipt.',
+  },
+  {
+    pattern: /i\s+can\s+confirm\s+(your\s+)?(eligibility|admission|acceptance)/i,
+    reason: 'Output confirms eligibility.',
   },
 ]
 
