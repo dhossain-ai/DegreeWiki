@@ -4,6 +4,76 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 36: Saved Result Chat Completion Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Make saved-result chat feel complete and persistent: load prior chat history from the DB,
+render it server-side on the result detail page, polish chat UX (empty state, suggested
+questions, scroll to latest, clear button), and add a safe clear/reset endpoint.
+No schema changes, no new dependencies, no service role in pages/components/layouts.
+
+---
+
+### Files Created
+
+src/pages/api/ai/chat-clear.ts:
+  Authenticated POST endpoint for /api/ai/chat-clear.
+  Accepts { ai_finder_result_id: uuid }.
+  Uses SSR Supabase client only (no service role).
+  Verifies result ownership via RLS (ai_finder_results_select_own) before deleting.
+  Deletes ai_conversations row for (user, result); ai_messages cascade via FK.
+  Returns { ok: true } on success or when no conversation exists.
+  Returns 404 not_found when result not found/not owned.
+
+### Files Modified
+
+src/pages/fit-finder/results/[id].astro:
+  Added two server-side DB queries after existing match queries:
+    - SELECT ai_conversations by ai_finder_result_id (RLS-scoped, SSR client).
+    - SELECT ai_messages by ai_conversation_id, role in (user, assistant),
+      ordered by created_at ASC, limit 40.
+  Passes initialMessages array (role, content only) to SavedResultChat.
+
+src/components/ai/SavedResultChat.astro:
+  New prop: initialMessages: Array<{ role, content }>.
+  Server-side renders prior messages into transcript div using Astro text interpolation.
+  New empty state with 4 static suggested question chips (fills textarea on click, no auto-submit).
+  Clear chat button (hidden until messages exist, disabled during fetch).
+  Scrolls to last message on initial load when history present.
+  Scrolls new turns into view after append.
+  Client clear flow: POST /api/ai/chat-clear, then replaceChildren() to clear transcript DOM.
+  setBusy() disables both Ask and Clear during any pending fetch.
+  No innerHTML, no set:html, no service role, no callAI.
+
+docs/09-ai-chat-architecture.md: Phase 36 section added.
+docs/06-status.md: Updated current phase to Phase 36.
+docs/07-task-log.md: This entry.
+
+---
+
+### Checks
+
+npm run build: passed, zero errors.
+npm run check: command does not exist in this project.
+
+Security greps (all 0 matches):
+  service_role in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  callAI in pages/components: 0 matches (existing hits are pre-approved API endpoint and result.astro).
+  PUBLIC service key in src: 0 matches.
+  innerHTML/set:html in chat component: 0 matches.
+
+---
+
+### Deviations from plan
+
+None.
+
+---
+
 ## 2026-06-18 - Phase 35: Saved Result Chat UI Foundation
 
 Tool:

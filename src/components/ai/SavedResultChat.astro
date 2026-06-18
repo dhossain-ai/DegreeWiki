@@ -1,8 +1,17 @@
 ---
 interface Props {
   resultId: string
+  initialMessages: Array<{ role: 'user' | 'assistant'; content: string }>
 }
-const { resultId } = Astro.props
+const { resultId, initialMessages } = Astro.props
+const hasHistory = initialMessages.length > 0
+
+const SUGGESTED_QUESTIONS = [
+  'Why are these programs a good match for me?',
+  'Which matched program looks most affordable?',
+  'Compare my top 3 matched programs.',
+  'What should I verify before applying?',
+]
 ---
 
 <div class="max-w-3xl mt-8 pt-6 border-t border-gray-100">
@@ -14,7 +23,29 @@ const { resultId } = Astro.props
     details directly with official sources before applying.
   </div>
 
-  <div id="chat-transcript" class="space-y-3 mb-4" style="display:none"></div>
+  <div id="chat-transcript" class="space-y-3 mb-4" style={hasHistory ? undefined : 'display:none'}>
+    {initialMessages.map(msg => (
+      <div class={msg.role === 'user'
+        ? 'bg-gray-100 rounded-md px-3 py-2 text-sm'
+        : 'bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-sm'}>
+        <span class={'block text-xs font-medium mb-1 ' + (msg.role === 'user' ? 'text-gray-500' : 'text-purple-700')}>
+          {msg.role === 'user' ? 'You' : 'Assistant'}
+        </span>
+        <p class="text-gray-700">{msg.content}</p>
+      </div>
+    ))}
+  </div>
+
+  <div id="chat-empty" class="mb-4" style={hasHistory ? 'display:none' : undefined}>
+    <p class="text-sm text-gray-500 mb-3">No questions yet. Try asking:</p>
+    <div class="flex flex-wrap gap-2">
+      {SUGGESTED_QUESTIONS.map(q => (
+        <button type="button" class="chat-suggestion text-xs bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-md px-3 py-1.5 text-gray-700 text-left">
+          {q}
+        </button>
+      ))}
+    </div>
+  </div>
 
   <div id="chat-status" class="text-sm mb-3" style="display:none"></div>
 
@@ -29,31 +60,43 @@ const { resultId } = Astro.props
     placeholder="Ask a question about these programs..."
   ></textarea>
 
-  <button
-    id="chat-submit"
-    type="button"
-    class="mt-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-  >
-    Ask
-  </button>
+  <div class="flex gap-2 mt-2">
+    <button
+      id="chat-submit"
+      type="button"
+      class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      Ask
+    </button>
+    <button
+      id="chat-clear"
+      type="button"
+      class="px-3 py-2 text-sm text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      style={hasHistory ? undefined : 'display:none'}
+    >
+      Clear chat
+    </button>
+  </div>
 </div>
 
-<script define:vars={{ resultId }}>
+<script define:vars={{ resultId, hasHistory }}>
   const transcriptEl = document.getElementById('chat-transcript')
+  const emptyEl = document.getElementById('chat-empty')
   const statusEl = document.getElementById('chat-status')
   const inputEl = document.getElementById('chat-input')
   const submitBtn = document.getElementById('chat-submit')
+  const clearBtn = document.getElementById('chat-clear')
+
+  let busy = false
 
   function appendTurn(role, text) {
     const wrapper = document.createElement('div')
-    wrapper.className =
-      role === 'user'
-        ? 'bg-gray-100 rounded-md px-3 py-2 text-sm'
-        : 'bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-sm'
+    wrapper.className = role === 'user'
+      ? 'bg-gray-100 rounded-md px-3 py-2 text-sm'
+      : 'bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-sm'
 
     const label = document.createElement('span')
-    label.className =
-      'block text-xs font-medium mb-1 ' +
+    label.className = 'block text-xs font-medium mb-1 ' +
       (role === 'user' ? 'text-gray-500' : 'text-purple-700')
     label.textContent = role === 'user' ? 'You' : 'Assistant'
 
@@ -65,6 +108,9 @@ const { resultId } = Astro.props
     wrapper.appendChild(body)
     transcriptEl.appendChild(wrapper)
     transcriptEl.style.display = ''
+    emptyEl.style.display = 'none'
+    clearBtn.style.display = ''
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
   function showError(msg) {
@@ -78,35 +124,40 @@ const { resultId } = Astro.props
     statusEl.textContent = ''
   }
 
+  function setBusy(val) {
+    busy = val
+    submitBtn.disabled = val
+    clearBtn.disabled = val
+  }
+
   function mapError(data) {
     const err = data && data.error ? data.error : ''
-    if (err === 'invalid_message') {
-      return 'Please enter a valid question between 1 and 1000 characters.'
-    }
-    if (err === 'message_rejected') {
-      return data && data.answer
-        ? data.answer
-        : "This question can't be answered here. Please ask about the programs in your saved result."
-    }
-    if (err === 'unauthenticated') {
-      return 'Please sign in again to continue.'
-    }
-    if (err === 'not_found') {
-      return 'This result is not available. It may have been deleted or is no longer accessible.'
-    }
-    if (err === 'rate_limit_exceeded') {
-      return "You've reached today's AI usage limit. Please try again tomorrow."
-    }
-    if (err === 'ai_unavailable') {
-      return 'AI is temporarily unavailable. Please try again in a few minutes.'
-    }
-    if (err === 'internal_error') {
-      return 'Something went wrong. Please try again.'
-    }
+    if (err === 'invalid_message') return 'Please enter a valid question between 1 and 1000 characters.'
+    if (err === 'message_rejected') return data && data.answer ? data.answer : "This question can't be answered here. Please ask about the programs in your saved result."
+    if (err === 'unauthenticated') return 'Please sign in again to continue.'
+    if (err === 'not_found') return 'This result is not available. It may have been deleted or is no longer accessible.'
+    if (err === 'rate_limit_exceeded') return "You've reached today's AI usage limit. Please try again tomorrow."
+    if (err === 'ai_unavailable') return 'AI is temporarily unavailable. Please try again in a few minutes.'
+    if (err === 'internal_error') return 'Something went wrong. Please try again.'
     return 'Something went wrong. Please try again.'
   }
 
+  // Populate textarea from suggested-question chips — no auto-submit.
+  document.querySelectorAll('.chat-suggestion').forEach(btn => {
+    btn.addEventListener('click', () => {
+      inputEl.value = btn.textContent.trim()
+      inputEl.focus()
+    })
+  })
+
+  // Scroll to latest message on initial load when history exists.
+  if (hasHistory) {
+    const last = transcriptEl.lastElementChild
+    if (last) last.scrollIntoView({ behavior: 'instant', block: 'nearest' })
+  }
+
   submitBtn.addEventListener('click', async () => {
+    if (busy) return
     const message = inputEl.value.trim()
     if (!message) return
     if (message.length > 1000) {
@@ -114,7 +165,7 @@ const { resultId } = Astro.props
       return
     }
 
-    submitBtn.disabled = true
+    setBusy(true)
     submitBtn.textContent = 'Asking...'
     hideStatus()
 
@@ -129,12 +180,7 @@ const { resultId } = Astro.props
       })
 
       let data
-      try {
-        data = await res.json()
-      } catch {
-        showError('Something went wrong. Please try again.')
-        return
-      }
+      try { data = await res.json() } catch { showError('Something went wrong. Please try again.'); return }
 
       if (data.ok) {
         appendTurn('assistant', data.answer)
@@ -144,8 +190,45 @@ const { resultId } = Astro.props
     } catch {
       showError('Something went wrong. Please try again.')
     } finally {
-      submitBtn.disabled = false
+      setBusy(false)
       submitBtn.textContent = 'Ask'
+    }
+  })
+
+  clearBtn.addEventListener('click', async () => {
+    if (busy) return
+
+    setBusy(true)
+    clearBtn.textContent = 'Clearing...'
+    hideStatus()
+
+    try {
+      const res = await fetch('/api/ai/chat-clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_finder_result_id: resultId }),
+      })
+
+      let data
+      try { data = await res.json() } catch { showError('Could not clear chat. Please try again.'); return }
+
+      if (data.ok) {
+        transcriptEl.replaceChildren()
+        transcriptEl.style.display = 'none'
+        emptyEl.style.display = ''
+        clearBtn.style.display = 'none'
+        hideStatus()
+      } else {
+        const err = data && data.error
+        showError(err === 'not_found'
+          ? 'This saved result is no longer available.'
+          : 'Could not clear chat. Please try again.')
+      }
+    } catch {
+      showError('Could not clear chat. Please try again.')
+    } finally {
+      setBusy(false)
+      clearBtn.textContent = 'Clear chat'
     }
   })
 </script>

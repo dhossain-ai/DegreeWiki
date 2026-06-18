@@ -919,7 +919,42 @@ no streaming, no chat history loading, no migrations, no new dependencies, no Re
 - No chat history loading in this phase.
 - Server persists messages via Phase 34 endpoint as before.
 
-### Phase 36 (optional) — Provider native multi-turn upgrade
+### Phase 36 — Saved Result Chat Completion Bundle (complete)
+
+History loading, UX polish, and clear/reset support. No schema changes, no new dependencies,
+no service role in pages/components/layouts.
+
+#### Files created (1)
+
+- `src/pages/api/ai/chat-clear.ts` — authenticated POST endpoint for `/api/ai/chat-clear`.
+  Body: `{ ai_finder_result_id: uuid }`.
+  Uses SSR Supabase client only (no service role).
+  Verifies result ownership via RLS before deleting.
+  Deletes `ai_conversations` row; `ai_messages` cascade via FK ON DELETE CASCADE.
+  Returns `{ ok: true }` when no conversation exists (no-op success).
+
+#### Files modified (3 in src)
+
+- `src/pages/fit-finder/results/[id].astro` — after existing DB queries, loads
+  `ai_conversations` by `ai_finder_result_id` and `ai_messages` (role, content, created_at ASC,
+  limit 40) via SSR client (RLS-scoped). Passes `initialMessages` to `SavedResultChat`.
+
+- `src/components/ai/SavedResultChat.astro` — new `initialMessages` prop; prior messages
+  rendered server-side via Astro text interpolation (no innerHTML, no set:html).
+  Empty state with 4 static suggested questions (fills textarea on click, no auto-submit).
+  Clear chat button (hidden until messages exist, disabled during any pending fetch).
+  Scrolls to last message on initial load; scrolls new turns into view after append.
+  Client clear flow: POST `/api/ai/chat-clear`, then `replaceChildren()` to reset DOM.
+
+#### Clear/reset endpoint security boundary
+
+- No service role: SSR client handles both the ownership check and the delete.
+- Ownership is double-enforced: explicit RLS on `ai_finder_results` SELECT, then
+  `user_id = auth.uid()` filter on the DELETE (consistent with RLS delete policy).
+- Missing conversation is a no-op success — idempotent.
+- No internal UUIDs returned. No model names or token counts.
+
+### Phase 37 (optional) — Provider native multi-turn upgrade
 
 - Update `GeminiProvider.complete()` to accept `messages: Array<{role, content}>` and
   use Gemini's `contents[]` multi-turn format natively

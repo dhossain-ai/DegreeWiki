@@ -60,6 +60,33 @@ if (matchError) {
 
 const matches = (matchRows ?? []) as any[]
 
+// Load existing conversation and message history for chat rendering (RLS: user_id = auth.uid()).
+// Only attempted when the result is complete — avoids two extra queries on pending/failed results.
+type ChatMessage = { role: 'user' | 'assistant'; content: string }
+let initialChatMessages: ChatMessage[] = []
+
+if (result.result_status === 'complete') {
+  const { data: conversation } = await supabase
+    .from('ai_conversations')
+    .select('id')
+    .eq('ai_finder_result_id', result.id)
+    .maybeSingle()
+
+  if (conversation?.id) {
+    const { data: msgRows } = await supabase
+      .from('ai_messages')
+      .select('role, content')
+      .eq('ai_conversation_id', conversation.id)
+      .in('role', ['user', 'assistant'])
+      .order('created_at', { ascending: true })
+      .limit(40)
+
+    initialChatMessages = (msgRows ?? []).filter(
+      (m): m is ChatMessage => m.role === 'user' || m.role === 'assistant'
+    )
+  }
+}
+
 function formatTuition(p: any): string | null {
   if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
   const fmt = (n: number) => Number(n).toLocaleString()
@@ -266,7 +293,7 @@ const aiExplanation = result.ai_explanation as string | null
     )}
 
     {result.result_status === 'complete' && matches.length > 0 && (
-      <SavedResultChat resultId={result.id} />
+      <SavedResultChat resultId={result.id} initialMessages={initialChatMessages} />
     )}
   </div>
 </PublicLayout>
