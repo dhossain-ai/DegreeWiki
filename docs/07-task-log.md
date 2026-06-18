@@ -4,6 +4,80 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 37: AI Chat Routing + Static Response Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add a deterministic routing layer to POST /api/ai/chat so obvious messages (greetings,
+thanks, capability questions, guarantee requests, out-of-scope requests) are handled with
+static responses before any LLM or rate-limit call. Static turns are persisted to chat
+history. No schema changes, no new dependencies, no UI changes, no service role expansion.
+
+---
+
+### Files Created
+
+src/lib/ai/chat/router.ts:
+  Exports StaticCategory, ChatRouteDecision types.
+  Exports STATIC_RESPONSES (Record<StaticCategory, string>) with bounded, non-guarantee wording.
+  Exports routeChatMessage(message: string): ChatRouteDecision.
+  Six regex-driven pattern groups: greeting, thanks, help, guarantee, out_of_scope (new programs
+  + off-topic + prompt-override attempts), llm fallthrough.
+  Guarantee patterns require explicit admission/visa/scholarship terms — avoids over-matching.
+  New-program patterns require a search/find verb or outside/beyond qualifier — normal comparison
+  questions ("which program should I choose?") fall through to LLM.
+
+---
+
+### Files Modified
+
+src/lib/ai/chat/persist.ts:
+  Added STATIC_PROMPT_TEMPLATE_VERSION constant ('static-v1').
+  Added PersistStaticTurnParams interface.
+  Added persistStaticTurn(params, env): Promise<boolean> helper.
+  Builds minimal ContextUsedSnapshot: chatMode='saved_result', programsUsed=[],
+  warningsIncluded=false, missingTuitionCount=0, ai_model_used='static', zero tokens.
+  Writes user + assistant rows to ai_messages; updates last_message_at (best-effort).
+  Does NOT write to ai_usage_logs. Fail-safe — returns false on error, never throws.
+
+src/pages/api/ai/chat.ts:
+  Imports routeChatMessage, STATIC_RESPONSES from router.ts.
+  Imports persistStaticTurn from persist.ts.
+  Updated POST flow: after auth, calls routeChatMessage(message).
+  Static path: SSR/RLS ownership check (.select('id').eq('id', resultId).maybeSingle()),
+    404 if not found; getOrCreateConversation; persistStaticTurn; return { ok: true, answer, conversation_id }.
+  LLM path: unchanged (rate limit → loadChatContext → getOrCreateConversation → callAI →
+    persistChatTurn → return).
+  Static path skips: rate-limit check, loadChatContext, callAI, usage logging.
+
+docs/09-ai-chat-architecture.md: Phase 37 section added; old Phase 37 (multi-turn) renamed Phase 38.
+docs/06-status.md: Updated current phase to Phase 37.
+docs/07-task-log.md: This entry.
+
+---
+
+### Checks
+
+npm run build: see below.
+npm run check: command does not exist in this project.
+
+Security greps (all 0 matches):
+  service_role in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  callAI in pages/components: 0 matches.
+  PUBLIC service key in src: 0 matches.
+  innerHTML/set:html in ai components: 0 matches.
+
+---
+
+### Deviations from plan
+
+None.
+
+---
+
 ## 2026-06-18 - Phase 36: Saved Result Chat Completion Bundle
 
 Tool:

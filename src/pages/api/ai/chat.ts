@@ -6,12 +6,13 @@
 //   Errors: see jsonResponse calls below
 //
 // All privileged Supabase operations are delegated to approved server-only lib
-// helpers (checkAIRateLimit, getOrCreateConversation, persistChatTurn, callAI).
+// helpers (checkAIRateLimit, getOrCreateConversation, persistChatTurn, persistStaticTurn, callAI).
 // This file contains no direct database service-key access.
 import type { APIRoute } from 'astro'
 import { createClient } from '../../../lib/supabase/server'
+import { routeChatMessage, STATIC_RESPONSES } from '../../../lib/ai/chat/router'
 import { loadChatContext } from '../../../lib/ai/chat/context'
-import { getOrCreateConversation, persistChatTurn } from '../../../lib/ai/chat/persist'
+import { getOrCreateConversation, persistChatTurn, persistStaticTurn } from '../../../lib/ai/chat/persist'
 import { callAI } from '../../../lib/ai/gateway'
 import { checkAIRateLimit } from '../../../lib/ai/usage/limits'
 import { getAIEnv } from '../../../lib/ai/env'
@@ -60,8 +61,56 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
     return jsonResponse(401, { ok: false, error: 'unauthenticated' })
   }
 
-  // Extract AI runtime env from Cloudflare Worker bindings.
+  // Route the message deterministically before any LLM or rate-limit call.
+  const decision = routeChatMessage(message)
+
+  // Extract AI runtime env from Cloudflare Worker bindings (needed by both paths).
   const aiEnv = getAIEnv(locals as Record<string, unknown>)
+
+  // Static path: no LLM, no rate-limit, no provider usage log.
+  if (decision.route === 'static') {
+    // Verify result ownership with authenticated SSR client (RLS enforced).
+    // Full context load is not needed for static responses.
+    const { data: resultRow } = await supabase
+      .from('ai_finder_results')
+      .select('id')
+      .eq('id', resultId)
+      .maybeSingle()
+
+    if (!resultRow) {
+      return jsonResponse(404, { ok: false, error: 'not_found' })
+    }
+
+    // Get or create the persistent conversation for this (user, result) pair.
+    const conversationId = await getOrCreateConversation(
+      { userId: user.id, finderResultId: resultId },
+      aiEnv,
+    )
+    if (!conversationId) {
+      return jsonResponse(500, { ok: false, error: 'internal_error' })
+    }
+
+    const answer = STATIC_RESPONSES[decision.category]
+
+    // Persist the static turn. Failure is logged server-side only; answer is still returned.
+    const persisted = await persistStaticTurn(
+      {
+        conversationId,
+        resultId,
+        userMessage:      message,
+        assistantText:    answer,
+        safetyPolicyVersion: GUARDRAILS_VERSION,
+      },
+      aiEnv,
+    )
+    if (!persisted) {
+      console.error('chat api: persistStaticTurn failed for conversation', conversationId)
+    }
+
+    return jsonResponse(200, { ok: true, answer, conversation_id: conversationId })
+  }
+
+  // LLM path: existing rate limit → context → AI → persist flow.
 
   // Pre-check rate limit via server-only lib helper.
   // Privileged access is encapsulated inside checkAIRateLimit — not in this file.

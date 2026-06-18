@@ -10,6 +10,9 @@
 import { createServiceClient } from '../../supabase/service'
 import type { AIRuntimeEnv, ContextUsedSnapshot } from '../types'
 
+// Template version embedded in context_used for static (router-handled) turns.
+const STATIC_PROMPT_TEMPLATE_VERSION = 'static-v1'
+
 // getOrCreateConversation finds the existing ai_conversations row for a
 // (userId, finderResultId) pair, or creates one if it does not exist yet.
 //
@@ -154,6 +157,87 @@ export async function persistChatTurn(
 
   if (updateError) {
     console.error('chat persist: last_message_at update failed:', updateError.message)
+  }
+
+  return true
+}
+
+export interface PersistStaticTurnParams {
+  conversationId: string
+  resultId: string
+  userMessage: string
+  assistantText: string
+  safetyPolicyVersion: string
+}
+
+// persistStaticTurn writes one router-handled (no LLM) chat turn to ai_messages.
+// Identical DB writes to persistChatTurn but uses minimal context metadata:
+//   modelUsed = 'static', promptTokens = 0, completionTokens = 0,
+//   programsUsed = [] (no program context was loaded for this turn).
+//
+// Must only be called after ownership of the saved result has been verified.
+// Must not be called when the AI provider was consulted — use persistChatTurn instead.
+export async function persistStaticTurn(
+  params: PersistStaticTurnParams,
+  env: AIRuntimeEnv,
+): Promise<boolean> {
+  const key = env.SUPABASE_SERVICE_ROLE_KEY
+  if (!key) return false
+
+  const serviceClient = createServiceClient(key)
+
+  const contextUsed: ContextUsedSnapshot = {
+    chatMode:              'saved_result',
+    promptTemplateVersion: STATIC_PROMPT_TEMPLATE_VERSION,
+    safetyPolicyVersion:   params.safetyPolicyVersion,
+    aiFinderResultId:      params.resultId,
+    conversationId:        params.conversationId,
+    programsUsed:          [],
+    warningsIncluded:      false,
+    missingTuitionCount:   0,
+  }
+
+  const { error: userMsgError } = await serviceClient
+    .from('ai_messages')
+    .insert({
+      ai_conversation_id:     params.conversationId,
+      role:                   'user',
+      content:                params.userMessage,
+      context_used:           null,
+      ai_model_used:          null,
+      prompt_token_count:     0,
+      completion_token_count: 0,
+    })
+
+  if (userMsgError) {
+    console.error('chat persist: static user message insert failed:', userMsgError.message)
+    return false
+  }
+
+  const { error: assistantMsgError } = await serviceClient
+    .from('ai_messages')
+    .insert({
+      ai_conversation_id:     params.conversationId,
+      role:                   'assistant',
+      content:                params.assistantText,
+      context_used:           contextUsed,
+      ai_model_used:          'static',
+      prompt_token_count:     0,
+      completion_token_count: 0,
+    })
+
+  if (assistantMsgError) {
+    console.error('chat persist: static assistant message insert failed:', assistantMsgError.message)
+    return false
+  }
+
+  const { error: updateError } = await serviceClient
+    .from('ai_conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', params.conversationId)
+
+  if (updateError) {
+    console.error('chat persist: static last_message_at update failed:', updateError.message)
   }
 
   return true

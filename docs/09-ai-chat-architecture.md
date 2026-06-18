@@ -954,7 +954,94 @@ no service role in pages/components/layouts.
 - Missing conversation is a no-op success — idempotent.
 - No internal UUIDs returned. No model names or token counts.
 
-### Phase 37 (optional) — Provider native multi-turn upgrade
+### Phase 37 — AI Chat Routing + Static Response Bundle (complete)
+
+Lightweight deterministic routing layer inserted before `/api/ai/chat` calls the AI provider.
+Obvious low-value messages are handled with static responses, which are still persisted to
+chat history so reloads show the full conversation. No schema changes, no new dependencies,
+no UI changes, no service role in pages/components/layouts.
+
+#### Router (`src/lib/ai/chat/router.ts`)
+
+New helper exports:
+- `StaticCategory`: `'greeting' | 'thanks' | 'help' | 'guarantee' | 'out_of_scope'`
+- `ChatRouteDecision`: `{ route: 'static'; category: StaticCategory } | { route: 'llm' }`
+- `STATIC_RESPONSES`: Record mapping each `StaticCategory` to its bounded, non-guarantee response text
+- `routeChatMessage(message: string): ChatRouteDecision`
+
+Decision order (deterministic, case-insensitive):
+1. `greeting` — standalone `hi`/`hello`/`hey` only
+2. `thanks` — standalone `thanks`/`thank you`/etc only
+3. `help` — "what can you do", "how can you help", "what can I ask you"
+4. `guarantee` — outcome certainty requests; requires admission/visa/scholarship term alongside guarantee wording
+5. `out_of_scope` — new program searches (requires search verb or outside/beyond qualifier); off-topic requests (jokes, coding, medical/investment advice); prompt-override attempts not caught by existing input guardrails
+6. `llm` — all other messages (normal saved-result follow-up questions)
+
+Pattern safety:
+- Guarantee regex requires explicit terms (`admission`, `visa`, `scholarship`) — "will I get a response?" does not match.
+- New-program regex requires a search/find verb or explicit "outside/beyond" qualifier — "which program should I choose?" and "tell me more about these programs" do not match and go to LLM.
+
+#### Static turn persistence (`src/lib/ai/chat/persist.ts`)
+
+New `PersistStaticTurnParams` interface and `persistStaticTurn(params, env)` helper:
+- Inserts user message row (`role = 'user'`, zero tokens, no model)
+- Inserts assistant message row (`ai_model_used = 'static'`, zero tokens, `context_used` snapshot)
+- Updates `ai_conversations.last_message_at` (best-effort)
+- Minimal `context_used` snapshot: `promptTemplateVersion = 'static-v1'`, `programsUsed = []`,
+  `warningsIncluded = false`, `missingTuitionCount = 0`, current `GUARDRAILS_VERSION`
+- Does **not** write to `ai_usage_logs` — no provider was called
+- Fail-safe: returns `false` on any DB error, never throws
+
+#### Endpoint integration (`src/pages/api/ai/chat.ts`)
+
+Updated `POST /api/ai/chat` flow:
+
+```
+parse request
+validate message + result_id (unchanged)
+auth user (unchanged)
+routeChatMessage(message)
+
+if static:
+  verify ai_finder_result ownership via SSR/RLS (.select('id') .maybeSingle())
+  → 404 if not found or not owned
+  getOrCreateConversation
+  → 500 if null
+  persistStaticTurn (fail-safe; 200 returned regardless)
+  return { ok: true, answer: STATIC_RESPONSES[category], conversation_id }
+
+if llm:
+  checkAIRateLimit (unchanged)
+  loadChatContext (unchanged — also verifies ownership + result_status)
+  getOrCreateConversation (unchanged)
+  callAI (unchanged)
+  guardrailTripped → 400 message_rejected (unchanged)
+  fallbackUsed → 503 ai_unavailable (unchanged)
+  persistChatTurn (unchanged)
+  return { ok: true, answer, conversation_id } (unchanged)
+```
+
+Static path skips: rate-limit check, full context load, AI provider call, usage logging.
+Rate limit is intentionally skipped for static turns — they are cheap and provider-free.
+Ownership is verified separately (SSR/RLS `.select('id')`) before `getOrCreateConversation`.
+
+#### Files created (1)
+
+- `src/lib/ai/chat/router.ts`
+
+#### Files modified (2 in src)
+
+- `src/lib/ai/chat/persist.ts` — added `PersistStaticTurnParams`, `persistStaticTurn`
+- `src/pages/api/ai/chat.ts` — imported and wired `routeChatMessage`, `STATIC_RESPONSES`, `persistStaticTurn`
+
+#### Explicit exclusions
+
+No schema changes. No UI changes. No new npm dependencies. No React. No streaming.
+No service_role in pages/components/layouts. No createServiceClient in pages/components/layouts.
+No callAI in UI or page components. No ai_usage_logs writes for static turns.
+No program-page AI. No scholarship-page AI. No RAG/vector search.
+
+### Phase 38 (optional) — Provider native multi-turn upgrade
 
 - Update `GeminiProvider.complete()` to accept `messages: Array<{role, content}>` and
   use Gemini's `contents[]` multi-turn format natively
