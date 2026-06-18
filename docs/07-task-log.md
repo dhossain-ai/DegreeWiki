@@ -4,6 +4,189 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 27: Saved Finder Results Management
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add a private /fit-finder/results list page and owner-only delete flow for logged-in users.
+No AI calls, no service_role, no service client, no public sharing, no anonymous persistence,
+no migrations, no new dependencies, no React, no client-side JS, no admin changes, no
+matching algorithm changes.
+
+---
+
+### Files Created
+
+src/pages/fit-finder/results/index.astro (new):
+  List page and POST delete handler. Uses PublicLayout, noindex=true.
+  Anonymous users: redirect to /login?redirect=/fit-finder/results (runs before any query).
+  POST handler (runs before GET render):
+    Reads 'id' field from formData. Validates against UUID regex — invalid → sets deleteError.
+    Calls supabase.from('ai_finder_results').delete().eq('id', rawId) via SSR client.
+    RLS ai_finder_results_delete_own enforces ownership server-side.
+    On DB error: sets deleteError string, falls through to re-render list.
+    On success: Astro.redirect('/fit-finder/results') (PRG pattern).
+    Non-owner UUID: RLS no-ops delete (0 rows affected, no error); redirects to list.
+    Never accepts user_id or student_profile_id from form.
+  GET handler:
+    Queries ai_finder_results via SSR client: id, created_at, result_status, shortlist_count,
+    ai_explanation (presence only), ai_model_used. No explicit user filter — RLS SELECT
+    policy (ai_finder_results_select_own) scopes results to auth.uid() through student_profiles.
+    Orders by created_at DESC. Sets pageState to 'list', 'empty', or 'error'.
+  Template:
+    Page actions: Run Fit Finder again (→ /fit-finder/result), Update preferences (→ /fit-finder).
+    deleteError banner shown when delete failed.
+    Empty state: heading + "Run the Fit Finder and your results will be saved automatically."
+      with Run Fit Finder and Update preferences CTAs.
+    Error state: generic message + Run Fit Finder link.
+    List state: cards sorted newest first. Each card shows: date saved, result_status badge
+      (only when non-complete), "AI summary" badge when ai_explanation is non-null,
+      program count, View result link (→ /fit-finder/results/{id}), Delete form button.
+  Security: no service client, no callAI, no getAIEnv, no SUPABASE_SERVICE_ROLE_KEY,
+    no createServiceClient, no profile ID or user ID in forms.
+
+---
+
+### Files Modified
+
+src/pages/fit-finder/results/[id].astro:
+  Added "← Back to saved results" link (href="/fit-finder/results") in a max-w-3xl div
+    above the h1 heading. Styled as small muted gray text.
+  Added "Delete this result" form (method="post", action="/fit-finder/results",
+    hidden input name="id" value={result.id}, button text "Delete this result") in the
+    action buttons row alongside existing Update/Run/Browse links.
+  No logic changes. No AI calls. No service client. No new imports.
+
+docs/06-status.md:
+  Marked Phase 27 complete. Added Phase 27 to Last Completed Work section.
+  Updated current phase to Phase 28.
+
+docs/07-task-log.md:
+  Added this entry.
+
+---
+
+### List Route Behavior
+
+GET /fit-finder/results:
+  Anonymous → redirect to /login?redirect=/fit-finder/results.
+  Logged-in + no rows → empty state with CTAs.
+  Logged-in + query error → error state with Run Fit Finder link.
+  Logged-in + rows → list of result cards, newest first.
+  RLS ensures only the current user's rows are returned.
+  No service client used.
+
+POST /fit-finder/results:
+  Anonymous → redirect to /login?redirect=/fit-finder/results.
+  Invalid/missing UUID → sets deleteError, re-renders list.
+  Valid UUID, owned by user → deletes row, CASCADE removes ai_finder_program_matches,
+    redirects to /fit-finder/results.
+  Valid UUID, not owned by user → RLS no-ops delete, redirect to list (no disclosure).
+  DB error on delete → sets deleteError, re-renders list.
+
+---
+
+### Delete Behavior
+
+- Server-side POST only; no client JS.
+- Only 'id' (result UUID) accepted from form; no user_id or student_profile_id.
+- UUID regex validation before query.
+- Deletion via SSR client: supabase.from('ai_finder_results').delete().eq('id', rawId).
+- RLS ai_finder_results_delete_own enforces ownership via student_profiles.user_id = auth.uid().
+- ai_finder_program_matches removed automatically by Postgres ON DELETE CASCADE.
+- No explicit match-row deletion in page code.
+- POST-Redirect-GET pattern: successful delete redirects to prevent re-submission.
+
+---
+
+### RLS/Ownership Behavior
+
+- ai_finder_results SELECT: ai_finder_results_select_own — EXISTS(SELECT 1 FROM
+  student_profiles sp WHERE sp.id = afr.student_profile_id AND sp.user_id = auth.uid()).
+  Plain .select() returns only current user's rows; no page-level user filter needed.
+- ai_finder_results DELETE: ai_finder_results_delete_own — same EXISTS check.
+  Non-owner UUID: 0 rows affected, no error; page redirects or shows nothing different.
+- ai_finder_program_matches: no explicit delete policy for authenticated users (intentional).
+  Cascade handles removal when parent row is deleted.
+- Anonymous access: blocked before any query by redirect to login.
+- Non-owner detail access: existing 404 behavior in [id].astro unchanged.
+- No service_role bypass anywhere in Phase 27 files.
+
+---
+
+### Detail Page Changes ([id].astro)
+
+- Added "← Back to saved results" link above heading (href="/fit-finder/results").
+- Added "Delete this result" form in action buttons row:
+  method="post", action="/fit-finder/results", hidden id=result.id.
+  Submits to index.astro POST handler which enforces RLS and redirects.
+- No changes to query logic, ownership checks, 404 handling, AI display, or imports.
+
+---
+
+### Explicit Exclusions
+
+- No AI calls (callAI, getAIEnv, Gemini, OpenAI not imported or used).
+- No service_role, SERVICE_ROLE, SUPABASE_SERVICE_ROLE_KEY in pages/components/layouts.
+- No createServiceClient in pages/components/layouts.
+- No public sharing or shareable links.
+- No anonymous persistence.
+- No migrations.
+- No new npm dependencies.
+- No React or client-side JS.
+- No admin page changes.
+- No matching algorithm changes (result.astro, persist.ts untouched).
+- No student_profile_id or user_id in forms.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 1.88s, zero errors, zero warnings in src).
+
+---
+
+### Safety Grep Results
+
+Get-ChildItem -Path src/pages,src/components,src/layouts -Recurse -File |
+  Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE"
+→ 0 matches.
+
+Get-ChildItem -Path src/pages,src/components,src/layouts -Recurse -File |
+  Select-String -Pattern "createServiceClient"
+→ 0 matches.
+
+Get-ChildItem -Path src/pages,src/components -Recurse -File |
+  Select-String -Pattern "callAI|Gemini|OpenAI"
+→ callAI appears in src/pages/fit-finder/result.astro only (import + invocation,
+  unchanged from Phase 26). No Gemini or OpenAI matches anywhere.
+
+Get-ChildItem -Path src/pages/fit-finder/results -Recurse -File |
+  Select-String -Pattern "callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient"
+→ 0 matches.
+
+---
+
+### Manual Test Checklist
+
+- [ ] Anonymous /fit-finder/results redirects to /login?redirect=/fit-finder/results.
+- [ ] Logged-in user with no saved results sees empty state.
+- [ ] Logged-in user with saved results sees own results list, newest first.
+- [ ] Each result card shows date, count, AI badge (if applicable), View result link, Delete button.
+- [ ] View result link navigates to /fit-finder/results/[id] and loads correctly.
+- [ ] Detail page shows "← Back to saved results" link.
+- [ ] Detail page shows "Delete this result" button.
+- [ ] Delete from list page removes result and redirects back to list.
+- [ ] Delete from detail page removes result and redirects to list.
+- [ ] Deleted result URL returns 404.
+- [ ] User B's result UUID submitted in delete form by User A: no disclosure, User A's list unchanged.
+- [ ] User B's result UUID in URL: 404 (existing behavior).
+- [ ] /fit-finder/result (live Fit Finder) still works without regression.
+
+---
+
 ## 2026-06-18 - Phase 26: AI Finder Result Persistence
 
 Tool:

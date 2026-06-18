@@ -4,11 +4,61 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 27 — TBD.
+Phase 28 — TBD.
+
+Phase 27 — Saved Finder Results Management — complete.
 
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 27 — Saved Finder Results Management (complete):
+
+- Added /fit-finder/results list page for logged-in users showing all their saved Fit Finder
+  results, sorted newest first. Each result card shows date, program count, status badge
+  (only when non-complete), and an AI summary indicator. Links to each detail page.
+  Owner-only delete flow via server-side POST: accepts only result UUID in hidden field;
+  RLS (ai_finder_results_delete_own: student_profiles.user_id = auth.uid()) enforces
+  ownership server-side; ON DELETE CASCADE removes ai_finder_program_matches automatically.
+  Anonymous users redirect to /login?redirect=/fit-finder/results.
+  No AI calls, no service_role, no service client, no public sharing, no anonymous
+  persistence, no migrations, no new dependencies, no React, no client-side JS,
+  no admin changes, no matching algorithm changes.
+
+Files created (1):
+  src/pages/fit-finder/results/index.astro — list page and POST delete handler.
+    GET: queries ai_finder_results via SSR client (RLS filters to owner's rows only).
+    Select: id, created_at, result_status, shortlist_count, ai_explanation, ai_model_used.
+    Order: created_at DESC. Three states: list, empty, error.
+    POST: reads 'id' from formData, validates UUID regex, calls
+      supabase.from('ai_finder_results').delete().eq('id', rawId) via SSR client.
+    On success: redirect to /fit-finder/results (PRG).
+    On failure: re-renders list with deleteError banner.
+    Non-owner UUID submit: RLS no-ops delete; page redirects normally (no disclosure).
+    No user_id/student_profile_id in forms. No service client.
+
+Files modified (1 in src):
+  src/pages/fit-finder/results/[id].astro — added "← Back to saved results" link above
+    h1, and a "Delete this result" form (method=post, action=/fit-finder/results, hidden
+    id=result.id) in the action buttons row. No logic changes, no AI calls, no service client.
+
+RLS/ownership:
+  SELECT: ai_finder_results_select_own — EXISTS on student_profiles.user_id = auth.uid().
+    Plain .select() returns only current user's rows; no explicit user filter needed.
+  DELETE: ai_finder_results_delete_own — same EXISTS check. Server enforces ownership.
+    No page-level ownership check required. Non-owner attempt: 0 rows affected (no error).
+  CASCADE: ai_finder_program_matches.ai_finder_result_id ON DELETE CASCADE removes
+    child rows automatically when parent ai_finder_results row is deleted.
+    No explicit match-row deletion in page code.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 1.88s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI|Gemini|OpenAI in src/pages,src/components → callAI only in
+    src/pages/fit-finder/result.astro (import + invocation, unchanged from Phase 26).
+  callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient in
+    src/pages/fit-finder/results → 0 matches.
 
 Phase 26 — AI Finder Result Persistence (complete):
 
