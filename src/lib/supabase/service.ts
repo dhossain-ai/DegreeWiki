@@ -1,9 +1,11 @@
 // SERVER-ONLY. Never import this file from browser code, client components,
 // Astro component scripts, or any file that runs in the browser.
 // The Supabase service role key bypasses all Row Level Security policies.
-// This module exists solely to support server-side AI usage logging and
-// rate-limit enforcement via ai_usage_logs, which has no authenticated
-// INSERT or SELECT policy for regular users.
+// Approved server-only AI operations that require the service role:
+//   - AI usage logging (ai_usage_logs — no authenticated INSERT)
+//   - Rate-limit enforcement (ai_usage_logs SELECT count)
+//   - Finder result persistence (ai_finder_results, ai_finder_program_matches — no authenticated INSERT)
+//   - Chat conversation/message persistence (ai_conversations INSERT, ai_messages — no authenticated INSERT)
 import { createClient } from '@supabase/supabase-js'
 
 export function createServiceClient(serviceRoleKey: string) {
