@@ -6305,3 +6305,111 @@ Next:
 - Merge feature/phase-03-app-foundation-auth to main.
 - Load countries and subjects via import batch.
 - Begin Phase 04: admin CRUD, public SEO pages, or React islands (TBD).
+
+---
+
+## Phase 28 — AI Finder Production Hardening
+
+Date: 2026-06-18
+
+### Summary
+
+Hardened AI Finder operational readiness: added a user-facing AI unavailable note,
+updated stale privacy copy, documented AI env/secret requirements, and created a
+deployment checklist. No new AI surfaces, no chatbot, no migrations, no dependencies.
+
+### UX Hardening
+
+src/pages/fit-finder/result.astro:
+  Added let aiUnavailable = false near other AI variables.
+  Set aiUnavailable = true inside the pageState === 'ready' && matches.length > 0 block:
+    - When callAI returns fallbackUsed=true (rate limit, missing key, provider error)
+    - When callAI returns guardrailTripped=true (output safety block)
+    - When the outer catch fires (unexpected exception)
+  Not set for anonymous, no_profile, sparse_profile, error, or no_matches states.
+  Template: renders subtle gray note after AI explanation block:
+    "AI summary is unavailable right now. Your rule-based matches are still shown."
+  Only shown when !aiExplanation && aiUnavailable. Does not expose rate-limit reason,
+  API key state, provider name, model name, daily limit, or error details.
+
+### Privacy Copy Update
+
+src/pages/privacy.astro:
+  Changed section heading "AI features (future)" to "AI features".
+  Updated body from future tense to present tense.
+  Added: AI usage logged server-side (user ID, session type, model, token count).
+  Added: Fit Finder match results saved to account for later review.
+  Added: Data used for rate limiting, cost management, saved results.
+  Added: AI context sent to Google Gemini; data not sold or used for advertising.
+
+### Docs Changes
+
+docs/04-ai-system.md:
+  Updated "Server-Only Secret Rules" env vars block:
+    - Added SUPABASE_SERVICE_ROLE_KEY as required secret with usage explanation
+    - Separated required secrets (wrangler secret) from optional env vars (Pages dashboard)
+  Added "AI Production Readiness (Phase 28)" section:
+    - Fail-closed behavior table (by missing secret, rate limit, provider error, guardrail)
+    - Cloudflare Pages and Workers secret setup commands
+    - Production verification steps for ai_usage_logs, ai_finder_results,
+      ai_finder_program_matches, owner access, non-owner 404, AI unavailable note
+    - Local dev notes (.dev.vars pattern, no PUBLIC_ prefix, no commit)
+
+docs/08-ai-deployment-checklist.md (new):
+  13 sections covering: purpose, required secrets, required env vars, Cloudflare setup
+  commands (Pages and Workers variants), Supabase prerequisites, build verification,
+  security grep checks, post-deploy smoke tests (9 cases), rate-limit test procedure,
+  AI usage log verification SQL, saved-result persistence verification SQL, expected
+  behavior by failure mode table, rollback notes.
+
+### Files Created
+
+- docs/08-ai-deployment-checklist.md
+
+### Files Modified
+
+- src/pages/fit-finder/result.astro
+- src/pages/privacy.astro
+- docs/04-ai-system.md
+- docs/06-status.md
+- docs/07-task-log.md
+
+### Explicit Exclusions
+
+No chatbot. No new AI surfaces or endpoints. No free-form prompt. No migrations.
+No new dependencies. No React or client-side JS. No admin UI.
+No service-role usage outside approved lib paths. No matching algorithm changes.
+No AI prompt changes (finder-summary.ts, chat-answer.ts unchanged).
+No rate-limit algorithm changes (limits.ts unchanged).
+No persistence strategy changes (persist.ts unchanged).
+No changes to gateway.ts, env.ts, gemini.ts, logging.ts, service.ts.
+No changes to results/index.astro or results/[id].astro.
+No changes to disclaimer.astro or terms.astro.
+No migrations.
+
+### Security / Service-Role Boundary
+
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/ → 0 matches.
+callAI only in src/pages/fit-finder/result.astro (import + invocation).
+"Gemini" in src/pages/privacy.astro is informational copy text only, not a code import.
+callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient in
+  src/pages/fit-finder/results → 0 matches.
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 10.18s, zero errors).
+
+### Manual Smoke-Test Checklist
+
+1. Anonymous user at /fit-finder/result → "Save your Fit Finder preferences" state; no AI note.
+2. No saved profile → "No saved Fit Finder profile yet." state; no AI note.
+3. Sparse profile → "Add more preferences" state; missing signals listed; no AI note.
+4. Valid profile + AI available → rule matches + purple AI summary + green save banner.
+5. AI unavailable (rate-limited or key absent) → rule matches + gray note; no AI section.
+6. no_matches state → match count shown; "No preference matches found"; no AI note.
+7. Page refresh within 60s → same saved result UUID reused; no duplicate row.
+8. Saved results list → list, delete, redirect.
+9. Saved result detail → stored matches; stored AI summary if present; non-owner 404.
+
