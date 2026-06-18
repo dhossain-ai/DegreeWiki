@@ -1,0 +1,143 @@
+---
+import PublicLayout from '../layouts/PublicLayout.astro'
+import { createClient } from '../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: { user } } = await supabase.auth.getUser()
+if (!user) {
+  return Astro.redirect('/login?redirect=/account')
+}
+
+let profileExists = false
+let savedCount = 0
+
+const [profileResult, savedCountResult] = await Promise.all([
+  supabase
+    .from('student_profiles')
+    .select('id')
+    .eq('is_anonymous', false)
+    .limit(1),
+  supabase
+    .from('ai_finder_results')
+    .select('id', { count: 'exact', head: true }),
+])
+
+if (profileResult.error) {
+  console.error('account: student_profiles query error:', profileResult.error.message)
+} else {
+  profileExists = (profileResult.data?.length ?? 0) > 0
+}
+
+if (savedCountResult.error) {
+  console.error('account: ai_finder_results count error:', savedCountResult.error.message)
+} else {
+  savedCount = savedCountResult.count ?? 0
+}
+
+const savedLabel = savedCount === 1 ? '1 saved result' : `${savedCount} saved results`
+---
+<PublicLayout title="Account — DegreeWiki" noindex={true}>
+  <div class="max-w-2xl mx-auto px-4 py-10">
+
+    <h1 class="text-2xl font-bold text-gray-900 mb-1">Account</h1>
+    {user.email && (
+      <p class="text-sm text-gray-500 mb-8">Signed in as <span class="text-gray-700">{user.email}</span></p>
+    )}
+
+    <!-- Fit Finder -->
+    <section class="mb-8">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Fit Finder</h2>
+      <div class="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+
+        <a href="/fit-finder"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <div>
+            <p class="text-sm font-medium text-gray-900">Fit Finder preferences</p>
+            <p class="text-xs text-gray-500 mt-0.5">
+              {profileExists ? 'Preferences saved' : 'Not set up yet'}
+            </p>
+          </div>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+        <a href="/fit-finder/results"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <div>
+            <p class="text-sm font-medium text-gray-900">Saved Fit Finder results</p>
+            <p class="text-xs text-gray-500 mt-0.5">{savedLabel}</p>
+          </div>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+        <a href="/fit-finder/result"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <div>
+            <p class="text-sm font-medium text-gray-900">Run Fit Finder</p>
+            <p class="text-xs text-gray-500 mt-0.5">Find programs matching your preferences</p>
+          </div>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+      </div>
+    </section>
+
+    <!-- Browse -->
+    <section class="mb-8">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Browse</h2>
+      <div class="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+
+        <a href="/programs"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <p class="text-sm font-medium text-gray-900">Browse programs</p>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+      </div>
+    </section>
+
+    <!-- Privacy and trust -->
+    <section class="mb-8">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Privacy &amp; trust</h2>
+      <div class="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+
+        <a href="/privacy"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <p class="text-sm font-medium text-gray-900">Privacy policy</p>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+        <a href="/terms"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <p class="text-sm font-medium text-gray-900">Terms</p>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+        <a href="/disclaimer"
+           class="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors">
+          <p class="text-sm font-medium text-gray-900">Disclaimer</p>
+          <span class="text-gray-400 text-sm">&rarr;</span>
+        </a>
+
+      </div>
+    </section>
+
+    <!-- Account actions -->
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Account</h2>
+      <div class="rounded-lg border border-gray-200 overflow-hidden">
+        <div class="p-4 bg-white">
+          <form method="post" action="/api/auth/logout">
+            <button
+              type="submit"
+              class="text-sm font-medium text-red-600 hover:text-red-700 cursor-pointer"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</PublicLayout>
