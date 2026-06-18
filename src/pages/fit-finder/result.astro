@@ -5,6 +5,7 @@ import { SITE_URL } from '../../lib/site'
 import { callAI } from '../../lib/ai/gateway'
 import { getAIEnv } from '../../lib/ai/env'
 import type { AIContext } from '../../lib/ai/types'
+import { persistFinderResult } from '../../lib/ai/finder/persist'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
@@ -70,6 +71,8 @@ let savedSignalCount = 0
 let candidatesChecked = 0
 let missingSignals: string[] = []
 let aiExplanation: string | null = null
+let savedResultId: string | null = null
+let persistAttempted = false
 
 function formatMode(value: string | null | undefined): string {
   return value ? value.replace(/_/g, ' ') : ''
@@ -306,6 +309,12 @@ if (!user) {
           pageState = matches.length > 0 ? 'ready' : 'no_matches'
 
           if (pageState === 'ready' && matches.length > 0) {
+            const aiEnv = getAIEnv(Astro.locals as Record<string, unknown>)
+
+            let aiModelUsed: string | null = null
+            let promptTokenCount = 0
+            let completionTokenCount = 0
+
             try {
               const top3 = matches.slice(0, 3)
               const aiContext: AIContext = {
@@ -332,7 +341,6 @@ if (!user) {
                   currency:        profile?.budget_currency ?? undefined,
                 },
               }
-              const aiEnv = getAIEnv(Astro.locals as Record<string, unknown>)
               const aiResponse = await callAI(
                 {
                   sessionType: 'finder',
@@ -344,9 +352,51 @@ if (!user) {
               )
               if (!aiResponse.fallbackUsed && !aiResponse.guardrailTripped && aiResponse.text.trim().length > 0) {
                 aiExplanation = aiResponse.text.trim()
+                aiModelUsed = aiResponse.modelUsed
+                promptTokenCount = aiResponse.promptTokens
+                completionTokenCount = aiResponse.completionTokens
               }
             } catch {
               // AI failure must never break rule-based matches
+            }
+
+            try {
+              const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString()
+              const { data: recentResult } = await supabase
+                .from('ai_finder_results')
+                .select('id')
+                .eq('student_profile_id', profile!.id)
+                .eq('result_status', 'complete')
+                .gte('created_at', sixtySecondsAgo)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+              if (recentResult?.id) {
+                savedResultId = recentResult.id as string
+              } else {
+                persistAttempted = true
+                savedResultId = await persistFinderResult(
+                  {
+                    studentProfileId:  profile!.id,
+                    shortlistCount:    matches.length,
+                    aiExplanation,
+                    aiModelUsed,
+                    promptTokenCount,
+                    completionTokenCount,
+                    matches: matches.map((m, i) => ({
+                      programId:    m.program.id as string,
+                      rank:         i + 1,
+                      score:        m.points,
+                      matchReasons: m.reasons,
+                      warnings:     m.warnings,
+                    })),
+                  },
+                  aiEnv,
+                )
+              }
+            } catch {
+              // persist failure must never break rule-based matches
             }
           }
         }
@@ -480,6 +530,18 @@ const pageTitle = 'Possible program matches'
             Browse all programs
           </a>
         </div>
+
+        {savedResultId && (
+          <div class="max-w-3xl mb-5 flex items-center gap-3 px-4 py-2 rounded-md bg-green-50 border border-green-100 text-sm text-green-800">
+            Your matches have been saved.{' '}
+            <a href={`/fit-finder/results/${savedResultId}`} class="font-medium underline hover:text-green-900">
+              View saved result →
+            </a>
+          </div>
+        )}
+        {persistAttempted && !savedResultId && (
+          <p class="max-w-3xl mb-5 text-sm text-gray-400">Results could not be saved this time.</p>
+        )}
 
         {aiExplanation && (
           <div class="max-w-3xl mb-7 bg-purple-50 border border-purple-100 rounded-md px-4 py-4">

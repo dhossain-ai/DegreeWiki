@@ -1,0 +1,235 @@
+---
+import PublicLayout from '../../../layouts/PublicLayout.astro'
+import { createClient } from '../../../lib/supabase/server'
+import { SITE_URL } from '../../../lib/site'
+
+const { id } = Astro.params
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+if (!id || !UUID_RE.test(id)) {
+  return new Response(null, { status: 404 })
+}
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: { user } } = await supabase.auth.getUser()
+
+if (!user) {
+  return Astro.redirect(`/login?redirect=/fit-finder/results/${id}`)
+}
+
+// RLS enforces owner access: student_profiles.user_id = auth.uid()
+const { data: result, error: resultError } = await supabase
+  .from('ai_finder_results')
+  .select('id, result_status, shortlist_count, ai_explanation, ai_model_used, created_at')
+  .eq('id', id)
+  .maybeSingle()
+
+if (resultError) {
+  console.error('ai_finder_results read error:', resultError.message)
+}
+
+if (!result) {
+  return new Response(null, { status: 404 })
+}
+
+// RLS on ai_finder_program_matches enforces ownership via parent result
+const { data: matchRows, error: matchError } = await supabase
+  .from('ai_finder_program_matches')
+  .select(`
+    rank, score, match_reasons, warnings,
+    programs(
+      id, title, slug,
+      study_mode, delivery_mode, language_of_instruction,
+      tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+      official_url,
+      universities(name, slug),
+      countries(name),
+      cities(name),
+      degree_levels(name),
+      subjects(name)
+    )
+  `)
+  .eq('ai_finder_result_id', result.id)
+  .order('rank', { ascending: true })
+
+if (matchError) {
+  console.error('ai_finder_program_matches read error:', matchError.message)
+}
+
+const matches = (matchRows ?? []) as any[]
+
+function formatTuition(p: any): string | null {
+  if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
+  const fmt = (n: number) => Number(n).toLocaleString()
+  const range =
+    p.tuition_min_amount != null && p.tuition_max_amount != null
+      ? `${fmt(p.tuition_min_amount)} - ${fmt(p.tuition_max_amount)}`
+      : p.tuition_min_amount != null
+        ? fmt(p.tuition_min_amount)
+        : `up to ${fmt(p.tuition_max_amount)}`
+  const period = p.tuition_period?.replace(/_/g, ' ') ?? ''
+  return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
+}
+
+function formatMode(value: string | null | undefined): string {
+  return value ? value.replace(/_/g, ' ') : ''
+}
+
+const savedDate = result.created_at
+  ? new Date(result.created_at).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
+  : null
+
+const aiExplanation = result.ai_explanation as string | null
+---
+<PublicLayout
+  title="Saved Fit Finder result — DegreeWiki"
+  description="Your saved DegreeWiki Fit Finder program matches."
+  noindex={true}
+  canonical={SITE_URL + `/fit-finder/results/${id}`}
+>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="max-w-3xl mb-5">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">Saved Fit Finder result</h1>
+      {savedDate && (
+        <p class="text-sm text-gray-500">Saved on {savedDate}</p>
+      )}
+      {result.result_status === 'failed' && (
+        <p class="mt-2 text-sm text-yellow-800 bg-yellow-50 border border-yellow-100 px-3 py-2 rounded-md">
+          This saved result may be incomplete.
+        </p>
+      )}
+    </div>
+
+    <div class="max-w-3xl mb-5 bg-blue-50 border border-blue-100 rounded-md px-4 py-3 text-sm text-blue-800">
+      <p>Match scores show how many of your saved preferences a program aligned with. A higher score means more of your preferences were matched — it does not indicate your chances of admission, eligibility, or scholarship likelihood.</p>
+      <p class="mt-2">These are rule-based preference matches only. Match scores do not assess your eligibility, academic qualifications, admission chances, scholarship prospects, or visa outcomes. Always verify fees, deadlines, admission requirements, and eligibility directly with the official university source before applying.</p>
+    </div>
+
+    <div class="max-w-3xl mb-5 px-4 py-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-500">
+      Match scores and reasons reflect your saved preferences at the time this result was created. Program details shown here may reflect the latest available DegreeWiki data.
+    </div>
+
+    {aiExplanation && (
+      <div class="max-w-3xl mb-7 bg-purple-50 border border-purple-100 rounded-md px-4 py-4">
+        <h2 class="text-sm font-semibold text-purple-900 mb-2">AI summary</h2>
+        <p class="text-xs text-purple-700 mb-3">
+          This explanation is AI-assisted and was generated at the time this result was saved. Verify all details directly with official university sources before applying.
+        </p>
+        <div class="space-y-2">
+          {aiExplanation.split(/\n\n+/).map(para => (
+            <p class="text-sm text-gray-700 leading-relaxed">{para}</p>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <div class="flex flex-wrap gap-3 mb-7">
+      <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+        Update preferences
+      </a>
+      <a href="/fit-finder/result" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+        Run Fit Finder again
+      </a>
+      <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+        Browse all programs
+      </a>
+    </div>
+
+    {matches.length === 0 ? (
+      <div class="max-w-2xl border border-gray-200 rounded-lg p-5 bg-gray-50">
+        <p class="text-sm text-gray-600">No program matches were stored with this result.</p>
+      </div>
+    ) : (
+      <ul class="space-y-4">
+        {matches.map((match: any) => {
+          const p = match.programs
+          if (!p) return null
+          const tuition = formatTuition(p)
+          const location = [p.countries?.name, p.cities?.name].filter(Boolean).join(', ')
+          const reasons: string[] = Array.isArray(match.match_reasons) ? match.match_reasons : []
+          const warnings: string[] = Array.isArray(match.warnings) ? match.warnings : []
+          return (
+            <li class="border border-gray-200 rounded-lg p-5 bg-white">
+              <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+                <div>
+                  <a href={`/programs/${p.slug}`} class="text-lg font-semibold text-blue-600 hover:underline leading-snug">
+                    {p.title}
+                  </a>
+                  <div class="text-sm text-gray-500 mt-1">
+                    {p.universities && (
+                      <a href={`/universities/${p.universities.slug}`} class="text-gray-700 font-medium hover:underline">
+                        {p.universities.name}
+                      </a>
+                    )}
+                    {p.universities && location && <span class="mx-1">·</span>}
+                    {location}
+                  </div>
+                </div>
+                <div class="shrink-0 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-center min-w-[56px]">
+                  <div class="text-base font-bold text-gray-700">#{match.rank}</div>
+                  <div class="text-xs text-gray-500">match</div>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-2 text-xs mb-4">
+                {p.degree_levels?.name && (
+                  <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{p.degree_levels.name}</span>
+                )}
+                {p.subjects?.name && (
+                  <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">{p.subjects.name}</span>
+                )}
+                {p.study_mode && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.study_mode)}</span>
+                )}
+                {p.delivery_mode && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.delivery_mode)}</span>
+                )}
+                {p.language_of_instruction && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{p.language_of_instruction}</span>
+                )}
+                {tuition && (
+                  <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{tuition}</span>
+                )}
+              </div>
+
+              {reasons.length > 0 && (
+                <div class="mb-3">
+                  <h2 class="text-sm font-semibold text-gray-900 mb-1">Why this may fit</h2>
+                  <ul class="list-disc pl-5 text-sm text-gray-700 space-y-0.5">
+                    {reasons.map(reason => <li>{reason}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {warnings.length > 0 && (
+                <div class="mb-3">
+                  <h2 class="text-sm font-semibold text-gray-900 mb-1">Things to verify</h2>
+                  <ul class="list-disc pl-5 text-sm text-gray-600 space-y-0.5">
+                    {warnings.map(warning => <li>{warning}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              <div class="text-sm text-gray-500 border-t border-gray-100 pt-3">
+                Confirm fees, deadlines, admission requirements, and eligibility directly with the official source.
+                {p.official_url && (
+                  <>
+                    {' '}
+                    <a href={p.official_url} target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">
+                      Official program page
+                    </a>
+                  </>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    )}
+  </div>
+</PublicLayout>
