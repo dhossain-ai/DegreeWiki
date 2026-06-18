@@ -685,18 +685,111 @@ These phases are not scheduled. They follow from this architecture document.
   Cross-field consistency check when both student_profile_id and ai_finder_result_id are set.
 - No chat UI, no chat route, no API endpoint, no AI calls, no src/ changes.
 
-### Phase 33 — Prompt hardening for saved-result chat
+### Phase 33 — Context-Bound Chat Prompt + Server Helper Foundation (complete)
 
-- Update `src/lib/ai/prompts/chat-answer.ts` with context-bound system prompt
-- Add session type parameter to select between generic and result-scoped prompt
-- Tests: verify refusal behavior for out-of-scope questions
+Server-only helper and prompt hardening phase. No chat route, no API endpoint, no chat UI,
+no live user-facing chat, no migrations, no new dependencies.
+
+#### Helper boundary
+
+**`src/lib/ai/chat/context.ts`** — RLS-scoped context loader (no service role).
+- `loadChatContext(resultId, supabase): Promise<ChatResultContext | null>`
+- Accepts the caller's authenticated SSR Supabase client; RLS enforces ownership.
+- Returns null if result is not found, not owned by the user, or `result_status !== 'complete'`.
+- Limits to top 10 matched programs (`MAX_PROGRAMS_IN_CONTEXT`).
+- Builds `ChatResultProgram[]` from an explicit allowlist: rank, title, university, country,
+  city, degreeLevel, subject, tuitionSummary, officialUrl, matchReasons, warnings.
+- Internal UUIDs (program_id, ai_finder_result_id, student_profile_id, score) are excluded.
+- The Phase 34 route calls this function before building AIContext and calling callAI().
+
+**`src/lib/ai/chat/persist.ts`** — service-role message persistence helper.
+- `getOrCreateConversation(params, env): Promise<string | null>`
+  Finds or creates the one `ai_conversations` row for `(userId, finderResultId)`.
+  Handles unique-constraint race via retry-SELECT on error code `23505`.
+- `persistChatTurn(params, env): Promise<boolean>`
+  Inserts user message row, then assistant message row with `context_used` snapshot,
+  then updates `ai_conversations.last_message_at` (best-effort).
+  Returns false if either message INSERT fails.
+  Must only be called when `callAI()` returned `fallbackUsed: false`.
+- Confirmed exact column names from migration 012/016:
+  `ai_conversation_id` (FK), `role`, `content`, `context_used`, `ai_model_used`,
+  `prompt_token_count`, `completion_token_count`.
+  `ai_conversations.session_type` CHECK `('finder'|'chat')` — uses `'chat'`.
+  `ai_conversations.last_message_at` — updated after each turn.
+
+#### Type additions (`src/lib/ai/types.ts`)
+
+- `ChatResultProgram` — LLM-facing compact program shape (no internal UUIDs).
+- `ChatResultContext` — server-side context for one saved-result chat session.
+  Contains `resultId` (server-only, never sent to LLM) and `programs: ChatResultProgram[]`.
+- `ContextUsedSnapshot` — audit record stored in `ai_messages.context_used` (jsonb).
+  Contains: `chatMode`, `promptTemplateVersion`, `safetyPolicyVersion`,
+  `aiFinderResultId`, `conversationId`, `programsUsed` (rank/title/university),
+  `warningsIncluded`, `missingTuitionCount`.
+  Internal IDs appear here for DB-side audit only — never in the LLM prompt.
+- `AIRequest.chatMode?: 'saved_result'` — signals saved-result mode to the gateway.
+
+#### Prompt hardening (`src/lib/ai/prompts/chat-answer.ts`)
+
+- `buildChatPrompt(userMessage, context, chatMode?)` — backward-compatible.
+- `chatMode === 'saved_result'`: uses 12-rule `SAVED_RESULT_SYSTEM_PROMPT`.
+  Program context formatted as human-readable structured block (not raw JSON)
+  to prevent internal field leakage and improve model readability.
+  Rule 12 explicitly instructs the model to decline prompt injection attempts.
+- `chatMode` undefined: preserves original generic behavior.
+- User input placed only in the user turn — never interpolated into system prompt.
+- Exports `CHAT_SAVED_RESULT_PROMPT_VERSION = 'chat-saved-result-v1'` for audit.
+
+#### Gateway wiring (`src/lib/ai/gateway.ts`)
+
+One-line change: passes `request.chatMode` to `buildChatPrompt` in the chat branch.
+
+#### Guardrail hardening (`src/lib/ai/safety/guardrails.ts`)
+
+Input patterns added (checked before any LLM call):
+- `ignore (all) (previous|prior|your) (instructions|rules|context|guidelines|constraints)`
+- `disregard (all) (previous|prior|your) (instructions|rules|context|guidelines|constraints)`
+
+Output patterns added (checked after LLM response):
+- `you will (receive|get|be awarded) the scholarship`
+- `i can confirm (your) (eligibility|admission|acceptance)`
+
+Exports `GUARDRAILS_VERSION = 'guardrails-v2'` for audit.
+
+#### `result_status` confirmed
+
+Value `'complete'` confirmed from migration 012 and existing page code.
+CHECK constraint: `('pending', 'complete', 'failed')`. Used exactly as `'complete'`.
+
+#### Files created (2)
+
+- `src/lib/ai/chat/context.ts`
+- `src/lib/ai/chat/persist.ts`
+
+#### Files modified (5)
+
+- `src/lib/ai/types.ts` — new types + `chatMode` on `AIRequest`
+- `src/lib/ai/gateway.ts` — pass `chatMode` to `buildChatPrompt`
+- `src/lib/ai/prompts/chat-answer.ts` — hardened saved-result prompt
+- `src/lib/ai/safety/guardrails.ts` — new input + output patterns
+- `src/lib/supabase/service.ts` — comment updated to reflect approved scope
+
+#### Explicit exclusions
+
+No chat route. No API endpoint. No chat UI. No live AI chat calls.
+No callAI caller beyond existing fit-finder/result.astro.
+No service_role in pages/components/layouts.
+No createServiceClient in pages/components/layouts.
+No migrations. No new npm dependencies. No React. No client-side JS.
+No changes to providers, env.ts, logging.ts, limits.ts, finder/persist.ts.
+No changes to any src/pages/* or src/components/* or src/layouts/* files.
 
 ### Phase 34 — Chat route MVP
 
 - Create `src/pages/fit-finder/results/[id]/chat.astro`
 - SSR GET + POST handler
 - Entry point on `/fit-finder/results/[id]`
-- Service-client message persistence via a new `src/lib/ai/chat/persist.ts`
+- Calls `loadChatContext`, `getOrCreateConversation`, `persistChatTurn` from Phase 33 helpers
 - Privacy page update bundled in this phase
 - Full security grep validation
 
