@@ -328,10 +328,19 @@ AI API keys must never use the PUBLIC_ prefix.
 Environment variables for the AI module:
 
 ```
-GEMINI_API_KEY          # Server/worker only. Set via: wrangler secret put GEMINI_API_KEY
-AI_PROVIDER             # Active provider name: gemini | openrouter
-AI_MODEL                # Model string passed to provider, e.g. gemini-2.5-flash
-AI_RATE_LIMIT_ANON_DAILY    # Max AI calls per anonymous session per day (default 5)
+# Required secrets — set via wrangler secret, never as plain env vars
+GEMINI_API_KEY             # Server/worker only. Required for AI to run.
+                            # Set via wrangler secret (see docs/08-ai-deployment-checklist.md).
+SUPABASE_SERVICE_ROLE_KEY  # Server/worker only. Required for AI to run.
+                            # Used for rate-limit checks, usage logging, and saved-result
+                            # persistence. If absent, all AI calls fail closed.
+                            # Never use the PUBLIC_ prefix.
+                            # Set via wrangler secret (see docs/08-ai-deployment-checklist.md).
+
+# Optional env vars — set in Cloudflare Pages dashboard or wrangler.toml, not as secrets
+AI_PROVIDER             # Active provider name: gemini | openrouter (default: gemini)
+AI_MODEL                # Model string passed to provider (default: gemini-2.5-flash)
+AI_RATE_LIMIT_ANON_DAILY    # Max AI calls per anonymous session per day (default 5, not yet enforced)
 AI_RATE_LIMIT_USER_DAILY    # Max AI calls per logged-in user per day (default 20)
 ```
 
@@ -479,3 +488,81 @@ For AI coding tools:
 9. Append to docs/07-task-log.md.
 
 Coding agents should not silently change architecture.
+
+## AI Production Readiness (Phase 28)
+
+### Fail-Closed Behavior by Missing Secret
+
+Every condition that prevents an authoritative AI call returns a safe fallback.
+Rule-based matches always render. The AI section is absent (with a subtle user note).
+
+| Condition | Effect |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` absent | `serviceClient = null` → rate limit returns `service_unavailable` → AI not called |
+| `GEMINI_API_KEY` absent | `resolveProvider()` throws → `callAI` catches → fallback |
+| Both secrets absent | Same as `SUPABASE_SERVICE_ROLE_KEY` absent path |
+| Rate limit exceeded | `checkRateLimit` returns `limit_exceeded` → AI not called |
+| Gemini API error (network, 4xx, 5xx) | Provider throws → `callAI` catches → fallback |
+| Output guardrail tripped | `checkOutput` fails → fallback with `guardrailTripped: true` |
+
+In all fallback cases: `aiResponse.fallbackUsed = true` or `guardrailTripped = true`.
+The result page sets `aiUnavailable = true` and shows:
+"AI summary is unavailable right now. Your rule-based matches are still shown."
+
+### Cloudflare Secret Setup
+
+Use the command matching your deployment target. Do not commit real values.
+
+**Cloudflare Pages:**
+```bash
+npx wrangler pages secret put GEMINI_API_KEY
+npx wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY
+```
+
+**Cloudflare Workers:**
+```bash
+npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+```
+
+Plain env vars (`AI_PROVIDER`, `AI_MODEL`, `AI_RATE_LIMIT_USER_DAILY`, `PUBLIC_SUPABASE_URL`,
+`PUBLIC_SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL`) are set in the Cloudflare Pages dashboard
+or `wrangler.toml` — not as encrypted secrets.
+
+### Production Verification Steps
+
+After deploying with all secrets set, run a Fit Finder session as a logged-in user with a
+valid profile and at least one published program in the database. Then verify in the Supabase
+dashboard:
+
+1. **AI usage log**: `ai_usage_logs` has a new row with `session_type = 'finder'` and
+   `tokens_used > 0`. If this row is absent, `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY`
+   may be missing or misconfigured.
+
+2. **Saved result**: `ai_finder_results` has a new row with `result_status = 'complete'`
+   and `shortlist_count > 0`.
+
+3. **Match rows**: `ai_finder_program_matches` has rows linked to that result UUID,
+   ordered by `rank` ascending.
+
+4. **Saved result page loads**: `/fit-finder/results/{result_id}` renders for the owner.
+
+5. **Non-owner 404**: Loading the same URL while signed in as a different user returns 404.
+
+6. **AI unavailable note**: Remove `GEMINI_API_KEY` (or set an invalid value), run the
+   Fit Finder again. The AI section should be absent and the gray note should appear.
+   Rule-based matches must render normally.
+
+### Local Dev Notes
+
+In local development with `wrangler pages dev`, AI runtime env vars are read from
+`locals.runtime.env` — not from `import.meta.env` and not from `.env`. Use `.dev.vars`
+(gitignored) to set secrets locally:
+
+```
+GEMINI_API_KEY=your_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_service_key_here
+```
+
+Never prefix secrets with `PUBLIC_`. Never commit `.dev.vars` or any file containing
+real secret values. See `docs/08-ai-deployment-checklist.md` for the full checklist.
