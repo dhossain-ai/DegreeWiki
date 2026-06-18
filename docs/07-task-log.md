@@ -4,6 +4,266 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 25: AI Usage Logging + Rate Limit Enforcement
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Activate server-only AI usage logging and daily per-user rate-limit enforcement.
+Replace writeUsageLog and checkRateLimit stubs with real implementations backed
+by ai_usage_logs via a narrow service role Supabase client. No chatbot, no
+free-form prompt, no new public pages, no AI finder result persistence, no
+migrations, no new dependencies, no React, no client-side JS.
+
+---
+
+### user_profiles FK Verification
+
+Inspected supabase/migrations/002_auth_roles.sql line 31:
+  CREATE TABLE public.user_profiles (
+    id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    ...
+  )
+
+And supabase/migrations/012_ai_tables.sql:
+  user_id uuid REFERENCES public.user_profiles(id) ON DELETE SET NULL
+
+Chain confirmed:
+  auth.users.id (UUID) ← public.user_profiles.id (same UUID, PK/FK)
+    ← ai_usage_logs.user_id (FK)
+
+user.id from supabase.auth.getUser() is the correct value to use as userId
+in AIRequest and to store in ai_usage_logs.user_id. Implementation proceeded.
+
+---
+
+### Files Created
+
+src/lib/supabase/service.ts (new):
+  Server-only service role Supabase client factory. Exports
+  createServiceClient(serviceRoleKey: string). Uses @supabase/supabase-js
+  createClient with persistSession: false, autoRefreshToken: false.
+  No cookies, no auth side effects. Key passed as parameter — never hardcoded
+  or logged. Must never be imported from browser code, client components,
+  Astro client scripts, or layouts.
+
+---
+
+### Files Modified
+
+src/lib/ai/types.ts:
+  AIUsageEntry — added costEstimateUsd?: number | null.
+  AIRuntimeEnv — added SUPABASE_SERVICE_ROLE_KEY?: string with server-only comment.
+
+src/lib/ai/env.ts:
+  Added SUPABASE_SERVICE_ROLE_KEY: raw['SUPABASE_SERVICE_ROLE_KEY'] to returned
+  AIRuntimeEnv object, alongside other AI runtime vars.
+
+src/lib/ai/usage/limits.ts:
+  Replaced always-allowed stub with real fail-closed rate limit implementation.
+  New exported interfaces: RateLimitResult (added reason field), RateLimitOpts.
+  New signature: checkRateLimit(userId, _sessionType, opts: RateLimitOpts).
+  Algorithm:
+    userId null → { allowed: false, reason: 'service_unavailable' }
+    serviceClient null → { allowed: false, reason: 'service_unavailable' }
+    PostgREST count: ai_usage_logs where user_id = userId AND
+      created_at >= UTC day start (Date.UTC of today midnight).
+    Query error → { allowed: false, reason: 'service_unavailable' }
+    count >= dailyLimit → { allowed: false, reason: 'limit_exceeded' }
+    Otherwise → { allowed: true, remaining: dailyLimit - count }
+  Counts across all session_type values (not per-type).
+
+src/lib/ai/usage/logging.ts:
+  Replaced no-op stub with real insert via service client.
+  New signature: writeUsageLog(entry: AIUsageEntry, serviceClient: SupabaseClient | null).
+  If serviceClient null → return (no-op, safe).
+  Inserts: user_id, session_type, tokens_used, model_used, cost_estimate_usd.
+  Insert error → console.error only, never throws.
+  Fire-and-forget contract preserved.
+
+src/lib/ai/gateway.ts:
+  Added import: createServiceClient from '../supabase/service'.
+  In callAI(), after input guardrail (Step 1):
+    Creates serviceClient from env.SUPABASE_SERVICE_ROLE_KEY (null if absent).
+    Parses dailyLimit from env.AI_RATE_LIMIT_USER_DAILY with default 20.
+  Step 2 (rate limit) now passes { serviceClient, dailyLimit } to checkRateLimit.
+  Rate limit fallback messages:
+    'limit_exceeded' → "You have reached today's AI usage limit. Your rule-based
+      matches are still available."
+    other → "AI is temporarily unavailable."
+  Step 7 (writeUsageLog) now passes serviceClient as second arg.
+  costEstimateUsd: null passed in entry (cost map deferred).
+  Comment updated from "no-op stub" to real description.
+
+.env.example:
+  Added SUPABASE_SERVICE_ROLE_KEY= with strict server-only annotation explaining
+  it bypasses RLS, must never use PUBLIC_ prefix, set via wrangler secret.
+  AI_RATE_LIMIT comment updated to Phase 25+.
+
+---
+
+### Not Modified
+
+src/pages/fit-finder/result.astro — no changes required; existing try/catch
+  and fallbackUsed guard already handle all rate-limit and logging fallback paths.
+src/pages/fit-finder/index.astro
+src/lib/ai/providers/gemini.ts
+src/lib/ai/prompts/*
+src/lib/ai/safety/guardrails.ts
+src/lib/supabase/server.ts
+src/lib/supabase/client.ts
+src/pages/ (all public routes)
+src/pages/admin/*
+src/components/*
+src/layouts/*
+supabase/migrations/*
+package.json
+astro.config.mjs
+
+---
+
+### Service Client Strategy
+
+createServiceClient(key) in src/lib/supabase/service.ts uses @supabase/supabase-js
+(already a direct dependency in package.json). Key is received as a function
+parameter, never module-level. Service key comes from locals.runtime.env via
+getAIEnv — same Cloudflare Workers pattern as GEMINI_API_KEY. createServiceClient
+is called once inside callAI() per request. The resulting client is passed into
+checkRateLimit and writeUsageLog, then discarded.
+
+---
+
+### Env Strategy
+
+SUPABASE_SERVICE_ROLE_KEY is read from locals.runtime.env, never from
+import.meta.env.PUBLIC_*. It has no PUBLIC_ prefix. It is documented in
+.env.example with a server-only annotation. In Cloudflare Workers production
+it must be set via: wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+
+---
+
+### Rate-Limit Behaviour
+
+Fail-closed: Gemini is never called unless checkRateLimit returns allowed=true.
+  No service key → Gemini not called.
+  Anonymous user → Gemini not called.
+  Query error → Gemini not called.
+  Limit exceeded → Gemini not called.
+Fallback text is user-friendly and does not reveal internal service key/infra details.
+Fit Finder result page: rule-based matches always render; AI section silently absent
+  when fallbackUsed=true.
+
+---
+
+### Usage Logging Behaviour
+
+Logged (ai_usage_logs):
+  user_id (auth UUID), session_type, tokens_used, model_used, cost_estimate_usd (null).
+Not logged:
+  Prompt text, AI response text, profile UUID, user email, session token,
+  additional_notes, raw admission/English/GPA requirements, internal UUIDs.
+Failure handling: console.error on insert error; function never throws.
+Call site: fire-and-forget writeUsageLog(...).catch(() => {}) after Step 6
+  output guardrail passes. Guardrail-tripped and provider-failure paths are
+  not logged (tokens_used not available or unreliable in those paths).
+
+---
+
+### Fail-Closed Behaviour
+
+Without SUPABASE_SERVICE_ROLE_KEY in Cloudflare Workers env:
+  serviceClient = null.
+  checkRateLimit returns { allowed: false, reason: 'service_unavailable' }.
+  callAI returns { text: 'AI is temporarily unavailable.', fallbackUsed: true }.
+  Gemini is never called. writeUsageLog returns immediately (no-op).
+  Rule-based matches on /fit-finder/result render normally.
+
+This is intentional: if usage tracking is not wired, AI should not silently
+run unchecked and unlogged.
+
+---
+
+### Explicit Exclusions
+
+No ai_finder_results insert.
+No ai_finder_program_matches insert.
+No chatbot UI.
+No free-form user prompt.
+No new public pages.
+No admin UI for viewing usage logs.
+No React or client-side JS.
+No migrations.
+No new npm dependencies.
+No matching algorithm changes.
+No prompt text or model response text logged.
+No cost estimate map (costEstimateUsd: null for Phase 25).
+No anonymous rate limiting (no anonymous AI calls exist yet).
+No src/pages/fit-finder/result.astro changes.
+No src/lib/ai/providers/* changes.
+No src/lib/ai/prompts/* changes.
+No src/lib/ai/safety/guardrails.ts changes.
+
+---
+
+### Docs Updated
+
+docs/04-ai-system.md — replaced Phase 23 architecture section with Phase 25:
+  updated directory structure, callAI() contract, Phase 25 behaviour, service
+  client strategy, rate-limit algorithm, usage logging fields, fail-closed
+  behaviour, what is and is not logged, cost_estimate_usd note.
+docs/06-status.md — Phase 25 completion entry added; current phase set to Phase 26.
+docs/07-task-log.md — this entry.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 2.27s, zero errors).
+
+---
+
+### Safety Grep Results
+
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts
+  → 0 matches.
+
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/
+  → 0 matches.
+
+callAI in src/pages,src/components
+  → 2 matches, both in src/pages/fit-finder/result.astro
+    (import line and invocation line only).
+
+ai_usage_logs in src/pages
+  → 0 matches.
+
+---
+
+### Manual Test Checklist
+
+With GEMINI_API_KEY + SUPABASE_SERVICE_ROLE_KEY configured:
+  [ ] /fit-finder/result logged-in user with matches → AI summary renders.
+  [ ] After AI render: 1 new row in ai_usage_logs with correct user_id,
+      session_type='finder', non-zero tokens_used, model_used set,
+      cost_estimate_usd null.
+  [ ] No prompt text or response text in ai_usage_logs row.
+
+Rate limit test (set AI_RATE_LIMIT_USER_DAILY=1):
+  [ ] First /fit-finder/result load → AI summary renders, 1 row logged.
+  [ ] Second load → no AI section rendered; rule-based matches still render.
+  [ ] No error state, no broken layout on rate-limited load.
+
+Without SUPABASE_SERVICE_ROLE_KEY:
+  [ ] /fit-finder/result → no AI section rendered; rule-based matches render normally.
+  [ ] No error state or broken layout.
+  [ ] No Gemini call made (GEMINI_API_KEY not consumed).
+
+Anonymous user:
+  [ ] /fit-finder/result → sign-in state renders, no AI call attempted.
+
+---
+
 ## 2026-06-18 - Phase 24: AI Finder Explanation MVP
 
 Tool:

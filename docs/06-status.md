@@ -4,7 +4,80 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 25 — TBD.
+Phase 26 — TBD.
+
+Phase 25 — AI Usage Logging + Rate Limit Enforcement — complete.
+
+## Last Completed Work
+
+Phase 25 — AI Usage Logging + Rate Limit Enforcement (complete):
+
+- Activated server-only AI usage logging and daily per-user rate-limit enforcement.
+  Both writeUsageLog and checkRateLimit stubs replaced with real implementations.
+  No chatbot, no free-form prompt, no new public pages, no ai_finder_results writes,
+  no ai_finder_program_matches writes, no migrations, no new dependencies, no React,
+  no client-side JS, no admin UI, no matching algorithm changes, no prompt or
+  response text logged.
+
+Files created (1):
+  src/lib/supabase/service.ts — narrow server-only service role Supabase client
+    factory. Uses @supabase/supabase-js createClient with persistSession: false,
+    autoRefreshToken: false. Created per-call inside callAI(); never at module scope.
+    Must never be imported from browser code, client components, or layouts.
+
+Files modified (6 in src):
+  src/lib/ai/types.ts — added SUPABASE_SERVICE_ROLE_KEY?: string to AIRuntimeEnv;
+    added costEstimateUsd?: number | null to AIUsageEntry.
+
+  src/lib/ai/env.ts — added SUPABASE_SERVICE_ROLE_KEY extraction from
+    locals.runtime.env alongside other AI runtime vars.
+
+  src/lib/ai/usage/limits.ts — replaced always-allowed stub with real fail-closed
+    implementation. Signature: checkRateLimit(userId, sessionType, opts).
+    Fail-closed: null userId → denied; null serviceClient → denied; query error →
+    denied; count >= limit → denied. Counts all session_type values for the user
+    on the current UTC day. Default limit: 20 (AI_RATE_LIMIT_USER_DAILY env var).
+    Returns reason: 'limit_exceeded' | 'service_unavailable' for message selection.
+
+  src/lib/ai/usage/logging.ts — replaced no-op stub with real insert into
+    ai_usage_logs. Signature: writeUsageLog(entry, serviceClient). Logs user_id,
+    session_type, tokens_used, model_used, cost_estimate_usd (null for Phase 25).
+    No prompt text, AI response text, profile UUIDs, emails, or raw profile data.
+    Never throws — logging failure is console.error only.
+
+  src/lib/ai/gateway.ts — creates service client from env.SUPABASE_SERVICE_ROLE_KEY
+    (null if absent) inside callAI(). Passes { serviceClient, dailyLimit } to
+    checkRateLimit; passes serviceClient to writeUsageLog. Rate-limit fallback
+    messages: 'limit_exceeded' → "You have reached today's AI usage limit. Your
+    rule-based matches are still available."; 'service_unavailable' → "AI is
+    temporarily unavailable." writeUsageLog called fire-and-forget after Step 6
+    output guardrail passes. costEstimateUsd: null passed to writeUsageLog.
+
+  .env.example — added SUPABASE_SERVICE_ROLE_KEY= with strict server-only
+    annotation. Set via: wrangler secret put SUPABASE_SERVICE_ROLE_KEY.
+
+Fail-closed behaviour:
+  Without SUPABASE_SERVICE_ROLE_KEY configured, all AI calls return a safe fallback
+  ("AI is temporarily unavailable.") and Gemini is not called. The Fit Finder
+  result page renders rule-based matches normally in all fallback cases.
+
+Logged data (ai_usage_logs):
+  user_id, session_type, tokens_used, model_used, cost_estimate_usd (null).
+  No prompt text, no AI response text, no profile IDs, no emails, no raw profile data.
+
+FK chain verified before implementation:
+  auth.users.id ← public.user_profiles.id (migration 002, PRIMARY KEY REFERENCES)
+  public.user_profiles.id ← ai_usage_logs.user_id (migration 012, FK)
+  user.id from supabase.auth.getUser() is the correct value to pass as userId.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 2.27s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts
+    → 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/ → 0 matches.
+  callAI in src/pages,src/components → 2 matches, both in
+    src/pages/fit-finder/result.astro (import + invocation only).
+  ai_usage_logs in src/pages → 0 matches.
 
 Phase 24 — AI Finder Explanation MVP — complete.
 
