@@ -46,6 +46,15 @@ type SavedResult = {
   ai_model_used: string | null
 }
 
+type TopProgram = {
+  title: string
+  slug: string
+  universityName: string | null
+  universitySlug: string | null
+  countryName: string | null
+  cityName: string | null
+}
+
 let results: SavedResult[] = []
 let pageState: 'list' | 'empty' | 'error' = 'empty'
 
@@ -64,12 +73,59 @@ if (listError) {
   pageState = 'empty'
 }
 
+// Top-program preview: fetch rank-1 match for each result (SSR client, RLS enforced)
+const previews = new Map<string, TopProgram>()
+
+if (pageState === 'list' && results.length > 0) {
+  const resultIds = results.map(r => r.id)
+  const { data: previewRows, error: previewError } = await supabase
+    .from('ai_finder_program_matches')
+    .select(`
+      ai_finder_result_id,
+      programs(
+        title, slug,
+        universities(name, slug),
+        countries(name),
+        cities(name)
+      )
+    `)
+    .in('ai_finder_result_id', resultIds)
+    .eq('rank', 1)
+
+  if (previewError) {
+    console.error('ai_finder_program_matches preview error:', previewError.message)
+    // List still renders without previews — no user-facing error
+  } else {
+    for (const row of previewRows ?? []) {
+      const p = (row as any).programs
+      const resultId = (row as any).ai_finder_result_id
+      if (!p || !resultId) continue
+      previews.set(resultId, {
+        title: p.title ?? '',
+        slug: p.slug ?? '',
+        universityName: p.universities?.name ?? null,
+        universitySlug: p.universities?.slug ?? null,
+        countryName: p.countries?.name ?? null,
+        cityName: p.cities?.name ?? null,
+      })
+    }
+  }
+}
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   })
+}
+
+type BadgeVariant = 'ai' | 'no-ai' | 'incomplete' | 'failed'
+
+function getCardBadge(result: SavedResult): BadgeVariant {
+  if (result.result_status === 'failed') return 'failed'
+  if (result.result_status !== 'complete') return 'incomplete'
+  return result.ai_explanation ? 'ai' : 'no-ai'
 }
 ---
 <PublicLayout
@@ -91,6 +147,9 @@ function formatDate(iso: string): string {
       <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
         Update preferences
       </a>
+      <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+        Browse programs
+      </a>
     </div>
 
     {deleteError && (
@@ -108,9 +167,9 @@ function formatDate(iso: string): string {
       </div>
     ) : pageState === 'empty' ? (
       <div class="max-w-2xl border border-gray-200 rounded-lg p-6 bg-gray-50">
-        <h2 class="text-base font-semibold text-gray-900 mb-2">No saved results yet</h2>
+        <h2 class="text-base font-semibold text-gray-900 mb-2">No saved Fit Finder results yet.</h2>
         <p class="text-sm text-gray-600 mb-4">
-          Run the Fit Finder and your results will be saved automatically.
+          Results are saved automatically after you run Fit Finder. Your matched programs and any AI summary are stored so you can review them later.
         </p>
         <div class="flex flex-wrap gap-3">
           <a href="/fit-finder/result" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
@@ -119,56 +178,89 @@ function formatDate(iso: string): string {
           <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-white">
             Update preferences
           </a>
+          <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-white">
+            Browse programs
+          </a>
         </div>
       </div>
     ) : (
       <ul class="space-y-4 max-w-3xl">
-        {results.map(r => (
-          <li class="border border-gray-200 rounded-lg p-5 bg-white">
-            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-              <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap items-center gap-2 mb-1">
-                  <span class="text-sm font-medium text-gray-900">
-                    {formatDate(r.created_at)}
-                  </span>
-                  {r.result_status !== 'complete' && (
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 border border-yellow-200 capitalize">
-                      {r.result_status}
+        {results.map(r => {
+          const badge = getCardBadge(r)
+          const preview = previews.get(r.id)
+          const location = [preview?.countryName, preview?.cityName].filter(Boolean).join(', ')
+          return (
+            <li class="border border-gray-200 rounded-lg p-5 bg-white">
+              <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div class="flex-1 min-w-0">
+
+                  {/* Header: date + badges */}
+                  <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <span class="text-sm font-medium text-gray-900">
+                      {formatDate(r.created_at)}
                     </span>
-                  )}
-                  {r.ai_explanation && (
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
-                      AI summary
-                    </span>
+                    {badge === 'ai' && (
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
+                        AI summary
+                      </span>
+                    )}
+                    {badge === 'no-ai' && (
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                        No AI summary
+                      </span>
+                    )}
+                    {badge === 'incomplete' && (
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 border border-yellow-200">
+                        Incomplete
+                      </span>
+                    )}
+                    {badge === 'failed' && (
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+                        Failed
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Program count */}
+                  <p class="text-sm text-gray-500 mb-2">
+                    {r.shortlist_count === 1
+                      ? '1 program matched'
+                      : `${r.shortlist_count} programs matched`}
+                  </p>
+
+                  {/* Top-program preview */}
+                  {preview && (
+                    <div class="mt-1">
+                      <p class="text-sm font-medium text-gray-800 leading-snug">{preview.title}</p>
+                      <p class="text-xs text-gray-500 mt-0.5">
+                        {[preview.universityName, location].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
                   )}
                 </div>
-                <p class="text-sm text-gray-500">
-                  {r.shortlist_count === 1
-                    ? '1 program matched'
-                    : `${r.shortlist_count} programs matched`}
-                </p>
-              </div>
 
-              <div class="flex flex-wrap items-center gap-2 shrink-0">
-                <a
-                  href={`/fit-finder/results/${r.id}`}
-                  class="px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-md hover:bg-blue-50"
-                >
-                  View result
-                </a>
-                <form method="post" action="/fit-finder/results">
-                  <input type="hidden" name="id" value={r.id} />
-                  <button
-                    type="submit"
-                    class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+                {/* Actions */}
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
+                  <a
+                    href={`/fit-finder/results/${r.id}`}
+                    class="px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-md hover:bg-blue-50"
                   >
-                    Delete
-                  </button>
-                </form>
+                    View result
+                  </a>
+                  <form method="post" action="/fit-finder/results">
+                    <input type="hidden" name="id" value={r.id} />
+                    <button
+                      type="submit"
+                      class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                </div>
               </div>
-            </div>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
     )}
   </div>
