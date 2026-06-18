@@ -4,6 +4,252 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 31: AI Chat Architecture Plan
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Design the AI chat architecture before any chatbot implementation. Produce a clear
+architecture and implementation plan for a future context-bound AI chat feature.
+Docs-only phase — no source code changes, no routes, no migrations, no AI calls.
+
+---
+
+### Files Created
+
+docs/09-ai-chat-architecture.md:
+
+  17-section architecture document for the future AI chat feature.
+
+  Section 1 — Purpose:
+    Context-bound AI chat on saved Fit Finder results. User asks follow-up questions
+    about the programs already matched in a specific saved result. AI answers from
+    saved result context only.
+
+  Section 2 — Non-goals:
+    No global chatbot. No anonymous chat. No shared sessions. No AI-driven discovery.
+    No streaming. No WebSocket. No React. No RAG/embeddings in MVP.
+
+  Section 3 — Core product rule:
+    Database chooses → rules rank → AI explains and answers within approved context.
+    Applies to chat exactly as it applies to Finder. Chat AI does not select or rank programs.
+
+  Section 4 — First supported chat surface:
+    Future route: /fit-finder/results/[id]/chat. Bound to one ai_finder_results row.
+    RLS verifies ownership via student_profiles.user_id = auth.uid().
+    Entry point on result detail page only when result_status='complete' + matches exist.
+
+  Section 5 — Current architecture findings:
+    callAI already dispatches to buildChatPrompt for sessionType='chat' (gateway.ts:84-86).
+    buildChatPrompt too generic — lacks saved-result scope constraints and refusal rules.
+    ai_usage_logs.session_type supports 'chat' already.
+    checkRateLimit ignores sessionType (_sessionType unused) — counts all types together.
+    ai_messages has no browser INSERT policy — service-role-only writes (correct).
+    ai_conversations has NO ai_finder_result_id column — critical gap identified.
+
+  Section 6 — Required future migration:
+    ADD COLUMN ai_finder_result_id uuid REFERENCES ai_finder_results(id) ON DELETE CASCADE.
+    ADD CONSTRAINT uq_ai_conversations_user_result UNIQUE (user_id, ai_finder_result_id).
+    UPDATE ai_conversations INSERT + UPDATE RLS WITH CHECK to validate result ownership.
+    Migration deferred to a future implementation phase.
+
+  Section 7 — Future route/API architecture:
+    Page: src/pages/fit-finder/results/[id]/chat.astro (SSR, noindex).
+    POST handler: same-page (consistent with results/index.astro pattern).
+    No separate API file. No JSON responses. No streaming. PRG pattern on POST.
+    Full POST flow documented: auth gate → UUID validate → load result (RLS) →
+    load matches → validate message → load/create conversation → load history →
+    build context → callAI → persist → redirect.
+
+  Section 8 — Context construction:
+    SSR client (RLS enforced) loads result + matches.
+    Context: top 10 matched programs (not all 20), compact per-program shape.
+    Per-program: rank, title, university, country/city, tuitionSummary, officialUrl,
+      matchReasons, warnings. No internal UUIDs, no raw scores, no secrets.
+    Multi-turn: pack last 10 pairs into user prompt field for Gemini MVP.
+    Future: upgrade GeminiProvider to use native contents[] multi-turn format.
+
+  Section 9 — Prompt contract:
+    Future system prompt for chat-answer.ts. Key rules:
+      Only discuss programs in this saved result.
+      Refuse questions about programs not in the list.
+      Refuse requests to rank new programs.
+      Never guarantee admission/scholarship/visa/job outcomes.
+      Cite programs by title + university only (never UUID).
+      Remind users to verify at official URLs.
+
+  Section 10 — Chat persistence:
+    One conversation per (user, ai_finder_result_id) pair.
+    ai_conversations INSERT via SSR client (RLS WITH CHECK after migration).
+    ai_messages INSERT via service-role client (server-only).
+    User message: role='user', content, context_used=null, token counts=0.
+    Assistant message: role='assistant', content, context_used=compact snapshot,
+      ai_model_used, prompt/completion token counts.
+    If callAI returns fallbackUsed=true: no rows written.
+    Cascade: parent result delete → conversation delete → message delete.
+
+  Section 11 — context_used decision:
+    Store compact public-field snapshot per assistant turn for audit.
+    Include: rank, title, university, country/city, tuitionSummary, officialUrl,
+      matchReasons, warnings.
+    Exclude: internal UUIDs, raw scores, full records, system prompt, service keys.
+
+  Section 12 — Rate limit/logging:
+    session_type='chat' used in ai_usage_logs (no code change needed).
+    Finder + chat share combined daily user limit in MVP.
+    No remaining-count display in chat UI for MVP.
+    On limit hit: safe message shown; AI not called; no message rows written.
+
+  Section 13 — Safety layers:
+    Layer 1: RLS ownership check (database).
+    Layer 2: Context construction allowlist (server).
+    Layer 3: Prompt refusal rules (prompt).
+    Layer 4: checkInput/checkOutput guardrails (deterministic regex, existing).
+
+  Section 14 — Privacy/data retention:
+    ai_messages.content stores question text and AI responses.
+    context_used stores compact public snapshot.
+    No system prompt text stored.
+    Retention: until user deletes or parent result is deleted (CASCADE).
+    Privacy page MUST be updated before or with chat launch.
+
+  Section 15 — UX boundaries:
+    Chat available: complete results only, logged-in only.
+    Scope disclaimer required above input.
+    Refusal message for out-of-scope questions.
+    No share. No anonymous chat. No UUIDs in UI.
+
+  Section 16 — Future implementation phases:
+    Phase 32+: migration (ai_finder_result_id + RLS).
+    Phase 33+: prompt hardening (chat-answer.ts update).
+    Phase 34+: chat route MVP + privacy page update.
+    Phase 35+ (optional): native Gemini multi-turn upgrade.
+    Later: per-session-type rate limits, cost estimates, conversation management.
+
+  Section 17 — Test checklist for future implementation:
+    Build, security greps, route verification, access control, chat flow,
+    rate limit, refusal behavior, privacy, data boundary checks.
+
+---
+
+### Files Modified
+
+docs/06-status.md — Phase 31 completion entry; current phase updated to Phase 32.
+docs/07-task-log.md — this entry.
+
+---
+
+### Architecture Decisions
+
+SSR POST handler (same-page) preferred over separate API endpoint for MVP.
+  Consistent with existing results pages. No JSON. PRG pattern. No streaming.
+
+One conversation per (user, saved result) via unique constraint after migration.
+  Prevents duplicate threads. NULL in ai_finder_result_id exempted by PostgreSQL UNIQUE.
+
+context_used stores compact public snapshot, not full raw records.
+  Keeps storage bounded. Excludes internal IDs. Sufficient for audit.
+
+Combined daily rate limit (finder + chat) in MVP.
+  Simple. No per-type tracking needed yet. Future env var can split if needed.
+
+Top 10 matched programs in initial context (not all 20).
+  Prevents token overflow. Can be raised if testing proves 20 is safe.
+
+Multi-turn packing into user field for Gemini MVP.
+  Avoids immediate provider API change. Native multi-turn deferred to later phase.
+
+---
+
+### Key Schema Finding
+
+ai_conversations has NO ai_finder_result_id column (confirmed in migration 012).
+A conversation cannot be uniquely linked to one saved ai_finder_results row using
+the existing schema. student_profile_id is insufficient (one profile → many results).
+
+---
+
+### Future Migration Requirement
+
+NOT included in Phase 31. Required before any chat implementation:
+
+ALTER TABLE public.ai_conversations
+  ADD COLUMN ai_finder_result_id uuid
+    REFERENCES public.ai_finder_results(id) ON DELETE CASCADE;
+
+ALTER TABLE public.ai_conversations
+  ADD CONSTRAINT uq_ai_conversations_user_result
+    UNIQUE (user_id, ai_finder_result_id);
+
+UPDATE ai_conversations INSERT and UPDATE RLS WITH CHECK to validate that a
+linked ai_finder_result_id belongs to auth.uid() via the student_profiles join.
+
+---
+
+### Explicit Exclusions
+
+No src/pages route created or modified.
+No src/components file created or modified.
+No src/layouts file created or modified.
+No src/lib/ai/* file created or modified.
+No supabase/migrations/* file created or modified.
+No callAI call. No getAIEnv call. No createServiceClient in pages/components/layouts.
+No service_role reference in pages/components/layouts.
+No chat route: src/pages/fit-finder/results/[id]/chat.astro (not created).
+No chat API: src/pages/api/fit-finder (not created).
+No new npm dependencies. No package.json changes.
+No React or client-side JS. No admin UI. No public sharing. No matching changes.
+No migrations. No AI provider changes. No guardrail changes.
+No prompt changes (chat-answer.ts unchanged).
+No rate-limit algorithm changes (limits.ts unchanged).
+No persistence changes (persist.ts unchanged).
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, zero errors).
+
+---
+
+### Safety Grep Results
+
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts:
+  → 0 matches (expected, unchanged from Phase 30).
+
+createServiceClient in src/pages,src/components,src/layouts:
+  → 0 matches (expected, unchanged from Phase 30).
+
+callAI in src/pages,src/components:
+  → 2 matches, both in src/pages/fit-finder/result.astro
+    (import line + invocation line, unchanged from Phase 30).
+
+---
+
+### Route/File Absence Checks
+
+src/pages/fit-finder/results/[id]/chat.astro → False (does not exist, correct).
+src/pages/api/fit-finder → False (does not exist, correct).
+docs/09-ai-chat-architecture.md → True (created in this phase).
+
+---
+
+### Future Implementation Notes
+
+The architecture document (docs/09-ai-chat-architecture.md) is the authoritative
+reference for any future chat implementation. All future chat phases should read
+this document before planning.
+
+Key open questions for ChatGPT review (from Phase 31 plan):
+  1. ai_conversations.ai_finder_result_id: ON DELETE CASCADE vs SET NULL.
+  2. Multi-turn prompt format: pack into user field vs native Gemini contents[] upgrade.
+  3. Browser vs service-role ai_conversations INSERT for result-scoped chat.
+  4. context_used storage: compact snapshot (chosen) vs program IDs only (rejected).
+  5. One conversation per result (chosen) vs new conversation per session (rejected).
+  6. Rate limit remaining count: expose in chat UI or suppress in MVP (suppressed).
+  7. Privacy page timing: update before chat launch (required, bundled with Phase 34+).
+
 ## 2026-06-18 - Phase 30: Account/Profile Area Foundation
 
 Tool:

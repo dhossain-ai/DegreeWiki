@@ -4,7 +4,9 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 31 — TBD.
+Phase 32 — TBD.
+
+Phase 31 — AI Chat Architecture Plan — complete.
 
 Phase 30 — Account/Profile Area Foundation — complete.
 
@@ -17,6 +19,65 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 31 — AI Chat Architecture Plan (complete):
+
+- Docs-only architecture phase. No source code changes, no routes, no API endpoints,
+  no AI calls, no migrations, no new dependencies, no React, no client-side JS,
+  no service-role expansion, no admin UI, no public sharing, no matching changes.
+
+Docs deliverable:
+  docs/09-ai-chat-architecture.md — complete AI chat architecture document.
+    17 sections covering: purpose, non-goals, core product rule, first chat surface,
+    current architecture findings, required future migration, route/API architecture,
+    context construction, prompt contract, persistence strategy, context_used decision,
+    rate-limit/logging strategy, safety layers, privacy/retention, UX boundaries,
+    future implementation phases, and test checklist.
+
+Key architecture decisions recorded:
+  First chat surface: /fit-finder/results/[id]/chat — context-bound to one saved result.
+  No global chatbot. No anonymous chat. No streaming in MVP. No React. No WebSocket.
+  Prefer same-page SSR POST handler (consistent with existing results pages).
+  Context allowlist: top 10 matched programs, public fields only, no internal UUIDs.
+  Multi-turn: pack last 10 pairs into user prompt field for MVP.
+  Rate limit: chat + finder share same combined daily user bucket in MVP.
+  Persistence: one conversation per (user, saved result); ai_messages via service role only.
+  context_used: compact public snapshot; no raw records, no internal IDs, no prompt text.
+  Privacy page update required before chat launches publicly.
+
+Key schema finding:
+  ai_conversations has NO ai_finder_result_id column. A conversation cannot currently be
+  linked to a specific saved ai_finder_results row. A future migration is required.
+
+Future migration requirement (NOT in Phase 31):
+  ALTER TABLE ai_conversations ADD COLUMN ai_finder_result_id uuid
+    REFERENCES public.ai_finder_results(id) ON DELETE CASCADE;
+  ADD CONSTRAINT uq_ai_conversations_user_result UNIQUE (user_id, ai_finder_result_id);
+  UPDATE INSERT/UPDATE RLS WITH CHECK to validate result ownership via auth.uid().
+
+Explicit exclusions:
+  No src/pages route created. No src/components file changed. No src/layouts file changed.
+  No src/lib/ai/* file changed. No supabase/migrations/* file changed.
+  No callAI call. No getAIEnv call. No service_role reference in pages/components/layouts.
+  No createServiceClient in pages/components/layouts.
+  No chat route: src/pages/fit-finder/results/[id]/chat.astro (not created).
+  No chat API: src/pages/api/fit-finder (not created).
+
+Files created (1):
+  docs/09-ai-chat-architecture.md
+
+Files modified (2):
+  docs/06-status.md
+  docs/07-task-log.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI in src/pages,src/components → 2 matches only in src/pages/fit-finder/result.astro (unchanged).
+  src/pages/fit-finder/results/[id]/chat.astro → does not exist.
+  src/pages/api/fit-finder → does not exist.
+  docs/09-ai-chat-architecture.md → exists.
 
 Phase 30 — Account/Profile Area Foundation (complete):
 
