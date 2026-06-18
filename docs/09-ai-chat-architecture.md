@@ -1041,7 +1041,14 @@ No service_role in pages/components/layouts. No createServiceClient in pages/com
 No callAI in UI or page components. No ai_usage_logs writes for static turns.
 No program-page AI. No scholarship-page AI. No RAG/vector search.
 
-### Phase 38 (optional) — Provider native multi-turn upgrade
+### Phase 38 — Program + Scholarship Advisor Boundaries (docs-only)
+
+Boundary planning for two future AI advisor surfaces. No implementation in this phase.
+No src changes, no migrations, no API routes, no UI, no prompt changes, no dependencies.
+
+See Section 18 for the full boundary specification.
+
+### Phase 39 (optional) — Provider native multi-turn upgrade
 
 - Update `GeminiProvider.complete()` to accept `messages: Array<{role, content}>` and
   use Gemini's `contents[]` multi-turn format natively
@@ -1053,6 +1060,8 @@ No program-page AI. No scholarship-page AI. No RAG/vector search.
 - Cost estimate map for `cost_estimate_usd`
 - Conversation management on the account page
 - Conversation delete button on the chat page
+- Program Page AI Advisor (requires schema migration + new prompt template + new API endpoint)
+- Scholarship Page AI Advisor (requires schema migration + new prompt template + new API endpoint)
 
 ---
 
@@ -1128,3 +1137,242 @@ Get-ChildItem -Path src -Recurse -File |
 - [ ] No internal UUID visible in rendered HTML or AI responses
 - [ ] No model name, token count, or system prompt text shown to user
 - [ ] `context_used` in `ai_messages` contains only compact public fields (verified in DB)
+
+---
+
+## 18. Phase 38 — Program + Scholarship Advisor Boundary Specification
+
+Documented in Phase 38 (2026-06-19). Docs only — no implementation included.
+
+This section defines the safe product boundaries for two future AI advisor surfaces:
+the Program Page AI Advisor and the Scholarship Page AI Advisor. Neither is built yet.
+Both must satisfy the core product rule in Section 3 without exception.
+
+---
+
+### 18.1 Program Page AI Advisor
+
+#### Allowed answers
+
+- Questions about the specific program on the page: degree level, subject, tuition summary,
+  location, city, study mode, delivery mode, intake dates — using only fields already stored
+  in that program's DB row.
+- What a field value means (e.g. what "full-time" means, what a degree level label means).
+- Where to find official information — the `official_url` field only.
+- If the user is logged in and has a saved Fit Finder result that includes this program:
+  the advisor may surface relevant match reasons and warnings from that result as additional
+  context. This is enrichment only — it does not re-run the finder, re-score, or re-rank.
+
+#### Context the advisor may use
+
+- The single program row (allowlisted public fields only; no internal UUIDs in the LLM prompt).
+- The linked university row (name, country, city).
+- The linked subject and degree level.
+- Optionally, match reasons and warnings from a relevant saved Fit Finder result (if the user
+  is logged in and such a result exists). These are passed as pre-fetched DB values, not derived
+  by the LLM.
+
+Fields excluded from LLM context (same exclusion rule as saved-result chat):
+internal UUIDs, raw scores, service keys, profile IDs, model internals, system prompt text.
+
+#### Login requirement
+
+Logged-in users only for profile-personalised commentary (e.g. "how does this fit my profile").
+Future anonymous users may be allowed to ask basic factual questions about a program, but
+implementation should include abuse controls and rate limits. This is not implemented in Phase 38.
+
+#### Student Profile requirement
+
+Not required. The advisor works on program data alone.
+If the user has no profile and asks a personalised question, the advisor responds:
+"Run Fit Finder first to get a personalised comparison."
+
+#### Conversation anchor (future schema requirement)
+
+Conversations must be bound to `program_id`, not to `ai_finder_result_id`.
+A future migration must add `program_id uuid` (nullable, FK to `programs`) to `ai_conversations`,
+with a partial unique index on `(user_id, program_id) WHERE program_id IS NOT NULL`.
+
+Do not reuse saved-result chat by stuffing program context into `ai_finder_result_id`.
+That would corrupt the conversation anchor semantics and break cascade logic.
+
+#### What the advisor must refuse
+
+- Admission eligibility predictions ("Will I get in?", "Am I eligible?").
+- Visa outcome predictions.
+- Scholarship award predictions.
+- Claims about tuition, deadlines, or requirements not present in the DB row.
+- Comparisons to programs not in DegreeWiki data.
+- Rankings against external universities or programs.
+- Any invented fact not traceable to a DB field passed in context.
+
+#### When data is missing or unverified
+
+- If a requested field is null in the DB: "This detail is not currently available in
+  DegreeWiki's data. Please verify directly at the official program page."
+- No advisor may claim data is verified or current until `verified_at`, `source_confidence`,
+  or equivalent source/verification fields exist on the program row. Those fields do not exist
+  yet. Until they do, the advisor must not imply its data is authoritative or up to date.
+
+---
+
+### 18.2 Scholarship Page AI Advisor
+
+#### Allowed answers
+
+- Questions about the specific scholarship on the page: amount range, currency, eligibility
+  summary, application deadline — using only fields stored in the DB for that scholarship row.
+- Which degree levels, subjects, countries, or universities the scholarship is associated with,
+  via junction table data (once those tables are populated — currently deferred from Phase 07).
+- Where to find the official application — the `official_url` field only.
+- If the user is logged in and has a student profile: whether the scholarship's
+  `eligibility_summary` appears relevant to their profile fields (nationality, degree level,
+  subject). This is a soft, non-binding commentary — not an eligibility determination.
+
+#### Context the advisor may use
+
+- The single scholarship row (allowlisted public fields only; no internal UUIDs in the LLM prompt).
+- Associated junction data (subject, university, country, degree level) — once populated.
+- If the user is logged in: relevant student profile fields (degree level, subject, nationality)
+  for soft relevance commentary only.
+
+#### Login requirement
+
+Logged-in users only for profile-based relevance commentary.
+Future anonymous users may be allowed to ask basic factual questions about a scholarship, but
+implementation should include abuse controls and rate limits. This is not implemented in Phase 38.
+
+#### Student Profile requirement
+
+Not required. Works on scholarship data alone.
+Profile-based relevance commentary requires a logged-in user with a saved profile.
+
+#### Conversation anchor (future schema requirement)
+
+Conversations must be bound to `scholarship_id`, not to `ai_finder_result_id`.
+A future migration must add `scholarship_id uuid` (nullable, FK to `scholarships`) to
+`ai_conversations`, with a partial unique index on
+`(user_id, scholarship_id) WHERE scholarship_id IS NOT NULL`.
+
+Do not reuse saved-result chat by stuffing scholarship context into `ai_finder_result_id`.
+That would corrupt the conversation anchor semantics and break cascade logic.
+
+#### What the advisor must refuse
+
+- "Will I receive this scholarship?" — never.
+- Eligibility guarantees or definitive eligibility determinations.
+- Award predictions based on GPA, nationality, or any other criterion.
+- Claims about amounts, deadlines, or requirements not in the DB row.
+- Advice about how to write winning applications beyond directing to official guidance.
+- Any invented fact not traceable to a DB field passed in context.
+
+#### When eligibility data is missing or unverified
+
+- If `eligibility_summary` is null or junction tables are empty: "Detailed eligibility
+  information is not yet available in DegreeWiki. Please verify directly at [official_url]."
+- No advisor may claim scholarship data is verified or current until source/verification
+  fields exist on the scholarship row. Until they do, the advisor must not imply its data
+  is authoritative or up to date.
+
+---
+
+### 18.3 Shared AI Safety Rules (both advisors)
+
+These apply without exception to both the Program Page AI Advisor and the
+Scholarship Page AI Advisor, identical to existing saved-result chat safety rules.
+
+- No admission guarantees.
+- No visa guarantees.
+- No scholarship award guarantees.
+- No official, legal, or immigration advice.
+- No invented facts — every claim must trace to a DB field passed in context.
+- No searching outside DegreeWiki data. No web browsing. No external lookups.
+- Always direct users to verify important details with official sources.
+- `checkInput()` (existing guardrail) applies before any LLM call.
+- `checkOutput()` (existing guardrail) applies before returning any LLM response.
+- System prompt must scope the LLM to the specific program or scholarship context,
+  analogous to the 12-rule `SAVED_RESULT_SYSTEM_PROMPT` in `chat-answer.ts`.
+- Static routing (analogous to `routeChatMessage` in `router.ts`) must be extended or
+  replicated to handle greetings, thanks, guarantee requests, and out-of-scope messages
+  on the new surfaces before any LLM call is made.
+- User input placed only in the user turn — never interpolated into the system prompt.
+
+Safe wording required:
+- "Based on the DegreeWiki data for this program/scholarship..."
+- "Please verify this detail at the official source before making any decisions."
+
+Prohibited wording:
+- "You will be admitted."
+- "You are eligible for this scholarship."
+- "Your visa will be approved."
+- Any language implying certainty of outcome.
+
+---
+
+### 18.4 Required Future Schema, API, and Helper Needs
+
+These are not built in Phase 38. Listed here to prevent ad-hoc decisions later.
+
+#### Schema migrations (future)
+
+| Migration | Change |
+|---|---|
+| Program advisor migration | Add `program_id uuid` (nullable, FK `programs.id` ON DELETE CASCADE) to `ai_conversations`. Add partial unique index `(user_id, program_id) WHERE program_id IS NOT NULL`. Update RLS INSERT/UPDATE WITH CHECK to validate `program_id` ownership. |
+| Scholarship advisor migration | Add `scholarship_id uuid` (nullable, FK `scholarships.id` ON DELETE CASCADE) to `ai_conversations`. Add partial unique index `(user_id, scholarship_id) WHERE scholarship_id IS NOT NULL`. Update RLS INSERT/UPDATE WITH CHECK to validate `scholarship_id` ownership. |
+
+Both columns are nullable so existing conversations and future generic sessions are unaffected.
+The existing partial unique index for `ai_finder_result_id` is unchanged.
+
+#### API endpoints (future)
+
+- `POST /api/ai/program-chat` — new endpoint bound to `program_id`, analogous to `/api/ai/chat`.
+  Must not reuse `/api/ai/chat` by adding a mode switch that accepts `program_id` instead of
+  `ai_finder_result_id`. A dedicated endpoint keeps the ownership verification paths clean.
+- `POST /api/ai/scholarship-chat` — new endpoint bound to `scholarship_id`.
+
+#### Helpers (future, analogous to existing chat helpers)
+
+- `src/lib/ai/program/context.ts` — RLS-scoped program context loader.
+  Allowlists public fields; excludes internal UUIDs; returns null if program is not published.
+- `src/lib/ai/scholarship/context.ts` — RLS-scoped scholarship context loader.
+  Allowlists public fields; excludes internal UUIDs; returns null if scholarship is not published.
+- `src/lib/ai/program/persist.ts` — service-role message persistence for program chat.
+- `src/lib/ai/scholarship/persist.ts` — service-role message persistence for scholarship chat.
+- Prompt templates in `chat-answer.ts` — new `chatMode` values:
+  `'program_page'` and `'scholarship_page'` with their own scoped system prompts.
+
+---
+
+### 18.5 Deferral Decisions
+
+#### Defer until Data Source + Verification foundation exists
+
+- Any advisor commentary implying data is "verified", "current", or "accurate".
+  No `verified_at`, `source_confidence`, or `last_verified` fields exist on programs or
+  scholarships yet. The advisor must not imply data quality it cannot confirm.
+- Scholarship eligibility advice that depends on precise, verified eligibility criteria.
+- Program admission requirement accuracy claims (GPA cutoffs, language requirements are
+  sparse or unverified on most current rows).
+
+#### Defer until Import/Staging/data-quality foundation exists
+
+- Scholarship junction table population (subject, country, university, degree level
+  associations were deferred in Phase 07). The scholarship advisor cannot surface meaningful
+  eligibility context until these are populated.
+- Program field completeness. Tuition, deadline, and intake fields are sparse on current data.
+  An advisor built before data is populated will produce low-value responses.
+
+#### Defer until Student Profile support improves
+
+- Profile-based fit commentary for logged-in users beyond the current `student_profiles` fields.
+  Matching scholarship eligibility criteria to student nationality, funding needs, and academic
+  background requires profile fields that may not yet be reliably populated.
+
+#### Defer until chat context schema expands
+
+- All actual implementation of Program Page AI Advisor.
+  Blocked on: `ai_conversations.program_id` migration, new context loader, new API endpoint,
+  new prompt template, new UI component.
+- All actual implementation of Scholarship Page AI Advisor.
+  Blocked on: `ai_conversations.scholarship_id` migration, new context loader, new API endpoint,
+  new prompt template, new UI component, and junction table population.

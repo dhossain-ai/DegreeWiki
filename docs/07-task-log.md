@@ -78,6 +78,72 @@ None.
 
 ---
 
+## 2026-06-19 - Phase 38: Program + Scholarship Advisor Boundary Plan
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Define safe future product boundaries for a Program Page AI Advisor and a Scholarship Page
+AI Advisor before any implementation begins. Docs only — no src changes, no migrations,
+no API routes, no UI, no AI prompt changes, no router changes, no dependencies.
+
+---
+
+### Files Created
+
+None.
+
+---
+
+### Files Modified
+
+docs/09-ai-chat-architecture.md:
+  Replaced Phase 38 stub (optional multi-turn upgrade) with a pointer to the boundary spec.
+  Renamed deferred multi-turn upgrade to Phase 39.
+  Added Program Page AI Advisor and Scholarship Page AI Advisor to the Later phases list.
+  Appended Section 18: Phase 38 boundary specification (five subsections):
+    18.1 Program Page AI Advisor — allowed answers, context, login requirement, conversation
+         anchor requirement (future ai_conversations.program_id migration), refusals,
+         missing/unverified data behavior.
+    18.2 Scholarship Page AI Advisor — allowed answers, context, login requirement,
+         conversation anchor requirement (future ai_conversations.scholarship_id migration),
+         refusals, missing/unverified data behavior.
+    18.3 Shared AI safety rules — applies to both advisors without exception. No guarantees,
+         no invented facts, no out-of-scope data, checkInput/checkOutput required, static
+         routing required before LLM, user input never in system prompt.
+    18.4 Required future schema, API, and helper needs — program_id and scholarship_id
+         migration specs, dedicated API endpoints (/api/ai/program-chat,
+         /api/ai/scholarship-chat), context loaders, persist helpers, prompt template
+         chatMode extensions. Explicitly states neither advisor should reuse saved-result
+         chat by stuffing context into ai_finder_result_id.
+    18.5 Deferral decisions — what must wait for Data Source + Verification foundation,
+         Import/Staging/data-quality foundation, Student Profile improvements, and
+         chat context schema expansion.
+
+docs/06-status.md:
+  Added Phase 38 as current phase (complete, docs only).
+
+docs/07-task-log.md:
+  This entry.
+
+---
+
+### Checks
+
+No build step required — docs only.
+No src changes — no security greps required.
+
+---
+
+### Deviations from plan
+
+None. docs/04-ai-system.md was reviewed and required no changes.
+Anonymous user phrasing corrected per approval: framed as future design only,
+not as a currently implemented feature.
+
+---
+
 ## 2026-06-18 - Phase 36: Saved Result Chat Completion Bundle
 
 Tool:

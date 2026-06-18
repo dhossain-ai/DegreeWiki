@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 38 — Program + Scholarship Advisor Boundary Plan — complete (docs only).
+
 Phase 37 — AI Chat Routing + Static Response Bundle — complete.
 
 Phase 36 — Saved Result Chat Completion Bundle — complete.
