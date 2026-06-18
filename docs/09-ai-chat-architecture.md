@@ -228,7 +228,12 @@ policies are unchanged. `ai_messages` schema and RLS are unchanged.
 
 ## 7. Future Route and API Architecture
 
-### Page route
+> **Phase 34 update (2026-06-18):** Phase 34 implemented a JSON API endpoint
+> (`src/pages/api/ai/chat.ts`) instead of the same-page POST approach described below.
+> The `chat.astro` page route with PRG is deferred to a later phase.
+> See Section 16 Phase 34 for the implemented endpoint contract and security design.
+
+### Page route (planned — deferred to Phase 35+)
 
 ```
 src/pages/fit-finder/results/[id]/chat.astro
@@ -240,16 +245,15 @@ src/pages/fit-finder/results/[id]/chat.astro
 - Requires authentication (redirect to `/login?redirect=/fit-finder/results/{id}/chat` if not logged in)
 - UUID format validated before any DB query
 
-### POST handler strategy — same-page POST (preferred for MVP)
+### POST handler strategy — JSON API endpoint (Phase 34, implemented)
 
-The Astro page handles both GET and POST in its frontmatter, consistent with the pattern
-already used in `/fit-finder/results/index.astro`.
+Phase 34 implemented `src/pages/api/ai/chat.ts` as a standalone JSON API endpoint
+rather than a same-page POST handler. This is more composable: the future `chat.astro`
+page can fetch this endpoint and render the response without coupling form submission
+to AI execution in one Astro page file.
 
-- GET: load conversation history, render message list + input form
-- POST: process one new user message, persist, redirect (PRG pattern)
-
-No separate API endpoint file. No JSON responses. No streaming. Server renders the updated
-conversation on redirect.
+The same-page POST with PRG redirect (originally described here as preferred for MVP)
+is superseded for the API layer. The chat page UI remains deferred to Phase 35+.
 
 **No client-side streaming in MVP.**
 **No WebSocket.**
@@ -784,16 +788,93 @@ No migrations. No new npm dependencies. No React. No client-side JS.
 No changes to providers, env.ts, logging.ts, limits.ts, finder/persist.ts.
 No changes to any src/pages/* or src/components/* or src/layouts/* files.
 
-### Phase 34 — Chat route MVP
+### Phase 34 — Saved Result Chat API Endpoint Foundation (complete)
+
+JSON API endpoint for saved-result-bound AI chat. No chat UI, no chat page, no migrations,
+no new dependencies, no service-key expansion in pages/components/layouts.
+
+#### Files created (1)
+
+- `src/pages/api/ai/chat.ts` — authenticated POST handler for `/api/ai/chat`
+
+#### Files modified (1 in src)
+
+- `src/lib/ai/usage/limits.ts` — added `checkAIRateLimit(userId, sessionType, env)`
+  wrapper that encapsulates service-client creation from `AIRuntimeEnv` internally.
+  API routes call this helper rather than reading service-role secrets directly.
+
+#### Endpoint contract
+
+```
+POST /api/ai/chat
+Content-Type: application/json
+{ "ai_finder_result_id": "uuid", "message": "user question (1–1000 chars)" }
+```
+
+Success (HTTP 200):
+```json
+{ "ok": true, "answer": "assistant text", "conversation_id": "uuid" }
+```
+
+Errors: 400 (invalid_body, invalid_request, invalid_message, message_rejected),
+401 (unauthenticated), 404 (not_found), 429 (rate_limit_exceeded),
+503 (ai_unavailable), 500 (internal_error).
+
+Never returned: user_id, student_profile_id, ai_finder_result_id, model name,
+token counts, prompt text, or raw provider error details.
+
+#### Endpoint flow
+
+1. Parse JSON body — 400 on failure.
+2. Validate `ai_finder_result_id` (UUID regex) and `message` (1–1000 chars trimmed).
+3. `createClient(cookies, request)` → `getUser()` — 401 if no user.
+4. `getAIEnv(locals)` to extract Cloudflare Worker bindings.
+5. `checkAIRateLimit(user.id, 'chat', aiEnv)` — 429 on limit_exceeded; 503 on unavailable.
+6. `loadChatContext(resultId, supabase)` — RLS-scoped, no privileged access. 404 if null.
+7. `getOrCreateConversation({ userId, finderResultId }, aiEnv)` — 500 if null.
+8. Build `AIContext` from `chatContext.programs` (allowlisted public fields only, no UUIDs).
+9. `callAI({ sessionType: 'chat', chatMode: 'saved_result', ... }, aiEnv)`.
+10. `guardrailTripped` → 400 message_rejected with safe answer text.
+11. `fallbackUsed` → 503 ai_unavailable.
+12. Build `ContextUsedSnapshot` audit record.
+13. `persistChatTurn(...)` — failure logged server-side; answer still returned (200).
+14. Return `{ ok: true, answer, conversation_id }`.
+
+#### Security boundary
+
+- Authenticated: `getUser()` before any data or AI operation.
+- Context loaded via RLS: `loadChatContext` uses SSR client — no privileged access.
+- No client-controlled program IDs: programs come only from `loadChatContext`.
+- Only `conversation_id` in response — no internal UUIDs or model internals.
+- No raw AI provider errors: all failures return structured safe responses.
+- Input guardrail and system prompt rule 12 handle prompt injection attempts.
+- `src/pages/api/ai/chat.ts` contains no service-key strings and no privileged imports.
+  All service-role operations remain inside `src/lib/` as before.
+
+#### Rate limiting approach
+
+- `checkAIRateLimit` pre-checks before context load → clean 429/503 HTTP status.
+- `callAI` also checks internally (idempotent, fail-closed double-check).
+- Chat and finder share the same combined `AI_RATE_LIMIT_USER_DAILY` daily limit.
+- Limitation: a concurrent race at the rate limit boundary may return 503 instead of
+  429 (rate limit hit after pre-check passed but before callAI runs). Acceptable for MVP.
+
+#### Persistence degradation
+
+- `getOrCreateConversation` null → 500, no AI call.
+- AI fallback → no persistChatTurn call.
+- `persistChatTurn` returns false → server-side log only; answer still returned (200).
+- Usage logging inside `callAI` is fire-and-forget; failure silently ignored.
+
+### Phase 35 — Chat page MVP (planned)
 
 - Create `src/pages/fit-finder/results/[id]/chat.astro`
-- SSR GET + POST handler
-- Entry point on `/fit-finder/results/[id]`
-- Calls `loadChatContext`, `getOrCreateConversation`, `persistChatTurn` from Phase 33 helpers
-- Privacy page update bundled in this phase
-- Full security grep validation
+- SSR GET page: load conversation history from `ai_messages`, render message list + form
+- Form calls `POST /api/ai/chat` (Phase 34 endpoint)
+- Entry point on `/fit-finder/results/[id]` shown for `result_status === 'complete'`
+- Privacy page update (`/privacy` must mention stored chat sessions) bundled here
 
-### Phase 35 (optional) — Provider native multi-turn upgrade
+### Phase 36 (optional) — Provider native multi-turn upgrade
 
 - Update `GeminiProvider.complete()` to accept `messages: Array<{role, content}>` and
   use Gemini's `contents[]` multi-turn format natively
