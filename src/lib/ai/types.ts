@@ -26,6 +26,9 @@ export interface AIContext {
 // What enters the AI gateway from a server endpoint.
 export interface AIRequest {
   sessionType: AISessionType
+  // When sessionType === 'chat', set to 'saved_result' for context-bound saved-result chat.
+  // Omit for generic/future chat surfaces. Only used when sessionType === 'chat'.
+  chatMode?: 'saved_result'
   conversationId?: string
   userMessage: string
   context: AIContext
@@ -77,6 +80,47 @@ export interface AIUsageEntry {
 export interface AIGuardrailResult {
   passed: boolean
   reason?: string
+}
+
+// Compact public representation of one matched program for use in chat prompts.
+// All internal UUIDs are excluded. This is the LLM-facing shape — every field
+// here may appear in a prompt sent to the AI provider.
+export interface ChatResultProgram {
+  rank: number
+  title: string
+  university: string | null
+  country: string | null
+  city: string | null
+  degreeLevel: string | null
+  subject: string | null
+  tuitionSummary: string | null
+  officialUrl: string | null
+  matchReasons: string[]
+  warnings: string[]
+}
+
+// Server-side context for one saved-result chat session.
+// resultId is internal (used to create/find the conversation row) and must
+// never be sent to the AI provider. programs is the allowlisted LLM-facing data.
+export interface ChatResultContext {
+  resultId: string
+  programs: ChatResultProgram[]
+  studentProfile?: StudentProfileSummary
+}
+
+// Compact audit snapshot stored in ai_messages.context_used (jsonb).
+// This is a DB-side audit record — not sent to the LLM.
+// Internal IDs (ai_finder_result_id, conversation_id) are included here for
+// audit traceability; they never appear in the AI prompt itself.
+export interface ContextUsedSnapshot {
+  chatMode: 'saved_result'
+  promptTemplateVersion: string
+  safetyPolicyVersion: string
+  aiFinderResultId: string
+  conversationId: string
+  programsUsed: Array<{ rank: number; title: string; university: string | null }>
+  warningsIncluded: boolean
+  missingTuitionCount: number
 }
 
 // Server/worker runtime env vars consumed by the AI module.
