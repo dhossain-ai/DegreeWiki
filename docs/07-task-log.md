@@ -4,6 +4,163 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 32: AI Chat Schema Foundation
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add the missing database schema and RLS foundation required for future saved-result-bound
+AI chat. Migration-only phase — no chat UI, no chat route, no API endpoint, no AI calls,
+no source app behavior changes.
+
+---
+
+### Files Created
+
+supabase/migrations/016_ai_chat_schema.sql:
+
+  Migration adding ai_finder_result_id to ai_conversations plus RLS policy updates.
+
+  Step 1 — ADD COLUMN IF NOT EXISTS:
+    ai_conversations.ai_finder_result_id uuid (nullable)
+    REFERENCES public.ai_finder_results(id) ON DELETE CASCADE.
+    Nullable: existing rows and future generic chat sessions receive NULL.
+    ON DELETE CASCADE: deleting the parent ai_finder_results row cascades to
+      ai_conversations, which cascades further to ai_messages via the existing
+      ai_conversation_id ON DELETE CASCADE FK.
+
+  Step 2 — Lookup index:
+    CREATE INDEX IF NOT EXISTS idx_ai_conversations_finder_result_id
+      ON public.ai_conversations (ai_finder_result_id);
+
+  Step 3 — Partial unique index:
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_conversations_unique_user_finder_result
+      ON public.ai_conversations (user_id, ai_finder_result_id)
+      WHERE ai_finder_result_id IS NOT NULL;
+    Enforces one conversation per (user_id, ai_finder_result_id) pair when the result
+    link is set. NULL rows excluded from uniqueness — no constraint on generic conversations.
+
+  Step 4 — RLS policy update (ai_conversations_insert_own):
+    DROP POLICY IF EXISTS then CREATE POLICY with extended WITH CHECK:
+    Clause 1 (unchanged): user_id = auth.uid().
+    Clause 2 (unchanged): student_profile_id ownership — if set, must belong to
+      auth.uid() with is_anonymous = false.
+    Clause 3 (new): ai_finder_result_id ownership — if set, the linked
+      ai_finder_results row must belong to auth.uid() via the student_profiles
+      join chain (afr.student_profile_id → sp.user_id = auth.uid()).
+    Clause 4 (new, cross-field consistency): if both student_profile_id and
+      ai_finder_result_id are set, ai_finder_results.student_profile_id must
+      equal ai_conversations.student_profile_id. Prevents a conversation from
+      declaring one profile but linking to a result owned by a different profile.
+      Implemented as a RLS subquery; cannot use a table CHECK constraint because
+      PostgreSQL CHECK constraints do not support subqueries.
+
+  Step 4 — RLS policy update (ai_conversations_update_own):
+    DROP POLICY IF EXISTS then CREATE POLICY.
+    USING (user_id = auth.uid()) — unchanged.
+    WITH CHECK — identical to the new ai_conversations_insert_own WITH CHECK.
+
+  Unchanged policies: ai_conversations_select_own, ai_conversations_delete_own,
+    ai_conversations_select_super_admin, ai_conversations_delete_super_admin.
+  Unchanged tables/RLS: ai_messages, ai_finder_results, ai_finder_program_matches,
+    ai_usage_logs.
+
+  Idempotency: ADD COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS,
+    CREATE UNIQUE INDEX IF NOT EXISTS, DROP POLICY IF EXISTS — all safe for
+    supabase db reset replay.
+
+---
+
+### Files Modified
+
+docs/09-ai-chat-architecture.md:
+  Section 6 "Required Future Migration" retitled and updated to "Schema Foundation —
+    Completed in Phase 32". Documents the exact column, FK, indexes, and RLS changes
+    applied in migration 016. Documents the cross-field consistency check and why it is
+    a RLS subquery rather than a table CHECK constraint. Notes that chat UI/route/API
+    remain future work.
+  Section 10 (persistence): updated reference from "required migration" to "Phase 32
+    migration" and updated unique constraint reference to the partial unique index name.
+  Section 16 (future phases): Phase 32 entry updated from planned to complete with
+    specific migration and index names listed.
+
+docs/06-status.md:
+  Current phase updated from "Phase 32 — TBD" to "Phase 33 — TBD".
+  Phase 32 added to phase list.
+  Phase 32 completion block added to Last Completed Work section.
+
+docs/07-task-log.md (this file):
+  Phase 32 entry appended.
+
+---
+
+### Validation Results
+
+supabase db reset:
+  PASS — migrations 001–016 applied successfully.
+
+npm run build:
+  PASS (Cloudflare server build, zero errors).
+
+Schema verification:
+  ai_conversations.ai_finder_result_id: exists, nullable uuid — PASS.
+  FK REFERENCES ai_finder_results(id) ON DELETE CASCADE: present — PASS.
+  idx_ai_conversations_finder_result_id: present — PASS.
+  idx_ai_conversations_unique_user_finder_result: present,
+    partial WHERE ai_finder_result_id IS NOT NULL — PASS.
+  ai_conversations_insert_own: includes ai_finder_result_id ownership check
+    and cross-field consistency check — PASS.
+  ai_conversations_update_own: includes ai_finder_result_id ownership check
+    and cross-field consistency check — PASS.
+
+Security greps:
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts
+    → 0 matches — PASS.
+  createServiceClient in src/pages,src/components,src/layouts
+    → 0 matches — PASS.
+  callAI in src/pages,src/components
+    → 2 matches only in src/pages/fit-finder/result.astro (unchanged) — PASS.
+
+Route/API absence:
+  src/pages/fit-finder/results/[id]/chat.astro → does not exist — PASS.
+  src/pages/api/fit-finder → does not exist — PASS.
+
+---
+
+### Explicit Exclusions
+
+No chat UI. No chat route. No chat API endpoint. No AI calls. No callAI.
+No getAIEnv. No service_role reference in pages/components/layouts.
+No createServiceClient in pages/components/layouts.
+No src/lib/ai/* changes. No src/pages/* changes. No src/components/* changes.
+No src/layouts/* changes. No package.json changes. No new npm dependencies.
+No new migrations beyond 016. No service_role expansion. No admin UI.
+No public sharing. No matching algorithm changes. No AI gateway/provider/prompt/
+rate-limit/logging changes.
+
+---
+
+### Risks / Deviations
+
+Deviation from Phase 31 plan — unique index form:
+  Phase 31 plan mentioned both a table UNIQUE constraint (ADD CONSTRAINT form, noted in
+  docs/09-ai-chat-architecture.md) and a partial unique index as the preferred approach.
+  Phase 32 implemented the partial unique index form only, as approved. The architecture
+  doc Section 6 was updated to reflect the implemented form.
+
+Cross-field consistency check — added per implementation correction:
+  Phase 31 plan deferred the cross-field student_profile_id ↔ ai_finder_result_id
+  consistency check as optional. The approved implementation scope (Phase 32 correction)
+  required it. Both INSERT and UPDATE WITH CHECK include the subquery that verifies
+  ai_finder_results.student_profile_id = ai_conversations.student_profile_id when both
+  fields are set. Note: this is a RLS subquery, not a table CHECK constraint, because
+  PostgreSQL CHECK constraints cannot use subqueries.
+
+No risks or unexpected deviations encountered.
+
+---
+
 ## 2026-06-18 - Phase 31: AI Chat Architecture Plan
 
 Tool:

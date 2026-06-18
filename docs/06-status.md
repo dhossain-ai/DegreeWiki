@@ -4,7 +4,9 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 32 — TBD.
+Phase 33 — TBD.
+
+Phase 32 — AI Chat Schema Foundation — complete.
 
 Phase 31 — AI Chat Architecture Plan — complete.
 
@@ -19,6 +21,80 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 32 — AI Chat Schema Foundation (complete):
+
+- Migration-only phase. No chat UI, no chat route, no API endpoint, no AI calls,
+  no source app behavior changes, no new dependencies, no React, no client-side JS,
+  no service_role expansion, no admin UI, no public sharing, no matching algorithm changes.
+
+Migration deliverable:
+  supabase/migrations/016_ai_chat_schema.sql
+
+Column added:
+  ai_conversations.ai_finder_result_id uuid (nullable)
+  FK: REFERENCES public.ai_finder_results(id) ON DELETE CASCADE.
+  Nullable so existing conversations and future generic chat sessions are unaffected.
+  ON DELETE CASCADE: deleting a saved result cascades to its bound conversation and all
+    child ai_messages rows (via the existing ai_conversation_id ON DELETE CASCADE FK).
+
+Indexes added:
+  idx_ai_conversations_finder_result_id — lookup index on ai_finder_result_id.
+  idx_ai_conversations_unique_user_finder_result — partial unique index on
+    (user_id, ai_finder_result_id) WHERE ai_finder_result_id IS NOT NULL.
+    Enforces one conversation per (user, saved result) pair.
+    NULL rows excluded — multiple conversations without a linked result are allowed.
+
+RLS policies updated (drop and recreate):
+  ai_conversations_insert_own — WITH CHECK extended with:
+    1. ai_finder_result_id ownership: if set, the linked ai_finder_results row must
+       belong to auth.uid() via ai_finder_results.student_profile_id →
+       student_profiles.user_id = auth.uid().
+    2. Cross-field consistency: if both student_profile_id and ai_finder_result_id
+       are set, ai_finder_results.student_profile_id must equal
+       ai_conversations.student_profile_id. Implemented as a RLS subquery (not a
+       table CHECK constraint — PostgreSQL CHECK constraints cannot use subqueries).
+  ai_conversations_update_own — same WITH CHECK additions as INSERT.
+    USING (user_id = auth.uid()) unchanged.
+
+RLS policies unchanged:
+  ai_conversations_select_own, ai_conversations_delete_own,
+  ai_conversations_select_super_admin, ai_conversations_delete_super_admin.
+  ai_messages schema and RLS unchanged.
+  ai_finder_results, ai_finder_program_matches, ai_usage_logs unchanged.
+
+Explicit exclusions:
+  No chat route: src/pages/fit-finder/results/[id]/chat.astro — not created.
+  No chat API: src/pages/api/fit-finder — not created.
+  No src/lib/ai/* changes. No src/pages/* changes. No src/components/* changes.
+  No src/layouts/* changes. No callAI call. No getAIEnv call.
+  No service_role reference in pages/components/layouts.
+  No createServiceClient in pages/components/layouts.
+  No new npm dependencies. No new migrations beyond 016.
+
+Validation results:
+  supabase db reset: PASS — migrations 001–016 applied successfully.
+  npm run build: PASS (Cloudflare server build, zero errors).
+  ai_conversations.ai_finder_result_id: exists, nullable uuid.
+  FK to ai_finder_results(id) ON DELETE CASCADE: present.
+  idx_ai_conversations_finder_result_id: present.
+  idx_ai_conversations_unique_user_finder_result: present (partial WHERE ai_finder_result_id IS NOT NULL).
+  ai_conversations_insert_own and ai_conversations_update_own: include ai_finder_result_id
+    ownership check and cross-field consistency check.
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI in src/pages,src/components → 2 matches only in src/pages/fit-finder/result.astro (unchanged).
+  src/pages/fit-finder/results/[id]/chat.astro → does not exist.
+  src/pages/api/fit-finder → does not exist.
+
+Files created (1):
+  supabase/migrations/016_ai_chat_schema.sql
+
+Files modified (3):
+  docs/09-ai-chat-architecture.md — Section 6 updated to reflect Phase 32 resolution;
+    Section 10 updated; Section 16 marks Phase 32 as complete.
+  docs/06-status.md — this entry.
+  docs/07-task-log.md — Phase 32 entry appended.
 
 Phase 31 — AI Chat Architecture Plan (complete):
 

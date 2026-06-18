@@ -124,72 +124,105 @@ uniquely identify which saved result a conversation is about.
 
 ---
 
-## 6. Required Future Migration
+## 6. Schema Foundation — Completed in Phase 32
 
-Before any chat implementation, a migration must:
+The schema blocker identified in Phase 31 was resolved in Phase 32 via
+`supabase/migrations/016_ai_chat_schema.sql`. The migration is additive and contains
+no chat UI, route, API, or AI calls.
 
-### Add ai_finder_result_id to ai_conversations
+### Column added to ai_conversations
 
 ```sql
 ALTER TABLE public.ai_conversations
-  ADD COLUMN ai_finder_result_id uuid
+  ADD COLUMN IF NOT EXISTS ai_finder_result_id uuid
     REFERENCES public.ai_finder_results(id) ON DELETE CASCADE;
 ```
 
-`ON DELETE CASCADE` is correct: when the saved result is deleted, the linked conversation
-and its messages should also be deleted (the chat has no meaning without its result).
+`ON DELETE CASCADE`: deleting the parent `ai_finder_results` row cascades to the bound
+`ai_conversations` row, which cascades further to all `ai_messages` rows via the existing
+`ai_conversation_id ON DELETE CASCADE` FK. The chat has no meaning without its result.
 
-### Add unique constraint (one conversation per user + saved result)
+The column is **nullable**: existing conversations and future generic chat sessions do not
+require a linked saved result.
 
-```sql
-ALTER TABLE public.ai_conversations
-  ADD CONSTRAINT uq_ai_conversations_user_result
-    UNIQUE (user_id, ai_finder_result_id);
-```
-
-This enforces one persistent conversation thread per (user, saved result) pair.
-A user cannot accidentally create duplicate conversations for the same result.
-The constraint must allow NULLs in `ai_finder_result_id` (for non-result-scoped
-conversations in the future) — PostgreSQL UNIQUE ignores NULL values by default.
-
-### Update ai_conversations INSERT RLS to validate result ownership
-
-The existing `ai_conversations_insert_own` policy must be extended with an additional
-check: if `ai_finder_result_id` is set, the linked result must belong to `auth.uid()`
-via the `student_profiles` join.
+### Lookup index
 
 ```sql
--- Future policy update (conceptual — exact SQL for the migration phase):
-CREATE POLICY "ai_conversations_insert_own" ON public.ai_conversations
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    user_id = auth.uid()
-    AND (
-      student_profile_id IS NULL
-      OR EXISTS (
-        SELECT 1 FROM public.student_profiles sp
-        WHERE sp.id      = ai_conversations.student_profile_id
-          AND sp.user_id = auth.uid()
-          AND sp.is_anonymous = false
-      )
-    )
-    AND (
-      ai_finder_result_id IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM   public.ai_finder_results afr
-        JOIN   public.student_profiles  sp ON sp.id = afr.student_profile_id
-        WHERE  afr.id     = ai_conversations.ai_finder_result_id
-          AND  sp.user_id = auth.uid()
-      )
-    )
-  );
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_finder_result_id
+  ON public.ai_conversations (ai_finder_result_id);
 ```
 
-The same ownership check should be added to the `ai_conversations_update_own` policy.
+### Partial unique index (one conversation per user + saved result)
 
-**This migration is deferred to the future implementation phase.**
-Do not write or apply this migration in Phase 31.
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_conversations_unique_user_finder_result
+  ON public.ai_conversations (user_id, ai_finder_result_id)
+  WHERE ai_finder_result_id IS NOT NULL;
+```
+
+Enforces one persistent conversation thread per `(user_id, ai_finder_result_id)` pair
+when `ai_finder_result_id IS NOT NULL`. NULL rows (generic or anonymous conversations)
+are excluded from the uniqueness constraint. The explicit `WHERE` clause makes the intent
+unambiguous rather than relying on PostgreSQL's implicit NULL handling in UNIQUE constraints.
+
+### RLS policies updated
+
+`ai_conversations_insert_own` and `ai_conversations_update_own` were dropped and recreated
+with three new conditions in the WITH CHECK clause:
+
+**Condition 1 — ai_finder_result_id ownership:**
+If `ai_finder_result_id` is set, the referenced `ai_finder_results` row must belong to
+`auth.uid()` via `ai_finder_results.student_profile_id → student_profiles.user_id = auth.uid()`.
+Prevents linking a conversation to another user's saved result by guessing its UUID.
+
+**Condition 2 — Cross-field consistency:**
+If both `student_profile_id` and `ai_finder_result_id` are set, the referenced result's
+`student_profile_id` must equal the conversation's `student_profile_id`. Prevents a
+conversation from declaring one profile but linking to a result owned by a different profile.
+Implemented as a RLS subquery — not a table CHECK constraint because PostgreSQL CHECK
+constraints cannot use subqueries.
+
+**Condition 3 — student_profile_id ownership (unchanged from Phase 12):**
+If `student_profile_id` is set, it must belong to `auth.uid()` with `is_anonymous = false`.
+
+```sql
+-- Applies to both ai_conversations_insert_own and ai_conversations_update_own WITH CHECK:
+user_id = auth.uid()
+AND (
+  student_profile_id IS NULL
+  OR EXISTS (
+    SELECT 1 FROM public.student_profiles sp
+    WHERE sp.id           = ai_conversations.student_profile_id
+      AND sp.user_id      = auth.uid()
+      AND sp.is_anonymous = false
+  )
+)
+AND (
+  ai_finder_result_id IS NULL
+  OR EXISTS (
+    SELECT 1
+    FROM   public.ai_finder_results afr
+    JOIN   public.student_profiles  sp ON sp.id = afr.student_profile_id
+    WHERE  afr.id     = ai_conversations.ai_finder_result_id
+      AND  sp.user_id = auth.uid()
+  )
+)
+AND (
+  student_profile_id IS NULL
+  OR ai_finder_result_id IS NULL
+  OR EXISTS (
+    SELECT 1
+    FROM   public.ai_finder_results afr
+    WHERE  afr.id                 = ai_conversations.ai_finder_result_id
+      AND  afr.student_profile_id = ai_conversations.student_profile_id
+  )
+)
+```
+
+`ai_conversations_select_own`, `ai_conversations_delete_own`, and both super_admin
+policies are unchanged. `ai_messages` schema and RLS are unchanged.
+
+**Chat UI, chat route, chat API, and AI calls remain future work.** See Section 16.
 
 ---
 
@@ -381,9 +414,9 @@ FORMAT RULES:
 
 ### One conversation per user + saved result
 
-After the required migration adds `ai_finder_result_id` to `ai_conversations`, each
-(user, saved result) pair has at most one conversation thread (enforced by the
-`uq_ai_conversations_user_result` unique constraint).
+After the Phase 32 migration added `ai_finder_result_id` to `ai_conversations`, each
+(user, saved result) pair has at most one conversation thread (enforced by the partial
+unique index `idx_ai_conversations_unique_user_finder_result`).
 
 ### Conversation row creation
 
@@ -640,12 +673,17 @@ Proposed addition:
 
 These phases are not scheduled. They follow from this architecture document.
 
-### Phase 32 (or next AI phase) — Chat migration
+### Phase 32 — AI Chat Schema Foundation (complete)
 
-- Migration: add `ai_finder_result_id` to `ai_conversations`
-- Migration: add unique constraint `(user_id, ai_finder_result_id)`
-- Migration: update INSERT/UPDATE RLS WITH CHECK on `ai_conversations`
-- No UI yet
+- `supabase/migrations/016_ai_chat_schema.sql` applied.
+- Added `ai_finder_result_id uuid` (nullable) to `ai_conversations`, FK ON DELETE CASCADE.
+- Added lookup index `idx_ai_conversations_finder_result_id`.
+- Added partial unique index `idx_ai_conversations_unique_user_finder_result`
+  on `(user_id, ai_finder_result_id) WHERE ai_finder_result_id IS NOT NULL`.
+- Updated INSERT/UPDATE RLS WITH CHECK on `ai_conversations`:
+  ai_finder_result_id ownership validation via student_profiles join chain.
+  Cross-field consistency check when both student_profile_id and ai_finder_result_id are set.
+- No chat UI, no chat route, no API endpoint, no AI calls, no src/ changes.
 
 ### Phase 33 — Prompt hardening for saved-result chat
 
