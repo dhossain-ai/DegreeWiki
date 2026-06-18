@@ -4,6 +4,92 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 33: Context-Bound Chat Prompt + Server Helper Foundation
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Prepare server-only foundations for saved-result-bound AI chat.
+No chat UI, no public route, no API endpoint, no live user-facing chat.
+Deliverables: context loader helper, persistence helper, hardened prompt, type additions,
+guardrail additions, gateway wiring, documentation.
+
+---
+
+### Files Created
+
+src/lib/ai/chat/context.ts:
+  Server-only RLS-scoped context loader. No service role.
+  loadChatContext(resultId, supabase) accepts authenticated SSR client.
+  RLS enforces ownership. Returns null on missing/non-owned/non-complete result.
+  Builds ChatResultProgram[] from explicit allowlist. Top 10 programs max.
+
+src/lib/ai/chat/persist.ts:
+  Server-only service-role persistence helper.
+  getOrCreateConversation — finds or creates ai_conversations row, handles 23505 race.
+  persistChatTurn — inserts user + assistant ai_messages rows, updates last_message_at.
+  Never called from pages/components/layouts (Phase 34 route will call these).
+
+---
+
+### Files Modified
+
+src/lib/ai/types.ts:
+  Added ChatResultProgram, ChatResultContext, ContextUsedSnapshot.
+  Added chatMode?: 'saved_result' to AIRequest.
+
+src/lib/ai/gateway.ts:
+  Passes request.chatMode to buildChatPrompt in the chat branch (one-line change).
+
+src/lib/ai/prompts/chat-answer.ts:
+  Replaced with hardened buildChatPrompt(userMessage, context, chatMode?).
+  chatMode === 'saved_result': 12-rule context-bound system prompt.
+    Human-readable program block format (not raw JSON). Anti-injection rule 12.
+  chatMode undefined: original generic prompt preserved (backward-compatible).
+  Exports CHAT_SAVED_RESULT_PROMPT_VERSION for ContextUsedSnapshot audit.
+
+src/lib/ai/safety/guardrails.ts:
+  Input patterns added: ignore/disregard previous instructions (prompt injection).
+  Output patterns added: scholarship certainty, eligibility confirmation variants.
+  Exports GUARDRAILS_VERSION = 'guardrails-v2' for ContextUsedSnapshot audit.
+
+src/lib/supabase/service.ts:
+  Comment updated to list all approved server-only AI operations.
+
+docs/09-ai-chat-architecture.md:
+  Phase 33 entry added to Section 16 with full helper/prompt boundary documentation.
+
+docs/06-status.md:
+  Phase 33 completion entry added.
+
+docs/07-task-log.md:
+  This entry.
+
+---
+
+### Key Facts Confirmed
+
+result_status 'complete' — from migration 012 CHECK constraint + existing page code.
+ai_messages FK column: ai_conversation_id (not conversation_id).
+ai_conversations.session_type CHECK ('finder'|'chat') — uses 'chat'.
+ai_conversations.last_message_at: timestamptz, nullable.
+No ai_messages.updated_at column (append-only by design).
+
+---
+
+### Validation
+
+npm run build: PASS (Cloudflare server build, zero errors).
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts → 0.
+createServiceClient in pages/components/layouts → 0.
+chat/context|chat/persist in pages/components/layouts → 0.
+callAI in pages/components → 2 matches, both in fit-finder/result.astro (unchanged).
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/ → 0.
+No migration added. No new dependencies. No chat route. No API endpoint.
+
+---
+
 ## 2026-06-18 - Phase 32: AI Chat Schema Foundation
 
 Tool:

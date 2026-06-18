@@ -4,7 +4,7 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 33 — TBD.
+Phase 33 — Context-Bound Chat Prompt + Server Helper Foundation — complete.
 
 Phase 32 — AI Chat Schema Foundation — complete.
 
@@ -21,6 +21,105 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 33 — Context-Bound Chat Prompt + Server Helper Foundation (complete):
+
+- Server-only helper and prompt hardening phase. No chat route, no API endpoint, no chat UI,
+  no live user-facing AI chat, no migrations, no new dependencies, no React, no client-side JS,
+  no service_role expansion in pages/components/layouts.
+
+Files created (2):
+
+  src/lib/ai/chat/context.ts:
+    Server-only RLS-scoped context loader.
+    loadChatContext(resultId, supabase): Promise<ChatResultContext | null>
+    Accepts the caller's authenticated SSR Supabase client — no service role.
+    RLS enforces result ownership (student_profiles.user_id = auth.uid()).
+    Returns null when result not found, not owned by user, or result_status !== 'complete'.
+    Limits to top 10 matched programs (MAX_PROGRAMS_IN_CONTEXT).
+    Builds ChatResultProgram[] from explicit allowlist: rank, title, university, country,
+      city, degreeLevel, subject, tuitionSummary, officialUrl, matchReasons, warnings.
+    Internal UUIDs (program_id, ai_finder_result_id, score) never included.
+
+  src/lib/ai/chat/persist.ts:
+    Server-only service-role message persistence helper.
+    getOrCreateConversation(params, env): Promise<string | null>
+      Finds or creates ai_conversations row for (userId, finderResultId).
+      Handles unique-constraint race (code 23505) via retry-SELECT.
+      session_type: 'chat'. expires_at: null for logged-in users.
+    persistChatTurn(params, env): Promise<boolean>
+      Inserts user message row (role: 'user', no context_used, no token counts).
+      Inserts assistant message row (role: 'assistant', context_used snapshot, token counts).
+      Updates ai_conversations.last_message_at (best-effort; failure does not affect return value).
+      Returns false if either message INSERT fails.
+      Must only be called when callAI() returned fallbackUsed: false.
+    Confirmed exact column names from migration 012/016:
+      ai_conversation_id (FK), role, content, context_used, ai_model_used,
+      prompt_token_count, completion_token_count.
+
+Files modified (5):
+
+  src/lib/ai/types.ts:
+    Added ChatResultProgram — LLM-facing compact program shape, no internal UUIDs.
+    Added ChatResultContext — server-side chat session context (resultId + programs[]).
+    Added ContextUsedSnapshot — audit record for ai_messages.context_used (jsonb).
+      Fields: chatMode, promptTemplateVersion, safetyPolicyVersion,
+              aiFinderResultId, conversationId, programsUsed, warningsIncluded, missingTuitionCount.
+    Added chatMode?: 'saved_result' to AIRequest.
+
+  src/lib/ai/gateway.ts:
+    One-line change: passes request.chatMode to buildChatPrompt in the chat branch.
+
+  src/lib/ai/prompts/chat-answer.ts:
+    buildChatPrompt(userMessage, context, chatMode?) — backward-compatible.
+    chatMode === 'saved_result': 12-rule SAVED_RESULT_SYSTEM_PROMPT.
+      Programs formatted as human-readable structured block (not raw JSON).
+      Rule 12: model instructed to decline prompt injection attempts.
+      User input in user turn only — never interpolated into system prompt.
+    chatMode undefined: original generic behavior preserved.
+    Exports CHAT_SAVED_RESULT_PROMPT_VERSION = 'chat-saved-result-v1'.
+
+  src/lib/ai/safety/guardrails.ts:
+    Input patterns added (checked before LLM call):
+      ignore (all) (previous|prior|your) (instructions|rules|context|guidelines|constraints)
+      disregard (all) (previous|prior|your) (instructions|rules|context|guidelines|constraints)
+    Output patterns added (checked after LLM response):
+      you will (receive|get|be awarded) the scholarship
+      i can confirm (your) (eligibility|admission|acceptance)
+    Exports GUARDRAILS_VERSION = 'guardrails-v2'.
+
+  src/lib/supabase/service.ts:
+    Comment updated to reflect approved server-only AI operations:
+      usage logging, rate limiting, finder result persistence, chat conversation/message persistence.
+
+Schema/migration facts confirmed:
+  result_status 'complete' — confirmed from migration 012 CHECK constraint and all existing page code.
+  ai_messages FK column: ai_conversation_id (not conversation_id).
+  ai_conversations.session_type CHECK ('finder'|'chat'). Column: session_type.
+  ai_conversations.last_message_at: present, timestamptz, nullable.
+  No migration added in Phase 33.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, ~9s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  chat/context|chat/persist in src/pages,src/components,src/layouts → 0 matches.
+  callAI in src/pages,src/components → 2 matches only in src/pages/fit-finder/result.astro
+    (import + invocation, unchanged from Phase 32).
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/ → 0 matches.
+  src/pages/fit-finder/results/[id]/chat.astro → does not exist.
+  src/pages/api/fit-finder → does not exist.
+
+Explicit exclusions:
+  No chat route: src/pages/fit-finder/results/[id]/chat.astro — not created.
+  No chat API: src/pages/api/fit-finder — not created.
+  No callAI call in Phase 33 code. No getAIEnv call in Phase 33 code.
+  No service_role in pages/components/layouts.
+  No createServiceClient in pages/components/layouts.
+  No new npm dependencies. No migrations beyond 016.
+  No React. No client-side JS. No chat UI. No live user-facing chat.
+  No changes to providers, env.ts, logging.ts, limits.ts, finder/persist.ts.
+  No changes to src/pages/*, src/components/*, src/layouts/*.
 
 Phase 32 — AI Chat Schema Foundation (complete):
 
