@@ -4,7 +4,9 @@ Last updated: 2026-06-18
 
 ## Current Phase
 
-Phase 30 — TBD.
+Phase 31 — TBD.
+
+Phase 30 — Account/Profile Area Foundation — complete.
 
 Phase 29 — Fit Finder History Polish — complete.
 
@@ -15,6 +17,71 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 30 — Account/Profile Area Foundation (complete):
+
+- Added a simple authenticated account hub at /account for logged-in users.
+  No AI calls, no service_role, no schema changes, no matching algorithm changes,
+  no new dependencies, no React, no client-side JS, no admin UI, no public sharing.
+
+Route added:
+  /account — SSR page, noindex=true. Anonymous users redirect to
+    /login?redirect=/account. Auth gate via supabase.auth.getUser().
+    After gate, two lightweight RLS-safe queries run in Promise.all:
+      1. student_profiles SELECT id, eq is_anonymous false, limit 1
+         → profileExists boolean.
+      2. ai_finder_results SELECT id count head:true
+         → savedCount integer.
+    Both queries fail-safe: console.error server-only, defaults to false/0.
+    No user_id, student_profile_id, or internal UUIDs rendered in HTML.
+
+Account page links:
+  Fit Finder section:
+    Fit Finder preferences → /fit-finder
+      subtext: "Preferences saved" or "Not set up yet" from profileExists
+    Saved Fit Finder results → /fit-finder/results
+      subtext: "N saved result[s]" from savedCount
+    Run Fit Finder → /fit-finder/result
+  Browse section:
+    Browse programs → /programs
+  Privacy & trust section:
+    Privacy policy → /privacy, Terms → /terms, Disclaimer → /disclaimer
+  Account section:
+    Sign out → POST form to /api/auth/logout
+
+Homepage navigation:
+  Added "Account →" link to /account in the existing logged-in auth row
+  (src/pages/index.astro). No new auth query; homepage already calls
+  supabase.auth.getUser(). Account link is only visible when user is logged in.
+
+RLS-safe summary signals:
+  Fit Finder profile: student_profiles RLS (user_id = auth.uid()) enforces
+    ownership; no explicit user_id filter needed in page code.
+  Saved results count: ai_finder_results RLS (EXISTS on student_profiles.user_id =
+    auth.uid()) enforces ownership; count returns only the current user's rows.
+
+Explicit exclusions:
+  No AI calls. No callAI. No getAIEnv. No Gemini/OpenAI references in account route.
+  No service_role. No createServiceClient. No migrations. No new dependencies.
+  No React or client-side JS. No admin UI. No public sharing. No matching changes.
+  No persistence changes (no INSERT/UPDATE). No AI gateway/logging/rate-limit changes.
+  No /account/profile page. No /account/fit-finder page.
+  No changes to PublicNav, PublicLayout, fit-finder pages, or AI lib files.
+
+Files created (1):
+  src/pages/account.astro — account hub page
+
+Files modified (1 in src):
+  src/pages/index.astro — added "Account" link in logged-in auth row
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, 9.87s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts → 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts → 0 matches.
+  callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient|Gemini|OpenAI in
+    src/pages/account.astro → 0 matches.
+  callAI in src/pages,src/components → 2 matches, both in
+    src/pages/fit-finder/result.astro (import + invocation only, unchanged).
 
 Phase 29 — Fit Finder History Polish (complete):
 

@@ -4,6 +4,192 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-18 - Phase 30: Account/Profile Area Foundation
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add a simple authenticated account hub at /account. Logged-in users get one central
+destination for their DegreeWiki tools and privacy/account links. Anonymous users
+redirect to login. No AI calls, no service_role, no schema changes, no matching changes,
+no new dependencies, no React, no client-side JS.
+
+---
+
+### Files Created
+
+src/pages/account.astro:
+
+  Auth gate:
+    createClient(Astro.cookies, Astro.request) from src/lib/supabase/server.ts.
+    supabase.auth.getUser(). If no user → redirect to /login?redirect=/account.
+
+  RLS-safe queries (Promise.all after auth gate):
+    Query 1: student_profiles
+      .select('id').eq('is_anonymous', false).limit(1)
+      profileExists = (data?.length ?? 0) > 0
+      On error: console.error server-only; profileExists = false.
+      id field never rendered to HTML.
+
+    Query 2: ai_finder_results
+      .select('id', { count: 'exact', head: true })
+      savedCount = count ?? 0
+      On error: console.error server-only; savedCount = 0.
+      No result IDs or content rendered.
+
+  Rendered content:
+    PublicLayout with noindex={true}, title "Account — DegreeWiki".
+    H1: "Account".
+    Signed-in email (user.email) shown if non-null/undefined; omitted otherwise.
+    user.id not rendered. student_profile_id not rendered. No UUIDs in HTML.
+
+  Sections:
+    Fit Finder:
+      /fit-finder — "Preferences saved" or "Not set up yet"
+      /fit-finder/results — "N saved result[s]"
+      /fit-finder/result — Run Fit Finder
+    Browse:
+      /programs — Browse programs
+    Privacy & trust:
+      /privacy, /terms, /disclaimer
+    Account:
+      POST form → /api/auth/logout with "Sign out" button
+
+  Style: max-w-2xl card list layout consistent with existing public pages.
+  No client-side JS. No React. No AI imports.
+
+---
+
+### Files Modified
+
+src/pages/index.astro:
+
+  Added "Account" link to /account in the logged-in auth row only.
+  Link appears between "Signed in as [email]" and "Admin dashboard".
+  No new auth query; homepage already calls supabase.auth.getUser().
+  Anonymous auth row (Sign in link) unchanged.
+
+docs/06-status.md — Phase 30 completion entry; current phase updated to Phase 31.
+docs/07-task-log.md — this entry.
+
+---
+
+### Account Route Behavior
+
+GET /account (anonymous) → redirect to /login?redirect=/account.
+GET /account (logged-in) → renders account hub with email, summary signals, links.
+No POST handler on /account. Sign-out is a form POST to /api/auth/logout (existing endpoint).
+
+---
+
+### Profile/Account Data Shown
+
+- user.email — displayed to session owner only; not in title/meta/OG.
+- profileExists boolean — drives "Preferences saved" / "Not set up yet" label.
+- savedCount integer — drives "N saved result[s]" label.
+- No UUIDs, no user_id, no student_profile_id, no token counts, no model names.
+- No ai_usage_logs query. No service keys exposed.
+
+---
+
+### Homepage Navigation Change
+
+src/pages/index.astro: added <a href="/account">Account</a> in the logged-in auth row.
+Location: between "Signed in as [email]" span and "Admin dashboard" link.
+Visible only when user is truthy. Anonymous row unchanged.
+No new queries added to homepage.
+
+---
+
+### Query Strategy
+
+All queries use createClient(Astro.cookies, Astro.request) — SSR anon key, RLS-enforced.
+Auth gate fires before any DB query.
+Two content queries run in Promise.all after auth gate passes:
+  student_profiles: SELECT id, is_anonymous=false, limit 1 → profileExists.
+  ai_finder_results: SELECT id count head:true → savedCount.
+No user_id filter in page code; RLS handles ownership in both queries.
+No service_role. No service client. No joins beyond what RLS requires.
+On query error: safe fallback values; console.error server-side; page still renders.
+
+---
+
+### RLS/Security Behavior
+
+/account is noindex (not crawled, not indexed, not in sitemap).
+Auth gate: anonymous users never reach DB queries or rendered content.
+student_profiles RLS (user_id = auth.uid()) — SELECT scoped to session owner.
+ai_finder_results RLS (EXISTS student_profiles.user_id = auth.uid()) — count scoped
+  to session owner; if user has no student profile, count returns 0.
+user.email displayed only after auth gate passes; not exposed in title/meta/og tags.
+No UUID, user_id, student_profile_id, or session token rendered in HTML.
+No AI calls, no callAI import, no getAIEnv import, no service key references.
+Sign-out via POST to existing /api/auth/logout (no new endpoint created).
+
+---
+
+### Explicit Exclusions
+
+No AI calls. No callAI. No getAIEnv. No Gemini/OpenAI references in /account.
+No service_role. No createServiceClient. No migrations. No new dependencies.
+No React or client-side JS. No admin UI. No public sharing.
+No /account/profile sub-route. No /account/fit-finder sub-route.
+No matching algorithm changes. No persistence changes (no INSERT/UPDATE).
+No AI gateway, provider, prompt, logging, or rate-limit changes.
+No changes to PublicNav, PublicLayout, fit-finder pages, or src/lib/ai/* files.
+No ai_usage_logs query. No token counts, model usage, or cost fields shown.
+
+---
+
+### Build Result
+
+npm run build: PASS (Cloudflare server build, 9.87s, zero errors).
+
+---
+
+### Safety Grep Results
+
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts:
+  → 0 matches (expected).
+
+createServiceClient in src/pages,src/components,src/layouts:
+  → 0 matches (expected).
+
+callAI|getAIEnv|SUPABASE_SERVICE_ROLE_KEY|createServiceClient|Gemini|OpenAI
+  in src/pages/account.astro:
+  → 0 matches (expected).
+
+callAI in src/pages,src/components:
+  → 2 matches, both in src/pages/fit-finder/result.astro
+    (import line + invocation line, unchanged from Phase 29).
+
+---
+
+### Manual Test Checklist
+
+[ ] Anonymous GET /account → redirects to /login?redirect=/account.
+[ ] POST login with valid credentials from /login?redirect=/account → lands on /account.
+[ ] /account loads with "Account" heading.
+[ ] User email displays if available; no UUID visible in page source.
+[ ] Profile status: "Preferences saved" (if profile exists) or "Not set up yet".
+[ ] Fit Finder preferences link (/fit-finder) → works.
+[ ] Saved results link (/fit-finder/results) → works.
+[ ] Saved results count displays correct integer.
+[ ] Run Fit Finder link (/fit-finder/result) → works.
+[ ] Browse programs link (/programs) → works.
+[ ] Privacy policy link (/privacy) → works.
+[ ] Terms link (/terms) → works.
+[ ] Disclaimer link (/disclaimer) → works.
+[ ] Sign out button → POST /api/auth/logout → redirects to /login; session cleared.
+[ ] After sign-out, GET /account → redirects to /login?redirect=/account.
+[ ] Homepage logged-in auth row shows "Account" link.
+[ ] Homepage anonymous row (Sign in) does not show Account link.
+[ ] No AI call triggered from /account load.
+[ ] Existing Fit Finder pages still work.
+
+---
+
 ## 2026-06-18 - Phase 29: Fit Finder History Polish
 
 Tool:
