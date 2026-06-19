@@ -4,6 +4,99 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 50: Starter Content Activation Bundle
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+Fix import workflow bugs (fire-and-forget staging UPDATE; updateExistingUniversity
+not setting match_university_id; no link-to-production UI for staging universities),
+prepare verified Finland master's programme data, write 2 guide articles, update
+workflow docs, validate build and security, and commit. Operational import run
+(admin UI steps) to follow separately.
+
+---
+
+### Code Changes
+
+**importMerge.ts — fire-and-forget fix (all 4 merge functions):**
+Added error capture to staging UPDATE calls in `mergeUniversity`, `mergeScholarship`,
+`mergeArticle`, and `mergeProgram`. On failure: logs with `console.error`, returns
+`ok: true` with an optional `warning` string. Changed return type to include
+`warning?: string`.
+
+**importMerge.ts — updateExistingUniversity fix:**
+Removed early-exit "Nothing safe to patch" error. The function now proceeds to mark
+the staging row merged and sets `match_university_id: prodRow.id` regardless of
+whether any production field was patched. Staging UPDATE error is also captured and
+surfaced as a warning.
+
+**[id].astro — set_match_university_id action:**
+New POST action that writes only `staging_universities.match_university_id`. Validates:
+row UUID format, production UUID format, batch membership, approved status, production
+university existence. No production writes.
+
+**[id].astro — set_match_university_id UI:**
+Added a collapsible "Link to existing production university" form in the university row
+Actions column. Shown when `import_status === 'approved' && !match_university_id`.
+Accepts a UUID text input and submits to the new action. The create-new merge form
+remains visible in the same block.
+
+**[id].astro — mergeWarning banner:**
+Added yellow banner rendered from `?mergeWarning=` query param (after PRG redirect
+when merge returns `ok: true` but `warning` is set).
+
+**[id].astro — setMatchError banner:**
+Added amber error banner for `setMatchError` (POST-side failure from `set_match_university_id`).
+
+### Data Files Prepared
+
+- `data/starter/programs.phase50.json` — 13 verified English-taught Finland master's
+  programmes across all 8 Phase 49 universities. `degree_level_code: "master"` for all.
+  `staging_university_id` placeholders must be filled from batch detail page before import.
+  Tuition included for 6 programmes where officially confirmed (Aalto: 17000 EUR/year,
+  Tampere: 12000 EUR/year, JYU: 12000 EUR/year). No deadlines (change annually).
+
+- `data/starter/programs.phase50.sources.md` — Source URL documentation, UUID assignment
+  worksheet, per-university official page URLs, tuition verification notes, and post-merge
+  data source entry instructions.
+
+- `data/starter/articles.phase50.json` — 2 guide articles:
+  "Study in Finland: A Starter Guide for International Students"
+  (slug: `study-in-finland-starter-guide`, category: `country-guides`) and
+  "How to Compare English-Taught Master's Programmes in Finland"
+  (slug: `compare-english-masters-finland`, category: `program-guides`).
+  No data source attachment (no valid source_type for editorial content).
+  `article_category_id` must be set manually post-merge via admin article edit page.
+
+### Template and Docs Fixes
+
+- `data/import-templates/programs.example.json`: corrected `degree_level_code` from
+  `"masters"` (wrong) to `"master"` (correct per migration 015 seed data).
+- `docs/10-import-workflow.md`: same correction in field reference example; added
+  "Importing Programs Against Existing Production Universities" section (9-step workflow
+  for mixed-batch imports using set_match_university_id).
+
+### Exclusions
+
+- Scholarships excluded: Finnish government master's scholarships do not exist
+  (confirmed studyinfinland.fi). University scholarship pages not reachable at research time.
+- Article data sources excluded: `official_editorial` is not a valid source_type in the
+  schema (valid values: official_university, government, third_party, aggregator,
+  user_submitted).
+
+### Validation
+
+- npm run build: PASS (Server built in 10.56s, zero errors).
+- service_role in src/: 0 matches.
+- createServiceClient in src/pages, src/components, src/layouts: 0 matches.
+- innerHTML|set:html in src/: 0 matches.
+- PUBLIC_SUPABASE_SERVICE in src/: 0 matches.
+- git diff package.json: 0 lines (no dependency changes).
+
+---
+
 ## 2026-06-19 - Phase 49: Full Starter University Import + Activation
 
 Tool:

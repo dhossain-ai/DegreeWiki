@@ -105,6 +105,8 @@ function numericOrNull(s: string): number | null {
 let formError: string | null = null
 let reviewError: string | null = null
 let mergeError: string | null = null
+let mergeWarningPost: string | null = null
+let setMatchError: string | null = null
 let bulkImportError: string | null = null
 let qualityError: string | null = null
 
@@ -146,6 +148,9 @@ if (Astro.request.method === 'POST') {
           action: mergeAction,
         })
         if (result.ok) {
+          if (result.warning) {
+            return Astro.redirect(`/admin/imports/${b.id}?mergeWarning=${encodeURIComponent(result.warning)}`)
+          }
           return Astro.redirect(`/admin/imports/${b.id}`)
         }
         mergeError = result.error
@@ -458,6 +463,54 @@ if (Astro.request.method === 'POST') {
       console.error('[run_quality_checks] error:', err instanceof Error ? err.message : String(err))
       qualityError = 'Quality check failed. Please try again.'
     }
+  } else if (postAction === 'set_match_university_id') {
+    // Staging-only: links a staging_universities row to a production university UUID.
+    // No production writes. Validates batch membership and production record existence.
+    const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
+    const rawProdId = fd.get('production_university_id')?.toString().trim() ?? ''
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+    if (!uuidPattern.test(rawRowId)) {
+      setMatchError = 'Invalid staging row ID.'
+    } else if (!uuidPattern.test(rawProdId)) {
+      setMatchError = 'Invalid production university UUID. Enter a valid UUID.'
+    } else {
+      const { data: stagingRow, error: stagingErr } = await supabase
+        .from('staging_universities')
+        .select('id, import_status')
+        .eq('id', rawRowId)
+        .eq('import_batch_id', b.id)
+        .single()
+
+      if (stagingErr || !stagingRow) {
+        setMatchError = 'Staging university row not found in this batch.'
+      } else if ((stagingRow as { id: string; import_status: string }).import_status !== 'approved') {
+        setMatchError = 'Only approved staging rows can be linked to a production university.'
+      } else {
+        const { data: prodRow, error: prodErr } = await supabase
+          .from('universities')
+          .select('id')
+          .eq('id', rawProdId)
+          .single()
+
+        if (prodErr || !prodRow) {
+          setMatchError = 'Production university not found. Confirm the UUID is correct.'
+        } else {
+          const { error: linkErr } = await supabase
+            .from('staging_universities')
+            .update({ match_university_id: rawProdId })
+            .eq('id', rawRowId)
+            .eq('import_batch_id', b.id)
+
+          if (linkErr) {
+            console.error('[set_match_university_id] staging update failed:', linkErr.code, linkErr.message)
+            setMatchError = 'Failed to link staging row to production university. Please try again.'
+          } else {
+            return Astro.redirect(`/admin/imports/${b.id}`)
+          }
+        }
+      }
+    }
   } else {
     const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
 
@@ -584,6 +637,9 @@ if (Astro.request.method === 'POST') {
     }
   }
 }
+
+// ---- Merge warning (from PRG redirect query params) ----
+const mergeWarningParam = Astro.url.searchParams.get('mergeWarning')
 
 // ---- Bulk import summary (from PRG redirect query params) ----
 const importedParam = Astro.url.searchParams.get('imported')
@@ -845,6 +901,18 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
   {mergeError && (
     <div class="mb-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
       Merge failed: {mergeError}
+    </div>
+  )}
+
+  {mergeWarningParam && (
+    <div class="mb-4 rounded-md bg-yellow-50 border border-yellow-300 px-4 py-3 text-sm text-yellow-800">
+      <strong>Merge warning:</strong> {decodeURIComponent(mergeWarningParam)}
+    </div>
+  )}
+
+  {setMatchError && (
+    <div class="mb-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+      Link failed: {setMatchError}
     </div>
   )}
 
@@ -1169,20 +1237,41 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                     </form>
                   </details>
                   {row.import_status === 'approved' && !row.match_university_id && (
-                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
-                      <input type="hidden" name="_action" value="merge" />
-                      <input type="hidden" name="entity_type" value="universities" />
-                      <input type="hidden" name="row_id" value={row.id} />
-                      <input type="hidden" name="merge_action" value="create_new" />
-                      <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
-                      <label class="flex items-start gap-1.5 text-gray-600">
-                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
-                        <span>I confirm this creates a production record.</span>
-                      </label>
-                      <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                        Merge to Production
-                      </button>
-                    </form>
+                    <div class="mt-2 border-t border-gray-100 pt-2 space-y-3">
+                      <details>
+                        <summary class="cursor-pointer text-blue-600 hover:text-blue-800 text-xs">Link to existing production university…</summary>
+                        <form method="POST" class="mt-2 space-y-1.5">
+                          <input type="hidden" name="_action" value="set_match_university_id" />
+                          <input type="hidden" name="row_id" value={row.id} />
+                          <p class="text-gray-600 text-xs">Paste the production university UUID to link this staging row for update-existing merge. No production write occurs.</p>
+                          <input
+                            type="text"
+                            name="production_university_id"
+                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                            required
+                            class="block w-full rounded border border-gray-200 px-2 py-1 text-xs font-mono text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400"
+                          />
+                          <button type="submit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                            Link
+                          </button>
+                        </form>
+                      </details>
+                      <form method="POST" class="space-y-1.5">
+                        <input type="hidden" name="_action" value="merge" />
+                        <input type="hidden" name="entity_type" value="universities" />
+                        <input type="hidden" name="row_id" value={row.id} />
+                        <input type="hidden" name="merge_action" value="create_new" />
+                        <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
+                        <label class="flex items-start gap-1.5 text-gray-600">
+                          <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                          <span>I confirm this creates a production record.</span>
+                        </label>
+                        <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                          Merge to Production
+                        </button>
+                      </form>
+                    </div>
                   )}
                   {row.import_status === 'approved' && row.match_university_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">

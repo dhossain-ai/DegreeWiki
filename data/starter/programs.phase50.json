@@ -1,0 +1,99 @@
+[
+  {
+    "_university_name": "University of Helsinki",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Computer Science",
+    "degree_level_code": "master",
+    "language": "English"
+  },
+  {
+    "_university_name": "University of Helsinki",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Data Science",
+    "degree_level_code": "master",
+    "language": "English"
+  },
+  {
+    "_university_name": "Aalto University",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Computer, Communication and Information Sciences — Computer Science",
+    "degree_level_code": "master",
+    "language": "English",
+    "tuition_amount": 17000
+  },
+  {
+    "_university_name": "Aalto University",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Computer, Communication and Information Sciences — Machine Learning, Data Science and Artificial Intelligence",
+    "degree_level_code": "master",
+    "language": "English",
+    "tuition_amount": 17000
+  },
+  {
+    "_university_name": "Tampere University",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Computing Sciences — Data Science",
+    "degree_level_code": "master",
+    "language": "English",
+    "tuition_amount": 12000
+  },
+  {
+    "_university_name": "Tampere University",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Computing Sciences — Software, Systems and Internet",
+    "degree_level_code": "master",
+    "language": "English",
+    "tuition_amount": 12000
+  },
+  {
+    "_university_name": "University of Oulu",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Computer Science and Engineering",
+    "degree_level_code": "master",
+    "language": "English"
+  },
+  {
+    "_university_name": "University of Oulu",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Wireless Communications Engineering",
+    "degree_level_code": "master",
+    "language": "English"
+  },
+  {
+    "_university_name": "University of Turku",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Degree Programme in Information and Communication Technology",
+    "degree_level_code": "master",
+    "language": "English"
+  },
+  {
+    "_university_name": "University of Jyväskylä",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Degree Programme in Mathematical Information Technology — Artificial Intelligence",
+    "degree_level_code": "master",
+    "language": "English",
+    "tuition_amount": 12000
+  },
+  {
+    "_university_name": "University of Jyväskylä",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Degree Programme in Mathematical Information Technology — Cyber Security",
+    "degree_level_code": "master",
+    "language": "English",
+    "tuition_amount": 12000
+  },
+  {
+    "_university_name": "LUT University",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Programme in Software Engineering",
+    "degree_level_code": "master",
+    "language": "English"
+  },
+  {
+    "_university_name": "University of Vaasa",
+    "staging_university_id": "REPLACE_WITH_STAGING_UUID",
+    "title": "Master's Degree Programme in Computer Science — Cyber Security",
+    "degree_level_code": "master",
+    "language": "English"
+  }
+]

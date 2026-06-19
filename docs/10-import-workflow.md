@@ -105,7 +105,7 @@ Minimum operational fields:
 [
   {
     "title": "Example Master of Computing",
-    "degree_level_code": "masters",
+    "degree_level_code": "master",
     "staging_university_id": "00000000-0000-0000-0000-000000000000",
     "language": "English",
     "tuition_amount": 25000
@@ -165,6 +165,59 @@ Fields:
 - `slug`: required for merge. Must be lowercase URL-safe slug text.
 - `category`: optional text value. Category FK mapping is not automatic.
 - `content`: optional but recommended for article usefulness.
+
+## Importing Programs Against Existing Production Universities
+
+Programs require a merged staging university row (one with `match_university_id` set) in the
+same batch. When those universities already exist in production from a previous phase, follow
+this sequence to link them without creating duplicates.
+
+**Step 1 — Create a mixed batch.**
+Open `/admin/imports` and create a new batch with batch type `mixed`. This allows universities
+and programs to share a single batch so programs can reference their staging university UUIDs.
+
+**Step 2 — Import the university stubs.**
+Bulk-import the universities JSON into the mixed batch under the `universities` entity type.
+These rows arrive in `pending` or `validated` status.
+
+**Step 3 — Run quality checks.**
+Use the quality check action to detect possible production matches. Confirm that each staged
+university corresponds to an existing production university.
+
+**Step 4 — Link to production using set_match_university_id.**
+For each approved staging university row that matches an existing production record, expand the
+"Link to existing production university" form in the row's Actions column. Paste the production
+university's UUID and submit. The form writes only `staging_universities.match_university_id`;
+no production data is written. The UUID can be found on the university's admin edit page URL or
+from the production universities list.
+
+**Step 5 — Merge each university row using update_existing.**
+With `match_university_id` now set, use the "Update Existing" merge form. This marks the staging
+row as merged and optionally patches `official_url` if currently empty in production. No
+production fields are overwritten.
+
+**Step 6 — Note staging UUIDs.**
+After merge, the staging university rows are in `merged` status. Note the staging row UUID for
+each university. These UUIDs are what the programs JSON must reference in `staging_university_id`.
+
+**Step 7 — Fill staging UUIDs into the programs JSON.**
+Edit the programs JSON to replace placeholder `staging_university_id` values with the actual
+staging UUIDs from Step 6. The staging UUID is the row's `id` in `staging_universities`, not
+the production `match_university_id`.
+
+**Step 8 — Import programs.**
+Bulk-import the updated programs JSON into the same mixed batch under the `programs` entity type.
+The import validates that each `staging_university_id` belongs to the current batch and that the
+referenced staging university has `match_university_id` set.
+
+**Step 9 — Review and merge programs.**
+Approve each program row after manual review. Use the create-new merge form for each. Program
+merge resolves the linked staging university's `match_university_id` to get the production
+university UUID for the FK relationship.
+
+The `set_match_university_id` action is available only for universities and only for rows in
+`approved` status. It validates: the row belongs to the current batch, the row is not already
+merged, and the target production university UUID exists. It does not write any production data.
 
 ## Warning And Error Handling
 

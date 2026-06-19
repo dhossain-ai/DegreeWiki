@@ -27,7 +27,7 @@ export async function mergeApprovedRow(
     batchId: string
     action?: MergeAction
   }
-): Promise<{ ok: true; productionId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; productionId: string; warning?: string } | { ok: false; error: string }> {
   const { entityType, rowId, batchId, action = 'create_new' } = params
 
   if (!UUID_RE.test(rowId)) return { ok: false, error: 'Invalid row ID.' }
@@ -159,11 +159,20 @@ async function mergeUniversity(
 
   const productionId = (inserted as { id: string }).id
 
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_universities')
     .update({ import_status: 'merged', match_university_id: productionId })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] mergeUniversity: staging status update failed after production insert:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId,
+      warning: 'Production university created but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId }
 }
@@ -214,21 +223,28 @@ async function updateExistingUniversity(
     patches.official_url = row.extracted_official_url.trim()
   }
 
-  if (Object.keys(patches).length === 0) {
-    return {
-      ok: false,
-      error: 'Nothing safe to patch: production official_url is already set, or staging has no URL. Merge not applied.',
-    }
+  // Apply production patch only when there is something safe to update.
+  // If nothing to patch, proceed without patching — the staging row is still
+  // marked merged so downstream program imports can resolve match_university_id.
+  if (Object.keys(patches).length > 0) {
+    const { error: updateErr } = await supabase.from('universities').update(patches).eq('id', prodRow.id)
+    if (updateErr) return { ok: false, error: 'Failed to update production university. Please try again.' }
   }
 
-  const { error: updateErr } = await supabase.from('universities').update(patches).eq('id', prodRow.id)
-  if (updateErr) return { ok: false, error: 'Failed to update production university. Please try again.' }
-
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_universities')
-    .update({ import_status: 'merged' })
+    .update({ import_status: 'merged', match_university_id: prodRow.id })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] updateExistingUniversity: staging status update failed:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId: prodRow.id,
+      warning: 'Production university linked but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId: prodRow.id }
 }
@@ -313,11 +329,20 @@ async function mergeScholarship(
 
   const productionId = (inserted as { id: string }).id
 
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_scholarships')
     .update({ import_status: 'merged', match_scholarship_id: productionId })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] mergeScholarship: staging status update failed after production insert:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId,
+      warning: 'Production scholarship created but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId }
 }
@@ -382,11 +407,20 @@ async function updateExistingScholarship(
   const { error: updateErr } = await supabase.from('scholarships').update(patches).eq('id', prodRow.id)
   if (updateErr) return { ok: false, error: 'Failed to update production scholarship. Please try again.' }
 
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_scholarships')
     .update({ import_status: 'merged' })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] updateExistingScholarship: staging status update failed:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId: prodRow.id,
+      warning: 'Production scholarship patched but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId: prodRow.id }
 }
@@ -474,11 +508,20 @@ async function mergeArticle(
 
   const productionId = (inserted as { id: string }).id
 
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_articles')
     .update({ import_status: 'merged', match_article_id: productionId })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] mergeArticle: staging status update failed after production insert:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId,
+      warning: 'Production article created but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId }
 }
@@ -539,11 +582,20 @@ async function updateExistingArticle(
   const { error: updateErr } = await supabase.from('articles').update(patches).eq('id', prodRow.id)
   if (updateErr) return { ok: false, error: 'Failed to update production article. Please try again.' }
 
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_articles')
     .update({ import_status: 'merged' })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] updateExistingArticle: staging status update failed:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId: prodRow.id,
+      warning: 'Production article patched but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId: prodRow.id }
 }
@@ -718,11 +770,20 @@ async function mergeProgram(
 
   const productionId = (inserted as { id: string }).id
 
-  await supabase
+  const { error: stagingUpdateErr } = await supabase
     .from('staging_programs')
     .update({ import_status: 'merged', match_program_id: productionId })
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] mergeProgram: staging status update failed after production insert:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId,
+      warning: 'Production program created but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
 
   return { ok: true, productionId }
 }

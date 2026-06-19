@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 50 — Starter Content Activation Bundle — complete (code + data committed; operational import run pending).
+
 Phase 49 — Full Starter University Import + Activation — complete.
 
 Phase 48 — Starter University Data Pack — complete.
@@ -53,6 +55,93 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 50 — Starter Content Activation Bundle (code + data committed):
+
+- Fixed fire-and-forget staging UPDATE bug in all 4 merge functions
+  (`mergeUniversity`, `mergeScholarship`, `mergeArticle`, `mergeProgram`) in
+  `src/lib/admin/importMerge.ts`. Each now captures the error from the post-merge
+  staging status UPDATE and logs it with `console.error`. On failure, the merge
+  function returns `ok: true` (the production insert succeeded) with an optional
+  `warning` string surfaced to the admin in the batch detail page as a yellow banner
+  via the `?mergeWarning=` query param.
+
+- Fixed `updateExistingUniversity` in `importMerge.ts`:
+  No longer fails with "Nothing safe to patch" when `official_url` is already set
+  in production. Now proceeds to mark the staging row merged and set
+  `match_university_id` regardless of whether any production fields were patched.
+  Always sets `match_university_id: prodRow.id` on the staging row.
+
+- Added `set_match_university_id` POST action in
+  `src/pages/admin/imports/[id].astro`. Staging-only: validates row UUID, validates
+  production university UUID, confirms staging row belongs to the current batch,
+  confirms production university exists, writes only
+  `staging_universities.match_university_id`. No production writes.
+
+- Added corresponding UI in the university row Actions column: a collapsible "Link
+  to existing production university" form shown when `import_status === 'approved'`
+  and `match_university_id` is not set. The create-new merge form remains available
+  in the same block for rows that do not yet have a production match.
+
+- Added merge warning banner and `setMatchError` banner to `[id].astro`.
+
+- Prepared 13 verified Finland master's programme records in
+  `data/starter/programs.phase50.json` with `degree_level_code: "master"` and
+  `staging_university_id: REPLACE_WITH_STAGING_UUID` placeholders to fill in
+  during the operational import workflow.
+
+- Prepared source URL documentation in `data/starter/programs.phase50.sources.md`
+  including per-university official page URLs, tuition facts, UUID assignment
+  worksheet, and post-merge data source instructions.
+
+- Wrote 2 guide articles in `data/starter/articles.phase50.json`:
+  "Study in Finland: A Starter Guide for International Students"
+  (slug: `study-in-finland-starter-guide`) and
+  "How to Compare English-Taught Master's Programmes in Finland"
+  (slug: `compare-english-masters-finland`).
+
+- Fixed `degree_level_code` in `data/import-templates/programs.example.json` and
+  `docs/10-import-workflow.md` from wrong `"masters"` to correct `"master"`.
+
+- Added "Importing Programs Against Existing Production Universities" section to
+  `docs/10-import-workflow.md` documenting the 9-step workflow using
+  `set_match_university_id` for mixed-batch program imports against existing
+  production universities.
+
+- Scholarships excluded: Finnish government master's scholarships do not exist
+  per studyinfinland.fi; university-specific scholarship pages were not reachable.
+
+- No data source attachment for articles: `official_editorial` is not a valid
+  `source_type` in the schema. Article data source attachment deferred.
+
+- Article `article_category_id` must be set manually via the admin article edit
+  page after merge (the merge pipeline does not set it).
+
+Files created (3):
+  data/starter/programs.phase50.json
+  data/starter/programs.phase50.sources.md
+  data/starter/articles.phase50.json
+
+Files modified (5):
+  src/lib/admin/importMerge.ts
+  src/pages/admin/imports/[id].astro
+  data/import-templates/programs.example.json
+  docs/06-status.md
+  docs/07-task-log.md
+  docs/10-import-workflow.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 10.56s, zero errors).
+  service_role in src/: 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts: 0 matches (existing AI lib unchanged).
+  innerHTML|set:html in src/: 0 matches.
+  PUBLIC_SUPABASE_SERVICE in src/: 0 matches.
+  git diff package.json: 0 lines (no dependency changes).
+
+Operational import run (admin UI steps, not yet executed):
+  See docs/10-import-workflow.md section "Importing Programs Against Existing Production
+  Universities" for the full 9-step workflow. Programs.phase50.json staging UUIDs must be
+  filled in from the batch detail page before program import.
 
 Phase 49 — Full Starter University Import + Activation (complete):
 
