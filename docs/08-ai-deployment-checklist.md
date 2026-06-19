@@ -41,6 +41,23 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 
 ---
 
+## 3A. Local Development Notes
+
+- `astro dev`: server-only AI env vars may be placed in `.env.local`; `src/lib/ai/env.ts`
+  falls back to server-only `import.meta.env` only when Cloudflare runtime bindings are absent.
+- `wrangler pages dev`: use `.dev.vars` for `GEMINI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY`.
+- Never use the `PUBLIC_` prefix for Gemini or service-role secrets.
+- Never commit `.env.local`, `.dev.vars`, or `.dev.vars.*`.
+
+Example `.dev.vars`:
+
+```bash
+GEMINI_API_KEY=your_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_service_key_here
+```
+
+---
+
 ## 4. Cloudflare Setup Commands
 
 Use the command matching your deployment target. Enter the real value when prompted.

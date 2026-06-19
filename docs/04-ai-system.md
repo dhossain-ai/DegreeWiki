@@ -258,12 +258,14 @@ Insert errors are logged server-side via console.error and never re-thrown.
 getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv
 ```
 
-Extracts AI env vars from Cloudflare Workers locals.runtime.env.
-Call once per server endpoint, pass result to callAI().
+Extracts AI env vars from Cloudflare Workers `locals.runtime.env`.
+When those bindings are absent in local Astro server development, the helper
+may safely fall back to server-only `import.meta.env` values. Call once per
+server endpoint, pass result to `callAI()`.
 
-In @astrojs/cloudflare, Cloudflare secrets and bindings are available at
-locals.runtime.env — not import.meta.env. A safe cast is required because
-src/env.d.ts does not exist in this project.
+In `@astrojs/cloudflare`, Cloudflare secrets and bindings are available at
+`locals.runtime.env` — that remains the primary production path. A safe cast
+is required because `src/env.d.ts` does not exist in this project.
 
 Usage in a server endpoint:
 ```
@@ -323,30 +325,36 @@ This is required for Cloudflare Workers compatibility.
 
 ## Server-Only Secret Rules
 
-AI API keys must never use the PUBLIC_ prefix.
+AI API keys must never use the `PUBLIC_` prefix.
 
 Environment variables for the AI module:
 
 ```
-# Required secrets — set via wrangler secret, never as plain env vars
+# Required secrets — server-only, never exposed with PUBLIC_
 GEMINI_API_KEY             # Server/worker only. Required for AI to run.
-                            # Set via wrangler secret (see docs/08-ai-deployment-checklist.md).
+                            # Production Cloudflare: set in the Cloudflare dashboard
+                            # or via wrangler secret (see docs/08-ai-deployment-checklist.md).
 SUPABASE_SERVICE_ROLE_KEY  # Server/worker only. Required for AI to run.
                             # Used for rate-limit checks, usage logging, and saved-result
                             # persistence. If absent, all AI calls fail closed.
                             # Never use the PUBLIC_ prefix.
-                            # Set via wrangler secret (see docs/08-ai-deployment-checklist.md).
+                            # Production Cloudflare: set in the Cloudflare dashboard
+                            # or via wrangler secret (see docs/08-ai-deployment-checklist.md).
 
-# Optional env vars — set in Cloudflare Pages dashboard or wrangler.toml, not as secrets
+# Optional server/runtime env vars — set in Cloudflare Pages dashboard or wrangler.toml
 AI_PROVIDER             # Active provider name: gemini | openrouter (default: gemini)
 AI_MODEL                # Model string passed to provider (default: gemini-2.5-flash)
 AI_RATE_LIMIT_ANON_DAILY    # Max AI calls per anonymous session per day (default 5, not yet enforced)
 AI_RATE_LIMIT_USER_DAILY    # Max AI calls per logged-in user per day (default 20)
 ```
 
-In Cloudflare Workers, env vars are accessed via locals.runtime.env (typed as AIRuntimeEnv).
+In Cloudflare Workers, env vars are accessed via `locals.runtime.env`
+(typed as `AIRuntimeEnv`). In local Astro server development, the same
+server-only names may be provided via `.env.local` and read through the
+`getAIEnv()` fallback in `src/lib/ai/env.ts`.
 
-Never access AI env vars via import.meta.env.PUBLIC_* — that would expose them to the browser.
+Never access AI env vars via `import.meta.env.PUBLIC_*` — that would expose
+them to the browser.
 
 ## Prompt Safety Boundaries
 
@@ -555,14 +563,19 @@ dashboard:
 
 ### Local Dev Notes
 
-In local development with `wrangler pages dev`, AI runtime env vars are read from
-`locals.runtime.env` — not from `import.meta.env` and not from `.env`. Use `.dev.vars`
-(gitignored) to set secrets locally:
+For local Astro server development, server-only AI env vars may be placed in
+`.env.local` and are read through the server-only `getAIEnv()` fallback. Do not
+use any `PUBLIC_` prefix for Gemini or service-role keys, and do not commit
+`.env.local`.
+
+For local Cloudflare / `wrangler pages dev` testing, AI runtime env vars are read
+from `locals.runtime.env`. Use `.dev.vars` (gitignored) to set secrets locally:
 
 ```
 GEMINI_API_KEY=your_key_here
 SUPABASE_SERVICE_ROLE_KEY=your_service_key_here
 ```
 
-Never prefix secrets with `PUBLIC_`. Never commit `.dev.vars` or any file containing
-real secret values. See `docs/08-ai-deployment-checklist.md` for the full checklist.
+Never prefix secrets with `PUBLIC_`. Never commit `.env.local`, `.dev.vars`, or any
+file containing real secret values. See `docs/08-ai-deployment-checklist.md` for the
+full checklist.

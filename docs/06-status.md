@@ -1,8 +1,12 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 
 ## Current Phase
+
+Phase 51B — Student Dashboard + AI Entry Bundle — complete.
+
+Phase 51A — Student Signup + Account Entry Flow — complete.
 
 Phase 50 — Starter Content Activation Bundle — complete (code + data committed; operational import run pending).
 
@@ -55,6 +59,134 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 51B — Student Dashboard + AI Entry Bundle (complete):
+
+- Upgraded `src/pages/account.astro` from a settings-style account hub into a
+  student dashboard while keeping the route at `/account`. The page still
+  requires login, keeps logout unchanged, and now shows:
+  a student-dashboard header, a primary `Run Fit Finder` action card, Fit
+  Finder profile status, saved-results count, AI advisor status, a latest
+  saved-result card, and browse/support links.
+- The dashboard now queries the latest user-owned saved result and, when
+  available, detects existing AI chat history through normal SSR/RLS queries on
+  `ai_conversations` and `ai_messages`. It uses:
+  `Continue AI chat` only when prior message history exists;
+  otherwise it links to the same saved-result detail page with
+  `Ask AI about your latest result` / `Open AI advisor` wording.
+- Kept AI entry saved-result-bound. No new chat route, no open-ended chatbot,
+  no global floating AI, and no program-page AI chat were added.
+- Updated `src/components/ai/SavedResultChat.astro` copy so the saved-result
+  detail page more clearly surfaces the existing chat as `DegreeWiki AI Advisor`
+  with a tighter safety note.
+- Updated `src/pages/fit-finder/results/index.astro` so complete saved results
+  with matched programs also show an `Open AI advisor` action, reusing the same
+  result detail URL.
+- Updated `src/components/public/PublicNav.astro` so logged-in users now see a
+  `Dashboard` label pointing to `/account`. No public admin link was reintroduced.
+- Added safe local env cleanup:
+  `.gitignore` now ignores `.dev.vars` and `.dev.vars.*`;
+  `src/lib/ai/env.ts` still prioritizes Cloudflare `locals.runtime.env` but now
+  safely falls back to server-only `import.meta.env` for local Astro server dev
+  when runtime bindings are absent.
+- Updated `.env.example`, `docs/04-ai-system.md`, and
+  `docs/08-ai-deployment-checklist.md` to clarify:
+  never use `PUBLIC_` for Gemini/service-role secrets;
+  local Astro server development may use server-only `.env.local`;
+  Cloudflare / wrangler local testing should use `.dev.vars`;
+  do not commit `.env.local` or `.dev.vars`.
+- No schema migration. No new dependencies. No admin guard or RLS weakening.
+
+Files modified (9):
+  src/pages/account.astro
+  src/pages/fit-finder/results/index.astro
+  src/components/ai/SavedResultChat.astro
+  src/components/public/PublicNav.astro
+  src/lib/ai/env.ts
+  .gitignore
+  .env.example
+  docs/04-ai-system.md
+  docs/08-ai-deployment-checklist.md
+
+Files modified for status/logging (2):
+  docs/06-status.md
+  docs/07-task-log.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 4.42s, zero errors).
+  npm run check: not runnable in the current repo state; no `check` script is defined.
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient|PUBLIC_GEMINI|PUBLIC_.*GEMINI|PUBLIC_.*API_KEY
+    in src/pages,src/components,src/layouts: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE|PUBLIC_.*GEMINI|PUBLIC_.*API_KEY
+    in src/: 0 matches.
+
+Manual verification performed:
+  GET /account while logged out: 302 → /login?redirect=/account.
+  GET / homepage while logged out: 200; `Sign in` and `Get started` visible;
+    no public `Admin dashboard` text present.
+
+Manual verification not performed:
+  live signed-in dashboard rendering with a real student account
+  live saved-result dashboard states against real saved data
+  live `Continue AI chat` state with existing message history
+  live logout click-through and saved-result detail rendering with an authenticated user
+
+Phase 51A — Student Signup + Account Entry Flow (complete):
+
+- Added `src/pages/signup.astro` with email/password/confirm-password signup,
+  safe validation, an 8-character minimum password rule, a student-focused
+  heading, login link, and the approved sensitive-data warning.
+- Added shared auth redirect sanitization in `src/lib/auth/redirect.ts`.
+  The helper allows only internal single-slash paths and falls back to
+  `/account`.
+- Updated `src/pages/login.astro` to default successful login to `/account`
+  instead of `/admin`, redirect already-signed-in users to the sanitized
+  target or `/account`, add a `/signup` link, and replace raw provider errors
+  with safe user-facing messages.
+- Updated `src/pages/auth/callback.astro` to use the sanitized redirect target
+  after code exchange and fall back to `/login?auth=error` on callback failure
+  without exposing raw provider errors.
+- Updated shared public navigation in
+  `src/components/public/PublicNav.astro` so logged-out users see `Sign in`
+  and `Get started`, while signed-in users see `Account` and `Sign out`
+  through the existing POST `/api/auth/logout` flow.
+- Reused the existing `/account` route unchanged as the single student
+  destination after signup/login. No duplicate dashboard was added.
+- Removed the old homepage-only public auth/admin row from `src/pages/index.astro`
+  so public pages no longer advertise `Admin dashboard` to normal users.
+- No schema migration. No new dependencies. No service-role usage added in
+  pages/components/layouts. No admin guard or RLS weakening.
+
+Files created (2):
+  src/lib/auth/redirect.ts
+  src/pages/signup.astro
+
+Files modified (6):
+  src/pages/login.astro
+  src/pages/auth/callback.astro
+  src/components/public/PublicNav.astro
+  src/pages/index.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build complete, zero errors).
+  npm run check: not runnable in the current repo state; no `check` script is
+    defined, and `astro check` prompts for missing `@astrojs/check`. Left
+    unchanged because Phase 51A forbids new dependencies.
+  createServiceClient|SUPABASE_SERVICE_ROLE_KEY|PUBLIC_SUPABASE_SERVICE|service_role
+    in src/pages,src/components,src/layouts: 0 matches.
+
+Manual verification performed:
+  GET /signup: 200; heading, login link, and sensitive-data note present.
+  POST /signup with empty fields: safe validation message shown; no raw provider text.
+  POST /signup with mismatched passwords: safe validation message shown.
+  POST /login with bad credentials: safe `Invalid email or password.` message shown.
+  GET /account while logged out: 302 → /login?redirect=/account.
+  GET /admin while logged out: 302 → /login?redirect=%2Fadmin (existing guard intact).
+  GET /auth/callback with no code: 302 → /account.
+  GET /login?redirect=//evil.com: signup link falls back to `/account`; unsafe redirect absent.
+  GET / homepage: `/signup` entry present; no public `Admin dashboard` link.
 
 Phase 50 — Starter Content Activation Bundle (code + data committed):
 

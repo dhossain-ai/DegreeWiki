@@ -4,6 +4,221 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-20 - Phase 51B: Student Dashboard + AI Entry Bundle
+
+Tool:
+Codex (GPT-5)
+
+Goal:
+Upgrade `/account` into a real student dashboard landing page, surface the
+existing saved-result AI advisor without adding any new chat route, tighten the
+saved-results AI entry copy, and clean up local AI env guidance. No schema
+migration, no new dependencies, no service-role usage in pages/components/layouts,
+and no admin/RLS weakening.
+
+---
+
+### Code Changes
+
+**src/pages/account.astro:**
+Reworked `/account` into a student dashboard while keeping the route unchanged.
+Still requires login and still uses the normal SSR Supabase client.
+
+Added:
+- `Student Dashboard` header and signed-in email display
+- primary `Run Fit Finder` action card
+- three status cards:
+  - Fit Finder profile status
+  - saved results count
+  - AI advisor availability
+- latest-result card showing:
+  - created date
+  - matched-program count
+  - AI summary badge state
+  - latest top-program preview when available
+  - `View latest result`
+  - conditional `Open AI advisor` / `Continue AI chat`
+- browse/support links and the existing sign-out form
+
+Server-side dashboard queries now load:
+- own non-anonymous `student_profiles` existence
+- own `ai_finder_results` count
+- latest own saved result
+- rank-1 program preview for the latest result
+- existing conversation/message history for that latest result through SSR/RLS
+
+`Continue AI chat` is shown only when prior `ai_messages` rows exist for the
+latest result conversation. Otherwise the dashboard uses safe `Ask AI about your
+latest result` / `Open AI advisor` wording.
+
+**src/components/ai/SavedResultChat.astro:**
+Updated chat heading/copy so the saved-result page clearly surfaces the existing
+chat as `DegreeWiki AI Advisor`.
+
+Added:
+- heading: `DegreeWiki AI Advisor`
+- helper copy: `Ask follow-up questions about this saved Fit Finder result.`
+- stronger safety note clarifying the chat is DegreeWiki-context-bound and not
+  an admission, visa, or scholarship guarantee
+
+No API behavior changes.
+
+**src/pages/fit-finder/results/index.astro:**
+Added `Open AI advisor` action for complete saved results with matched programs,
+reusing the same `/fit-finder/results/[id]` detail page.
+
+**src/components/public/PublicNav.astro:**
+Changed the logged-in label from `Account` to `Dashboard` while keeping
+`href="/account"`. No public admin link was added.
+
+**src/lib/ai/env.ts:**
+Kept Cloudflare `locals.runtime.env` as the primary path, but added a safe
+server-only fallback to `import.meta.env` when runtime bindings are absent.
+This supports local Astro server development without exposing secrets to client code.
+
+**.gitignore:**
+Added:
+- `.dev.vars`
+- `.dev.vars.*`
+
+**.env.example, docs/04-ai-system.md, docs/08-ai-deployment-checklist.md:**
+Updated env guidance to document:
+- never use `PUBLIC_` for Gemini or service-role secrets
+- local Astro server development may use server-only `.env.local`
+- Cloudflare / `wrangler pages dev` should use `.dev.vars`
+- never commit `.env.local` or `.dev.vars`
+
+### Scope / Boundary Notes
+
+- `/account` was reused; no `/dashboard` route was created.
+- AI entry remains saved-result-bound.
+- No global chatbot.
+- No program-page AI chat.
+- No open-ended general chatbot.
+- No schema migration.
+- No new dependencies.
+- No changes to `src/lib/admin/guard.ts`.
+
+### Validation
+
+- `npm run build`: PASS.
+- `npm run check`: repo does not currently define a `check` script.
+- `service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient|PUBLIC_GEMINI|PUBLIC_.*GEMINI|PUBLIC_.*API_KEY`
+  in `src/pages`, `src/components`, `src/layouts`: 0 matches.
+- `PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE|PUBLIC_.*GEMINI|PUBLIC_.*API_KEY`
+  in `src/`: 0 matches.
+
+### Manual Verification
+
+Performed:
+- `GET /account` while logged out → `302 /login?redirect=/account`.
+- `GET /` while logged out → `200`; `Sign in` and `Get started` visible.
+- Confirmed no public `Admin dashboard` text on the homepage response.
+
+Not performed:
+- live signed-in dashboard rendering with a real student account
+- live latest-result/AI-advisor states against real user data
+- live saved-result detail page rendering with an authenticated result owner
+- live logout click-through in a signed-in browser session
+
+---
+
+## 2026-06-20 - Phase 51A: Student Signup + Account Entry Flow
+
+Tool:
+Codex (GPT-5)
+
+Goal:
+Implement a proper student signup flow, clean auth entry behavior, and public
+account navigation using the existing `/account` route as the single student
+destination. No schema migration, no new dependencies, no admin-gate changes,
+and no service-role usage in pages/components/layouts.
+
+---
+
+### Code Changes
+
+**src/lib/auth/redirect.ts:**
+Added shared `sanitizeAuthRedirect()` with fallback `/account`. It accepts only
+internal paths beginning with a single `/` and rejects empty, external, and
+protocol-relative redirect values.
+
+**src/pages/signup.astro:**
+Added new signup page with:
+- email, password, confirm-password fields
+- required-field validation
+- 8-character minimum password validation
+- password mismatch validation
+- safe generic error handling for Supabase signup
+- success split:
+  - active session → redirect to sanitized target or `/account`
+  - no active session → show check-email message and `/login` link
+- student-focused copy and approved sensitive-data warning
+
+**src/pages/login.astro:**
+Updated login flow so:
+- default redirect is `/account` instead of `/admin`
+- already-authenticated visits redirect to sanitized target or `/account`
+- `/signup` link is shown with the current safe redirect preserved
+- raw provider errors are replaced with safe messages only
+- optional `?auth=error` banner handles callback failures safely
+
+**src/pages/auth/callback.astro:**
+Updated callback handling to:
+- exchange the auth code as before
+- redirect to sanitized `?redirect=` target after success
+- redirect to `/login?auth=error` on callback failure without exposing raw error text
+- fall back to `/account` when no redirect is provided
+
+**src/components/public/PublicNav.astro:**
+Made the shared public nav auth-aware using the existing SSR Supabase client:
+- logged-out users see `Sign in` and `Get started`
+- signed-in users see `Account` and `Sign out`
+- sign-out uses the existing POST `/api/auth/logout` route
+- no public `Admin dashboard` link is shown
+
+**src/pages/index.astro:**
+Removed the old homepage-only auth/admin row because the shared nav now handles
+public auth entry globally. This also removes the misleading public `Admin dashboard`
+link for normal students.
+
+### Reuse / Scope Notes
+
+- Reused the existing `/account` route unchanged as the single student post-auth destination.
+- `/account` still requires login and still tolerates users with no `student_profiles` row.
+- No duplicate dashboard route was added.
+- No schema migration was created.
+- `src/lib/admin/guard.ts` was left unchanged.
+
+### Validation
+
+- `npm run build`: PASS.
+- `npm run check`: repo does not currently define a `check` script.
+- `astro check` was not installed/runnable without adding `@astrojs/check`; this was not added because Phase 51A forbids new dependencies.
+- `createServiceClient|SUPABASE_SERVICE_ROLE_KEY|PUBLIC_SUPABASE_SERVICE|service_role` in `src/pages`, `src/components`, `src/layouts`: 0 matches.
+
+### Manual Verification
+
+Used the local dev server and HTTP requests for a focused anonymous/manual pass:
+
+- `GET /signup` → 200; heading, login link, and sensitive-data warning present.
+- `POST /signup` with empty fields → safe validation message; no raw provider text.
+- `POST /signup` with mismatched passwords → safe validation message.
+- `POST /login` with bogus credentials → safe `Invalid email or password.` message; no raw provider text.
+- `GET /account` while logged out → `302 /login?redirect=/account`.
+- `GET /admin` while logged out → `302 /login?redirect=%2Fadmin` (existing admin gate unchanged).
+- `GET /auth/callback` with no code → `302 /account`.
+- `GET /login?redirect=//evil.com` → signup link falls back to `/account`; unsafe redirect not reflected.
+- `GET /` → public signup entry present; no `Admin dashboard` link visible.
+
+Not performed:
+- real successful signup/login redirect with a live account
+- email-confirmation completion path with a live mailbox
+- logged-in logout/account-nav checks
+- confirmed admin login with a real admin user
+
+---
+
 ## 2026-06-19 - Phase 50: Starter Content Activation Bundle
 
 Tool:
@@ -8718,4 +8933,3 @@ npm run build: PASS (Cloudflare server build, 10.18s, zero errors).
 7. Page refresh within 60s → same saved result UUID reused; no duplicate row.
 8. Saved results list → list, delete, redirect.
 9. Saved result detail → stored matches; stored AI summary if present; non-owner 404.
-
