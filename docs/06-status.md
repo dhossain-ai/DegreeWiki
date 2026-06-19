@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 42 — Staging Review + Safe Merge Planning Bundle — complete.
+
 Phase 41 — Manual Staged Record Entry + Validation Preview — complete.
 
 Phase 40 — Import / Staging Foundation Bundle — complete.
@@ -35,6 +37,56 @@ Phase 28 — AI Finder Production Hardening — complete.
 Phase 27 — Saved Finder Results Management — complete.
 
 Phase 26 — AI Finder Result Persistence — complete.
+
+## Last Completed Work
+
+Phase 42 — Staging Review + Safe Merge Planning Bundle (complete):
+
+- Migration 019: Added `skipped` to the `import_status` CHECK constraint on all four
+  staging tables (staging_universities, staging_programs, staging_scholarships,
+  staging_articles). Final allowed values: pending, processing, validated,
+  duplicate_detected, needs_review, approved, rejected, error, skipped.
+
+- New `src/lib/admin/importReview.ts`: `applyReviewAction()` helper. Validates entity
+  type (allowlist), review action (allowlist), row UUID, batch UUID. Fetches current
+  row status to block actions on `processing` or `error` rows. Maps actions to statuses:
+  approve→approved, reject→rejected, skip→skipped, reset→pending. Reset clears
+  review_notes, reviewed_by_user_id, reviewed_at. All other actions set reviewer fields.
+  Always scopes UPDATE with `.eq('import_batch_id', batchId)` — a row cannot be reviewed
+  across batch boundaries. No production table writes.
+
+- `/admin/imports/[id]`: Added `_action=review` POST branch. Reads entity_type, row_id,
+  review_action, review_notes from form; calls applyReviewAction; redirects on success
+  or shows inline reviewError banner on failure. SELECT queries updated to include
+  reviewed_by_user_id and reviewed_at. Added per-row "Actions" column to all four
+  staging tables: shows per-row validation warnings (from errsByRowId map), reviewed_at
+  timestamp if set, and an expandable review form with Approve/Reject/Skip/Reset buttons.
+  No merge buttons. No production write actions exposed.
+
+- Merge planning notes added to `docs/03-database-plan.md`: preconditions, merge modes
+  (create vs update), entity-specific field rules, verification_status defaults, why bulk
+  merge is deferred.
+
+No production merge implemented. No bulk approve. No CSV/XLSX/JSON upload.
+No AI extraction. No scraping. No background jobs. No duplicate matching.
+No public UI changes. No new npm dependencies. No service role in pages/components/layouts.
+No innerHTML/set:html.
+
+Files created (2):
+  supabase/migrations/019_add_skipped_status.sql
+  src/lib/admin/importReview.ts
+
+Files modified (3):
+  src/pages/admin/imports/[id].astro
+  docs/03-database-plan.md
+  docs/06-status.md, docs/07-task-log.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 8.65s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  innerHTML|set:html in pages/components: 0 matches.
 
 ## Last Completed Work
 

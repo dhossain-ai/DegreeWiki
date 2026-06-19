@@ -3,6 +3,7 @@ import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { requireSuperAdmin } from '../../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
+import { applyReviewAction } from '../../../lib/admin/importReview'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -89,128 +90,146 @@ function numericOrNull(s: string): number | null {
 }
 
 let formError: string | null = null
+let reviewError: string | null = null
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
-  const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+  const postAction = fd.get('_action')?.toString() ?? ''
 
-  if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
-    formError = 'Invalid entity type.'
+  if (postAction === 'review') {
+    const result = await applyReviewAction(supabase, {
+      entityType: fd.get('entity_type')?.toString().trim() ?? '',
+      rowId: fd.get('row_id')?.toString().trim() ?? '',
+      batchId: b.id,
+      action: fd.get('review_action')?.toString().trim() ?? '',
+      reviewNotes: fd.get('review_notes')?.toString() ?? '',
+      reviewerUserId: user.id,
+    })
+    if (result.ok) {
+      return Astro.redirect(`/admin/imports/${b.id}`)
+    }
+    reviewError = result.error
   } else {
-    const entityType = rawEntityType as StagedEntityType
+    const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
 
-    if (b.batch_type !== 'mixed' && b.batch_type !== entityType) {
-      formError = 'Entity type does not match this batch type.'
+    if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
+      formError = 'Invalid entity type.'
     } else {
-      const rawDataStr = fd.get('raw_data')?.toString() ?? ''
-      const rawDataResult = parseRawData(rawDataStr)
+      const entityType = rawEntityType as StagedEntityType
 
-      if (!rawDataResult.ok) {
-        formError = rawDataResult.error
+      if (b.batch_type !== 'mixed' && b.batch_type !== entityType) {
+        formError = 'Entity type does not match this batch type.'
       } else {
-        const rawData = rawDataResult.value
-        const pfx = ENTITY_PREFIX[entityType]
-        const fv = (key: string) => fd.get(`${pfx}${key}`)?.toString() ?? ''
+        const rawDataStr = fd.get('raw_data')?.toString() ?? ''
+        const rawDataResult = parseRawData(rawDataStr)
 
-        // Build values for validation (validator expects un-prefixed keys)
-        const vals: Record<string, string> = {
-          extracted_name: fv('extracted_name'),
-          extracted_country_code: fv('extracted_country_code'),
-          extracted_official_url: fv('extracted_official_url'),
-          extracted_title: fv('extracted_title'),
-          extracted_degree_level_code: fv('extracted_degree_level_code'),
-          extracted_language: fv('extracted_language'),
-          extracted_tuition_amount: fv('extracted_tuition_amount'),
-          extracted_deadline: fv('extracted_deadline'),
-          extracted_amount: fv('extracted_amount'),
-          extracted_slug: fv('extracted_slug'),
-          extracted_category: fv('extracted_category'),
-          extracted_content: fv('extracted_content'),
-        }
-
-        const { warnings } = validateStagedRecord(entityType, vals)
-        const importStatus = warnings.length === 0 ? 'validated' : 'pending'
-
-        let insertedId: string | null = null
-        let insertFailed = false
-
-        if (entityType === 'universities') {
-          const { data, error } = await supabase
-            .from('staging_universities')
-            .insert({
-              import_batch_id: b.id,
-              raw_data: rawData,
-              extracted_name: nullIfEmpty(vals.extracted_name),
-              extracted_country_code: nullIfEmpty(vals.extracted_country_code),
-              extracted_official_url: nullIfEmpty(vals.extracted_official_url),
-              import_status: importStatus,
-            })
-            .select('id')
-            .single()
-          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
-        } else if (entityType === 'programs') {
-          const { data, error } = await supabase
-            .from('staging_programs')
-            .insert({
-              import_batch_id: b.id,
-              raw_data: rawData,
-              extracted_title: nullIfEmpty(vals.extracted_title),
-              extracted_degree_level_code: nullIfEmpty(vals.extracted_degree_level_code),
-              extracted_language: nullIfEmpty(vals.extracted_language),
-              extracted_tuition_amount: numericOrNull(vals.extracted_tuition_amount),
-              extracted_deadline: nullIfEmpty(vals.extracted_deadline),
-              import_status: importStatus,
-            })
-            .select('id')
-            .single()
-          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
-        } else if (entityType === 'scholarships') {
-          const { data, error } = await supabase
-            .from('staging_scholarships')
-            .insert({
-              import_batch_id: b.id,
-              raw_data: rawData,
-              extracted_name: nullIfEmpty(vals.extracted_name),
-              extracted_amount: numericOrNull(vals.extracted_amount),
-              extracted_deadline: nullIfEmpty(vals.extracted_deadline),
-              import_status: importStatus,
-            })
-            .select('id')
-            .single()
-          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+        if (!rawDataResult.ok) {
+          formError = rawDataResult.error
         } else {
-          const { data, error } = await supabase
-            .from('staging_articles')
-            .insert({
-              import_batch_id: b.id,
-              raw_data: rawData,
-              extracted_title: nullIfEmpty(vals.extracted_title),
-              extracted_slug: nullIfEmpty(vals.extracted_slug),
-              extracted_category: nullIfEmpty(vals.extracted_category),
-              extracted_content: nullIfEmpty(vals.extracted_content),
-              import_status: importStatus,
-            })
-            .select('id')
-            .single()
-          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
-        }
+          const rawData = rawDataResult.value
+          const pfx = ENTITY_PREFIX[entityType]
+          const fv = (key: string) => fd.get(`${pfx}${key}`)?.toString() ?? ''
 
-        if (insertFailed) {
-          formError = 'Failed to insert staged record. Please try again.'
-        } else if (insertedId) {
-          if (warnings.length > 0) {
-            const rowId = insertedId
-            await supabase.from('staging_errors').insert(
-              warnings.map(w => ({
-                import_batch_id: b.id,
-                staging_table: STAGING_TABLE_NAME[entityType],
-                staging_row_id: rowId,
-                error_type: 'validation_warning',
-                error_message: w,
-              }))
-            )
+          // Build values for validation (validator expects un-prefixed keys)
+          const vals: Record<string, string> = {
+            extracted_name: fv('extracted_name'),
+            extracted_country_code: fv('extracted_country_code'),
+            extracted_official_url: fv('extracted_official_url'),
+            extracted_title: fv('extracted_title'),
+            extracted_degree_level_code: fv('extracted_degree_level_code'),
+            extracted_language: fv('extracted_language'),
+            extracted_tuition_amount: fv('extracted_tuition_amount'),
+            extracted_deadline: fv('extracted_deadline'),
+            extracted_amount: fv('extracted_amount'),
+            extracted_slug: fv('extracted_slug'),
+            extracted_category: fv('extracted_category'),
+            extracted_content: fv('extracted_content'),
           }
-          return Astro.redirect(`/admin/imports/${b.id}`)
+
+          const { warnings } = validateStagedRecord(entityType, vals)
+          const importStatus = warnings.length === 0 ? 'validated' : 'pending'
+
+          let insertedId: string | null = null
+          let insertFailed = false
+
+          if (entityType === 'universities') {
+            const { data, error } = await supabase
+              .from('staging_universities')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: rawData,
+                extracted_name: nullIfEmpty(vals.extracted_name),
+                extracted_country_code: nullIfEmpty(vals.extracted_country_code),
+                extracted_official_url: nullIfEmpty(vals.extracted_official_url),
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+          } else if (entityType === 'programs') {
+            const { data, error } = await supabase
+              .from('staging_programs')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: rawData,
+                extracted_title: nullIfEmpty(vals.extracted_title),
+                extracted_degree_level_code: nullIfEmpty(vals.extracted_degree_level_code),
+                extracted_language: nullIfEmpty(vals.extracted_language),
+                extracted_tuition_amount: numericOrNull(vals.extracted_tuition_amount),
+                extracted_deadline: nullIfEmpty(vals.extracted_deadline),
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+          } else if (entityType === 'scholarships') {
+            const { data, error } = await supabase
+              .from('staging_scholarships')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: rawData,
+                extracted_name: nullIfEmpty(vals.extracted_name),
+                extracted_amount: numericOrNull(vals.extracted_amount),
+                extracted_deadline: nullIfEmpty(vals.extracted_deadline),
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+          } else {
+            const { data, error } = await supabase
+              .from('staging_articles')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: rawData,
+                extracted_title: nullIfEmpty(vals.extracted_title),
+                extracted_slug: nullIfEmpty(vals.extracted_slug),
+                extracted_category: nullIfEmpty(vals.extracted_category),
+                extracted_content: nullIfEmpty(vals.extracted_content),
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+          }
+
+          if (insertFailed) {
+            formError = 'Failed to insert staged record. Please try again.'
+          } else if (insertedId) {
+            if (warnings.length > 0) {
+              const rowId = insertedId
+              await supabase.from('staging_errors').insert(
+                warnings.map(w => ({
+                  import_batch_id: b.id,
+                  staging_table: STAGING_TABLE_NAME[entityType],
+                  staging_row_id: rowId,
+                  error_type: 'validation_warning',
+                  error_message: w,
+                }))
+              )
+            }
+            return Astro.redirect(`/admin/imports/${b.id}`)
+          }
         }
       }
     }
@@ -226,6 +245,8 @@ type StagingUniversity = {
   extracted_official_url: string | null
   import_status: string
   review_notes: string | null
+  reviewed_by_user_id: string | null
+  reviewed_at: string | null
   raw_data: Record<string, unknown>
   created_at: string
 }
@@ -235,6 +256,8 @@ type StagingProgram = {
   extracted_degree_level_code: string | null
   import_status: string
   review_notes: string | null
+  reviewed_by_user_id: string | null
+  reviewed_at: string | null
   raw_data: Record<string, unknown>
   created_at: string
 }
@@ -244,6 +267,8 @@ type StagingScholarship = {
   extracted_amount: number | null
   import_status: string
   review_notes: string | null
+  reviewed_by_user_id: string | null
+  reviewed_at: string | null
   raw_data: Record<string, unknown>
   created_at: string
 }
@@ -254,6 +279,8 @@ type StagingArticle = {
   extracted_category: string | null
   import_status: string
   review_notes: string | null
+  reviewed_by_user_id: string | null
+  reviewed_at: string | null
   raw_data: Record<string, unknown>
   created_at: string
 }
@@ -276,7 +303,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showUniversities
     ? supabase
         .from('staging_universities')
-        .select('id, extracted_name, extracted_country_code, extracted_official_url, import_status, review_notes, raw_data, created_at')
+        .select('id, extracted_name, extracted_country_code, extracted_official_url, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -284,7 +311,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showPrograms
     ? supabase
         .from('staging_programs')
-        .select('id, extracted_title, extracted_degree_level_code, import_status, review_notes, raw_data, created_at')
+        .select('id, extracted_title, extracted_degree_level_code, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -292,7 +319,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showScholarships
     ? supabase
         .from('staging_scholarships')
-        .select('id, extracted_name, extracted_amount, import_status, review_notes, raw_data, created_at')
+        .select('id, extracted_name, extracted_amount, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -300,7 +327,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showArticles
     ? supabase
         .from('staging_articles')
-        .select('id, extracted_title, extracted_slug, extracted_category, import_status, review_notes, raw_data, created_at')
+        .select('id, extracted_title, extracted_slug, extracted_category, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -318,6 +345,15 @@ const stagingPrograms = (progResult.data ?? []) as StagingProgram[]
 const stagingScholarships = (scholResult.data ?? []) as StagingScholarship[]
 const stagingArticles = (artResult.data ?? []) as StagingArticle[]
 const stagingErrors = (errResult.data ?? []) as StagingError[]
+
+const errsByRowId = new Map<string, StagingError[]>()
+for (const e of stagingErrors) {
+  if (e.staging_row_id) {
+    const existing = errsByRowId.get(e.staging_row_id) ?? []
+    existing.push(e)
+    errsByRowId.set(e.staging_row_id, existing)
+  }
+}
 
 const totalStaged = stagingUniversities.length + stagingPrograms.length + stagingScholarships.length + stagingArticles.length
 
@@ -380,6 +416,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
       <span class="text-xs text-gray-400 font-mono">{b.id}</span>
     </div>
   </div>
+
+  {reviewError && (
+    <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      Review action failed: {reviewError}
+    </div>
+  )}
 
   <!-- Add staged record form -->
   <details class="mb-6 rounded-lg border border-gray-200 bg-white" {...(formError !== null ? { open: true } : {})}>
@@ -547,6 +589,7 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
               <th class="px-4 py-3">URL</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Actions</th>
               <th class="px-4 py-3">Raw Data</th>
             </tr>
           </thead>
@@ -566,6 +609,33 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   </span>
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-3 py-3 text-xs min-w-[190px]">
+                  {(errsByRowId.get(row.id) ?? []).length > 0 && (
+                    <div class="mb-1.5 space-y-0.5">
+                      {(errsByRowId.get(row.id) ?? []).map(e => (
+                        <p class="text-orange-600">{e.error_message}</p>
+                      ))}
+                    </div>
+                  )}
+                  {row.reviewed_at && (
+                    <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
+                  )}
+                  <details>
+                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
+                    <form method="POST" class="mt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="review" />
+                      <input type="hidden" name="entity_type" value="universities" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      <div class="flex flex-wrap gap-1">
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
+                        <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
+                        <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
+                      </div>
+                    </form>
+                  </details>
+                </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
                     <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
@@ -591,6 +661,7 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
               <th class="px-4 py-3">Degree Level</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Actions</th>
               <th class="px-4 py-3">Raw Data</th>
             </tr>
           </thead>
@@ -605,6 +676,33 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   </span>
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-3 py-3 text-xs min-w-[190px]">
+                  {(errsByRowId.get(row.id) ?? []).length > 0 && (
+                    <div class="mb-1.5 space-y-0.5">
+                      {(errsByRowId.get(row.id) ?? []).map(e => (
+                        <p class="text-orange-600">{e.error_message}</p>
+                      ))}
+                    </div>
+                  )}
+                  {row.reviewed_at && (
+                    <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
+                  )}
+                  <details>
+                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
+                    <form method="POST" class="mt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="review" />
+                      <input type="hidden" name="entity_type" value="programs" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      <div class="flex flex-wrap gap-1">
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
+                        <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
+                        <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
+                      </div>
+                    </form>
+                  </details>
+                </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
                     <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
@@ -630,6 +728,7 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
               <th class="px-4 py-3">Amount</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Actions</th>
               <th class="px-4 py-3">Raw Data</th>
             </tr>
           </thead>
@@ -644,6 +743,33 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   </span>
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-3 py-3 text-xs min-w-[190px]">
+                  {(errsByRowId.get(row.id) ?? []).length > 0 && (
+                    <div class="mb-1.5 space-y-0.5">
+                      {(errsByRowId.get(row.id) ?? []).map(e => (
+                        <p class="text-orange-600">{e.error_message}</p>
+                      ))}
+                    </div>
+                  )}
+                  {row.reviewed_at && (
+                    <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
+                  )}
+                  <details>
+                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
+                    <form method="POST" class="mt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="review" />
+                      <input type="hidden" name="entity_type" value="scholarships" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      <div class="flex flex-wrap gap-1">
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
+                        <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
+                        <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
+                      </div>
+                    </form>
+                  </details>
+                </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
                     <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
@@ -670,6 +796,7 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
               <th class="px-4 py-3">Category</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Actions</th>
               <th class="px-4 py-3">Raw Data</th>
             </tr>
           </thead>
@@ -685,6 +812,33 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   </span>
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-3 py-3 text-xs min-w-[190px]">
+                  {(errsByRowId.get(row.id) ?? []).length > 0 && (
+                    <div class="mb-1.5 space-y-0.5">
+                      {(errsByRowId.get(row.id) ?? []).map(e => (
+                        <p class="text-orange-600">{e.error_message}</p>
+                      ))}
+                    </div>
+                  )}
+                  {row.reviewed_at && (
+                    <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
+                  )}
+                  <details>
+                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
+                    <form method="POST" class="mt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="review" />
+                      <input type="hidden" name="entity_type" value="articles" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      <div class="flex flex-wrap gap-1">
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
+                        <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
+                        <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
+                      </div>
+                    </form>
+                  </details>
+                </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
                     <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>

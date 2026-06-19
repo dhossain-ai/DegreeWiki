@@ -149,6 +149,70 @@ Import flow:
 7. approve/reject/merge
 8. publish to live tables
 
+## Staged-to-Production Merge Rules (Phase 42 Planning — NOT YET IMPLEMENTED)
+
+These rules document the intended future merge implementation.
+No production merge code exists yet. Do not implement until a dedicated merge phase is approved.
+
+### Preconditions before any staged row may be merged
+
+- `import_status` must be `approved`.
+- Actor must have `super_admin` role.
+- All required production fields must be present on the staged row (entity-specific, see below).
+- `duplicate_of_id` must be null or admin must have explicitly confirmed intent to proceed.
+- No unresolved `staging_errors` of type `validation_error` for the row (warnings acceptable).
+- `data_source_id` on the parent `import_batches` row should be linked where possible.
+
+### Merge modes
+
+**Create:** insert a new production record when no matching production row exists.
+**Update:** patch an existing production record only when `match_*_id` is set,
+confirmed by the admin, and a second `confirm_overwrite=true` field is submitted.
+Without explicit overwrite confirmation, the merge endpoint must refuse to update.
+
+### Entity-specific future rules
+
+**Universities**
+- Safe to write: `name`, `official_url`, `country_id`.
+- Never overwrite `slug` if the university is already live and indexed.
+- Set `verification_status = 'pending'` on create; do not touch `is_verified`.
+- Do not overwrite `name` on update without explicit confirmation.
+
+**Programs**
+- Safe to write: `title`, `degree_level_id`, `language`, `tuition_amount`, `application_deadline`.
+- Must link to a `university_id` via `match_university_id`; reject if university not found.
+- Never overwrite existing `tuition_amount` without explicit confirmation.
+- Set `content_status = 'draft'` on create; require separate publish action.
+
+**Scholarships**
+- Safe to write: `name`, `amount_min`, `amount_max`, `currency`, `deadline`.
+- Never overwrite `eligibility_summary` if a richer value already exists in production.
+- Set `content_status = 'draft'` on create.
+
+**Articles**
+- Safe to write: `title`, `slug`, `category`, `content` for new records only.
+- Never overwrite published `content` without explicit admin confirmation.
+- Set `content_status = 'draft'` on create.
+
+### verification_status and source_confidence defaults
+
+- All merged records start with `verification_status = 'pending'` (or equivalent low-trust value).
+- `source_confidence` should reflect the import source type (manual = medium, AI = low).
+- A separate verification workflow promotes records to higher confidence after human review.
+
+### verification_events
+
+- Not written automatically on merge.
+- A super admin should create a verification_event manually after confirming data accuracy.
+- Automated verification_events are deferred to a future verification pipeline phase.
+
+### Why bulk merge is deferred
+
+Bulk merge removes the per-record confirmation step that prevents destructive overwrites,
+especially in update mode. The risk is too high until duplicate resolution is deterministic
+and a field-level source tracking system is in place. Bulk merge will only be considered
+after the single-record merge workflow is proven stable in production.
+
 ## Media Tables
 
 Planned tables:
