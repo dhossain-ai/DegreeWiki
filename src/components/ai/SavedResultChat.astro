@@ -15,12 +15,15 @@ const SUGGESTED_QUESTIONS = [
 ---
 
 <div class="max-w-3xl mt-8 pt-6 border-t border-gray-100">
-  <h2 class="text-sm font-semibold text-gray-900 mb-3">Ask about this result</h2>
+  <h2 class="text-base font-semibold text-gray-900 mb-2">DegreeWiki AI Advisor</h2>
+  <p class="text-sm text-gray-600 mb-3">
+    Ask follow-up questions about this saved Fit Finder result.
+  </p>
 
   <div class="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-4 py-3 mb-4">
-    This chat is scoped to the programs in this saved result. It cannot search for new
-    programs or provide admission, visa, or scholarship guarantees. Verify important
-    details directly with official sources before applying.
+    AI answers are based on DegreeWiki context and are not admission, visa, or scholarship
+    guarantees. This chat is scoped to the programs in this saved result and cannot search
+    for new programs. Verify important details directly with official sources before applying.
   </div>
 
   <div id="chat-transcript" class="space-y-3 mb-4" style={hasHistory ? undefined : 'display:none'}>

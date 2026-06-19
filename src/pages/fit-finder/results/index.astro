@@ -247,6 +247,14 @@ function getCardBadge(result: SavedResult): BadgeVariant {
                   >
                     View result
                   </a>
+                  {r.result_status === 'complete' && r.shortlist_count > 0 && (
+                    <a
+                      href={`/fit-finder/results/${r.id}`}
+                      class="px-3 py-1.5 text-sm text-purple-700 border border-purple-200 rounded-md hover:bg-purple-50"
+                    >
+                      Open AI advisor
+                    </a>
+                  )}
                   <form method="post" action="/fit-finder/results">
                     <input type="hidden" name="id" value={r.id} />
                     <button
