@@ -6,6 +6,17 @@ import { parseRawData, validateStagedRecord, type StagedEntityType } from '../..
 import { applyReviewAction } from '../../../lib/admin/importReview'
 import { mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
 import { parseBulkJson } from '../../../lib/admin/importParse'
+import {
+  detectUniSameBatchDuplicates,
+  detectUniProductionMatches,
+  detectProgSameBatchDuplicates,
+  detectProgProductionMatches,
+  detectScholSameBatchDuplicates,
+  detectScholProductionMatches,
+  detectArtSameBatchDuplicates,
+  detectArtProductionMatches,
+  type QualityWarning,
+} from '../../../lib/admin/importQuality'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -95,6 +106,7 @@ let formError: string | null = null
 let reviewError: string | null = null
 let mergeError: string | null = null
 let bulkImportError: string | null = null
+let qualityError: string | null = null
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
@@ -363,6 +375,89 @@ if (Astro.request.method === 'POST') {
         )
       }
     }
+  } else if (postAction === 'run_quality_checks') {
+    try {
+      const bType = b.batch_type
+      const allWarnings: QualityWarning[] = []
+
+      if (bType === 'universities' || bType === 'mixed') {
+        const { data: uniRows } = await supabase
+          .from('staging_universities')
+          .select('id, extracted_name, extracted_official_url')
+          .eq('import_batch_id', b.id)
+          .limit(100)
+        const rows = (uniRows ?? []) as { id: string; extracted_name: string | null; extracted_official_url: string | null }[]
+        allWarnings.push(...detectUniSameBatchDuplicates(rows))
+        allWarnings.push(...await detectUniProductionMatches(supabase, rows))
+      }
+
+      if (bType === 'programs' || bType === 'mixed') {
+        const { data: progRows } = await supabase
+          .from('staging_programs')
+          .select('id, extracted_title, extracted_degree_level_code, staging_university_id')
+          .eq('import_batch_id', b.id)
+          .limit(100)
+        const rows = (progRows ?? []) as { id: string; extracted_title: string | null; extracted_degree_level_code: string | null; staging_university_id: string | null }[]
+        allWarnings.push(...detectProgSameBatchDuplicates(rows))
+        allWarnings.push(...await detectProgProductionMatches(supabase, rows))
+      }
+
+      if (bType === 'scholarships' || bType === 'mixed') {
+        const { data: scholRows } = await supabase
+          .from('staging_scholarships')
+          .select('id, extracted_name')
+          .eq('import_batch_id', b.id)
+          .limit(100)
+        const rows = (scholRows ?? []) as { id: string; extracted_name: string | null }[]
+        allWarnings.push(...detectScholSameBatchDuplicates(rows))
+        allWarnings.push(...await detectScholProductionMatches(supabase, rows))
+      }
+
+      if (bType === 'articles' || bType === 'mixed') {
+        const { data: artRows } = await supabase
+          .from('staging_articles')
+          .select('id, extracted_title, extracted_slug')
+          .eq('import_batch_id', b.id)
+          .limit(100)
+        const rows = (artRows ?? []) as { id: string; extracted_title: string | null; extracted_slug: string | null }[]
+        allWarnings.push(...detectArtSameBatchDuplicates(rows))
+        allWarnings.push(...await detectArtProductionMatches(supabase, rows))
+      }
+
+      // Remove previous Phase 46 quality warnings for this batch only. Does not
+      // touch validation_warning entries from Phase 45 or other batches.
+      const { error: deleteErr } = await supabase
+        .from('staging_errors')
+        .delete()
+        .eq('import_batch_id', b.id)
+        .in('error_type', ['same_batch_duplicate', 'possible_production_match'])
+
+      if (deleteErr) {
+        console.error('[run_quality_checks] delete failed:', deleteErr.code)
+        qualityError = 'Failed to reset previous quality warnings. Please try again.'
+      } else if (allWarnings.length > 0) {
+        const { error: insertErr } = await supabase.from('staging_errors').insert(
+          allWarnings.map(w => ({
+            import_batch_id: b.id,
+            staging_table: w.stagingTable,
+            staging_row_id: w.rowId,
+            error_type: w.errorType,
+            error_message: w.errorMessage,
+          }))
+        )
+        if (insertErr) {
+          console.error('[run_quality_checks] insert failed:', insertErr.code)
+          qualityError = 'Failed to save quality warnings. Please try again.'
+        } else {
+          return Astro.redirect(`/admin/imports/${b.id}?quality=${allWarnings.length}`)
+        }
+      } else {
+        return Astro.redirect(`/admin/imports/${b.id}?quality=0`)
+      }
+    } catch (err) {
+      console.error('[run_quality_checks] error:', err instanceof Error ? err.message : String(err))
+      qualityError = 'Quality check failed. Please try again.'
+    }
   } else {
     const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
 
@@ -498,6 +593,12 @@ const bulkSummary = importedParam !== null
       warned: Math.max(0, parseInt(Astro.url.searchParams.get('warned') ?? '0', 10) || 0),
       failed: Math.max(0, parseInt(Astro.url.searchParams.get('failed') ?? '0', 10) || 0),
     }
+  : null
+
+// ---- Quality check summary (from PRG redirect query params) ----
+const qualityParam = Astro.url.searchParams.get('quality')
+const qualitySummary = qualityParam !== null
+  ? { count: Math.max(0, parseInt(qualityParam, 10) || 0) }
   : null
 
 // ---- GET: load staging data ----
@@ -764,6 +865,20 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
     </div>
   )}
 
+  {qualitySummary !== null && (
+    <div class="mb-4 rounded-md bg-purple-50 border border-purple-200 px-4 py-3 text-sm text-purple-800">
+      {qualitySummary.count === 0
+        ? 'Quality checks complete. No quality warnings found.'
+        : `Quality checks complete. ${qualitySummary.count} warning${qualitySummary.count !== 1 ? 's' : ''} found. Check the Actions column or Staging Errors section below for details.`}
+    </div>
+  )}
+
+  {qualityError && (
+    <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      Quality check error: {qualityError}
+    </div>
+  )}
+
   <!-- Bulk JSON Import form -->
   <details class="mb-4 rounded-lg border border-blue-200 bg-white" {...(bulkImportError !== null ? { open: true } : {})}>
     <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
@@ -975,6 +1090,21 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
       </form>
     </div>
   </details>
+
+  {totalStaged > 0 && (
+    <div class="mb-4 flex items-center gap-3">
+      <form method="POST">
+        <input type="hidden" name="_action" value="run_quality_checks" />
+        <button
+          type="submit"
+          class="rounded border border-purple-300 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1"
+        >
+          Run quality checks
+        </button>
+      </form>
+      <span class="text-xs text-gray-400">Checks for same-batch duplicates and possible production matches. Warnings appear in the Actions column below.</span>
+    </div>
+  )}
 
   {totalStaged === 0 && stagingErrors.length === 0 ? (
     <p class="text-sm text-gray-500 py-2">No staged records or errors for this batch yet.</p>
