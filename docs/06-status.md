@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 43 — Staged-to-Production Merge MVP Bundle — complete.
+
 Phase 42 — Staging Review + Safe Merge Planning Bundle — complete.
 
 Phase 41 — Manual Staged Record Entry + Validation Preview — complete.
