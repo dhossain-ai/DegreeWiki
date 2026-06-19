@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 47 — Initial Real Data Import Bundle — workflow and templates foundation — complete.
+
 Phase 46 — Import Quality Hardening Bundle — complete.
 
 Phase 45 — Structured File Import Bundle — complete.
@@ -47,6 +49,47 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 47 — Initial Real Data Import Bundle — workflow and templates foundation (complete):
+
+- Added `docs/10-import-workflow.md` as the admin import workflow reference.
+  The guide documents the JSON-only import path, universities-first recommendation,
+  entity field references, warning/error handling, quality checks, manual review,
+  merge rules, post-merge data source entry, and common troubleshooting cases.
+
+- Added placeholder-only JSON templates under `data/import-templates/`:
+  `universities.example.json`, `programs.example.json`,
+  `scholarships.example.json`, and `articles.example.json`.
+  These files intentionally use obvious example names and are not real starter
+  datasets.
+
+- Documented the hard boundary for Phase 47:
+  no real Supabase/admin import run, no import batches, no pasted real data,
+  no review actions, no merges, no production data mutation, no `src/` edits,
+  no migrations, and no dependency changes.
+
+- Actual real data import remains an operational step after template/workflow
+  review and explicit approval. It is not performed automatically by this
+  code/docs update.
+
+Files created (5):
+  docs/10-import-workflow.md
+  data/import-templates/universities.example.json
+  data/import-templates/programs.example.json
+  data/import-templates/scholarships.example.json
+  data/import-templates/articles.example.json
+
+Files modified (2):
+  docs/06-status.md
+  docs/07-task-log.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 13.37s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  innerHTML|set:html in pages/components: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  git diff package.json package-lock.json: 0 lines (no dependency changes).
 
 Phase 46 — Import Quality Hardening Bundle (complete):
 

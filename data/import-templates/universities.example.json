@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Example University One",
+    "country_code": "EX",
+    "official_url": "https://www.example.edu"
+  },
+  {
+    "name": "Example University Two",
+    "country_code": "EX",
+    "official_url": "https://www.example-two.edu"
+  },
+  {
+    "name": "Example Institute Three",
+    "country_code": "EX",
+    "official_url": "https://www.example-three.edu"
+  }
+]

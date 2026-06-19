@@ -1,0 +1,18 @@
+[
+  {
+    "title": "Example Master of Computing",
+    "degree_level_code": "masters",
+    "staging_university_id": "00000000-0000-0000-0000-000000000000",
+    "language": "English",
+    "tuition_amount": 25000,
+    "deadline": "2026-09-01"
+  },
+  {
+    "title": "Example Bachelor of Data Studies",
+    "degree_level_code": "bachelors",
+    "staging_university_id": "11111111-1111-1111-1111-111111111111",
+    "language": "English",
+    "tuition_amount": 18000,
+    "deadline": "2026-10-15"
+  }
+]

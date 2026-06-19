@@ -4,6 +4,79 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 47: Initial Real Data Import Bundle - Workflow and Templates Foundation
+
+Tool:
+Codex (GPT-5)
+
+Goal:
+Add the import workflow documentation and placeholder JSON templates needed before
+any real operational import run. Keep Phase 47 docs/templates/process only.
+Do not create import batches, paste real data, review rows, merge rows, modify
+Supabase data, edit `src/`, create migrations, or add dependencies.
+
+---
+
+### Files Created
+
+docs/10-import-workflow.md
+  Admin import workflow reference. Covers the JSON-only import workflow,
+  universities-first recommendation, field references for universities/programs/
+  scholarships/articles, warning and error handling, quality checks, manual
+  review, one-row-at-a-time merge, post-merge data source entry, troubleshooting,
+  and the direct-production-write prohibition.
+
+data/import-templates/universities.example.json
+  Placeholder-only university import template with obvious example institution
+  names. Not a real starter dataset.
+
+data/import-templates/programs.example.json
+  Placeholder-only program import template. Uses example staged university UUIDs
+  to show required shape; not real data.
+
+data/import-templates/scholarships.example.json
+  Placeholder-only scholarship import template. Not real data.
+
+data/import-templates/articles.example.json
+  Placeholder-only article import template. Not real content.
+
+### Files Modified
+
+docs/06-status.md
+  Added Phase 47 completion entry and documented that actual real data import is
+  an operational step after review and explicit approval, not part of this update.
+
+docs/07-task-log.md
+  This entry.
+
+### Explicit Exclusions
+
+No real Supabase/admin import run.
+No import batches created.
+No real data pasted into admin.
+No row review actions.
+No row merge actions.
+No production data mutation.
+No `src/` edits.
+No migrations.
+No dependency changes.
+No package file edits.
+
+### Checks Run
+
+npm run build: PASS (Cloudflare server build, Server built in 13.37s, zero errors).
+
+Security greps:
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  innerHTML|set:html in pages/components: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+
+Dependency check:
+  git diff package.json package-lock.json: 0 lines.
+
+---
+
 ## 2026-06-19 - Phase 46: Import Quality Hardening Bundle
 
 Tool:

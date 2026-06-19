@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Example Application Guide",
+    "slug": "example-application-guide",
+    "category": "guide",
+    "content": "Example article content for template shape only. Replace this with manually verified editorial content before any approved operational import."
+  },
+  {
+    "title": "Example Scholarship Checklist",
+    "slug": "example-scholarship-checklist",
+    "category": "checklist",
+    "content": "Example checklist content for template shape only. Replace this with reviewed content before any approved operational import."
+  }
+]
