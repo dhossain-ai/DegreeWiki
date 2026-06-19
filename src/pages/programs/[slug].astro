@@ -22,7 +22,7 @@ const { data: program } = await supabase
     canonical_url, og_title, og_description,
     universities(name, slug),
     degree_levels(name),
-    subjects(name),
+    subjects!programs_primary_subject_id_fkey(name),
     countries(name),
     cities(name)
   `)

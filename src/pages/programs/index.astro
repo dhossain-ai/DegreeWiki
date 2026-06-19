@@ -61,7 +61,7 @@ let query = supabase
      degree_levels(name),
      countries(name),
      cities(name),
-     subjects(name)`,
+     subjects!programs_primary_subject_id_fkey(name)`,
     { count: 'exact' }
   )
   .eq('content_status', 'published')
