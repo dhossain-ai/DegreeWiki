@@ -1,0 +1,409 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { requireSuperAdmin } from '../../../lib/admin/guard'
+import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+
+const { user, supabase } = guard
+
+const { id } = Astro.params
+if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+  return new Response('Not found', { status: 404 })
+}
+
+type BatchRow = {
+  id: string
+  batch_type: string
+  import_status: string
+  total_records: number
+  processed_count: number
+  error_count: number
+  notes: string | null
+  data_source_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+const { data: batch, error: batchError } = await supabase
+  .from('import_batches')
+  .select('id, batch_type, import_status, total_records, processed_count, error_count, notes, data_source_id, created_at, updated_at')
+  .eq('id', id)
+  .single()
+
+if (batchError || !batch) {
+  return new Response('Not found', { status: 404 })
+}
+
+const b = batch as BatchRow
+
+type DataSourceRow = { source_url: string; source_title: string | null; source_type: string }
+let dataSource: DataSourceRow | null = null
+if (b.data_source_id) {
+  const { data: ds } = await supabase
+    .from('data_sources')
+    .select('source_url, source_title, source_type')
+    .eq('id', b.data_source_id)
+    .single()
+  dataSource = (ds ?? null) as DataSourceRow | null
+}
+
+type StagingUniversity = {
+  id: string
+  extracted_name: string | null
+  extracted_country_code: string | null
+  extracted_official_url: string | null
+  import_status: string
+  review_notes: string | null
+  raw_data: Record<string, unknown>
+  created_at: string
+}
+type StagingProgram = {
+  id: string
+  extracted_title: string | null
+  extracted_degree_level_code: string | null
+  import_status: string
+  review_notes: string | null
+  raw_data: Record<string, unknown>
+  created_at: string
+}
+type StagingScholarship = {
+  id: string
+  extracted_name: string | null
+  extracted_amount: number | null
+  import_status: string
+  review_notes: string | null
+  raw_data: Record<string, unknown>
+  created_at: string
+}
+type StagingArticle = {
+  id: string
+  extracted_title: string | null
+  extracted_slug: string | null
+  extracted_category: string | null
+  import_status: string
+  review_notes: string | null
+  raw_data: Record<string, unknown>
+  created_at: string
+}
+type StagingError = {
+  id: string
+  staging_table: string
+  staging_row_id: string | null
+  error_type: string
+  error_message: string
+  created_at: string
+}
+
+const batchType = b.batch_type
+const showUniversities = batchType === 'universities' || batchType === 'mixed'
+const showPrograms = batchType === 'programs' || batchType === 'mixed'
+const showScholarships = batchType === 'scholarships' || batchType === 'mixed'
+const showArticles = batchType === 'articles' || batchType === 'mixed'
+
+const [uniResult, progResult, scholResult, artResult, errResult] = await Promise.all([
+  showUniversities
+    ? supabase
+        .from('staging_universities')
+        .select('id, extracted_name, extracted_country_code, extracted_official_url, import_status, review_notes, raw_data, created_at')
+        .eq('import_batch_id', id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+    : Promise.resolve({ data: [] }),
+  showPrograms
+    ? supabase
+        .from('staging_programs')
+        .select('id, extracted_title, extracted_degree_level_code, import_status, review_notes, raw_data, created_at')
+        .eq('import_batch_id', id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+    : Promise.resolve({ data: [] }),
+  showScholarships
+    ? supabase
+        .from('staging_scholarships')
+        .select('id, extracted_name, extracted_amount, import_status, review_notes, raw_data, created_at')
+        .eq('import_batch_id', id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+    : Promise.resolve({ data: [] }),
+  showArticles
+    ? supabase
+        .from('staging_articles')
+        .select('id, extracted_title, extracted_slug, extracted_category, import_status, review_notes, raw_data, created_at')
+        .eq('import_batch_id', id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+    : Promise.resolve({ data: [] }),
+  supabase
+    .from('staging_errors')
+    .select('id, staging_table, staging_row_id, error_type, error_message, created_at')
+    .eq('import_batch_id', id)
+    .order('created_at', { ascending: false })
+    .limit(100),
+])
+
+const stagingUniversities = (uniResult.data ?? []) as StagingUniversity[]
+const stagingPrograms = (progResult.data ?? []) as StagingProgram[]
+const stagingScholarships = (scholResult.data ?? []) as StagingScholarship[]
+const stagingArticles = (artResult.data ?? []) as StagingArticle[]
+const stagingErrors = (errResult.data ?? []) as StagingError[]
+
+const totalStaged = stagingUniversities.length + stagingPrograms.length + stagingScholarships.length + stagingArticles.length
+---
+<AdminLayout title={`Import Batch — DegreeWiki Admin`} activePath="/admin/imports" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Import Batch</h1>
+    <a href="/admin/imports" class="text-sm text-gray-500 hover:underline">← Back to Imports</a>
+  </div>
+
+  <div class="mb-6 rounded-lg border border-gray-200 bg-white divide-y divide-gray-100">
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-500 w-32">Type</span>
+      <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${BATCH_TYPE_BADGE[b.batch_type] ?? FALLBACK_BADGE}`}>
+        {b.batch_type}
+      </span>
+    </div>
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-500 w-32">Status</span>
+      <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[b.import_status] ?? FALLBACK_BADGE}`}>
+        {b.import_status}
+      </span>
+    </div>
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-500 w-32">Records</span>
+      <span class="text-sm text-gray-700">
+        {b.total_records} total · {b.processed_count} processed · {b.error_count > 0 ? <span class="text-red-600 font-medium">{b.error_count} errors</span> : <span class="text-gray-400">0 errors</span>}
+      </span>
+    </div>
+    {b.notes && (
+      <div class="px-4 py-3 flex items-start gap-3">
+        <span class="text-sm font-medium text-gray-500 w-32">Notes</span>
+        <span class="text-sm text-gray-700">{b.notes}</span>
+      </div>
+    )}
+    {dataSource && (
+      <div class="px-4 py-3 flex items-start gap-3">
+        <span class="text-sm font-medium text-gray-500 w-32">Data Source</span>
+        <span class="text-sm text-gray-700">
+          {dataSource.source_title && <span class="font-medium">{dataSource.source_title} · </span>}
+          <a href={dataSource.source_url} class="text-blue-600 hover:underline break-all" target="_blank" rel="noopener noreferrer">
+            {dataSource.source_url}
+          </a>
+          <span class="ml-2 text-gray-400 text-xs">({dataSource.source_type})</span>
+        </span>
+      </div>
+    )}
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-500 w-32">Created</span>
+      <span class="text-sm text-gray-400">{new Date(b.created_at).toLocaleString()}</span>
+    </div>
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-500 w-32">Updated</span>
+      <span class="text-sm text-gray-400">{new Date(b.updated_at).toLocaleString()}</span>
+    </div>
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-500 w-32">Batch ID</span>
+      <span class="text-xs text-gray-400 font-mono">{b.id}</span>
+    </div>
+  </div>
+
+  {totalStaged === 0 && stagingErrors.length === 0 ? (
+    <p class="text-sm text-gray-500 py-2">No staged records or errors for this batch yet.</p>
+  ) : null}
+
+  {showUniversities && stagingUniversities.length > 0 && (
+    <div class="mb-6">
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Universities ({stagingUniversities.length})</h2>
+      <div class="overflow-x-auto rounded-lg border border-gray-200">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3">Name</th>
+              <th class="px-4 py-3">Country</th>
+              <th class="px-4 py-3">URL</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Raw Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stagingUniversities.map(row => (
+              <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3 text-gray-700">{row.extracted_name ?? <span class="text-gray-400">—</span>}</td>
+                <td class="px-4 py-3 text-gray-500 text-xs">{row.extracted_country_code ?? '—'}</td>
+                <td class="px-4 py-3 text-xs max-w-[160px] truncate">
+                  {row.extracted_official_url
+                    ? <a href={row.extracted_official_url} class="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">{row.extracted_official_url}</a>
+                    : <span class="text-gray-400">—</span>}
+                </td>
+                <td class="px-4 py-3">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
+                    {row.import_status}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <details class="text-xs">
+                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
+                    <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[240px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  {showPrograms && stagingPrograms.length > 0 && (
+    <div class="mb-6">
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Programs ({stagingPrograms.length})</h2>
+      <div class="overflow-x-auto rounded-lg border border-gray-200">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3">Title</th>
+              <th class="px-4 py-3">Degree Level</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Raw Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stagingPrograms.map(row => (
+              <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3 text-gray-700">{row.extracted_title ?? <span class="text-gray-400">—</span>}</td>
+                <td class="px-4 py-3 text-xs text-gray-500">{row.extracted_degree_level_code ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
+                    {row.import_status}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <details class="text-xs">
+                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
+                    <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[240px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  {showScholarships && stagingScholarships.length > 0 && (
+    <div class="mb-6">
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Scholarships ({stagingScholarships.length})</h2>
+      <div class="overflow-x-auto rounded-lg border border-gray-200">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3">Name</th>
+              <th class="px-4 py-3">Amount</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Raw Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stagingScholarships.map(row => (
+              <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3 text-gray-700">{row.extracted_name ?? <span class="text-gray-400">—</span>}</td>
+                <td class="px-4 py-3 text-xs text-gray-500">{row.extracted_amount != null ? String(row.extracted_amount) : '—'}</td>
+                <td class="px-4 py-3">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
+                    {row.import_status}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <details class="text-xs">
+                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
+                    <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[240px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  {showArticles && stagingArticles.length > 0 && (
+    <div class="mb-6">
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Articles ({stagingArticles.length})</h2>
+      <div class="overflow-x-auto rounded-lg border border-gray-200">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3">Title</th>
+              <th class="px-4 py-3">Slug</th>
+              <th class="px-4 py-3">Category</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Notes</th>
+              <th class="px-4 py-3">Raw Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stagingArticles.map(row => (
+              <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3 text-gray-700">{row.extracted_title ?? <span class="text-gray-400">—</span>}</td>
+                <td class="px-4 py-3 text-xs text-gray-500 font-mono">{row.extracted_slug ?? '—'}</td>
+                <td class="px-4 py-3 text-xs text-gray-500">{row.extracted_category ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
+                    {row.import_status}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <details class="text-xs">
+                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
+                    <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[240px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  {stagingErrors.length > 0 && (
+    <div class="mb-6">
+      <h2 class="text-base font-semibold text-gray-800 mb-3">Staging Errors ({stagingErrors.length})</h2>
+      <div class="overflow-x-auto rounded-lg border border-red-200">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-red-50 border-b border-red-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3">Table</th>
+              <th class="px-4 py-3">Row ID</th>
+              <th class="px-4 py-3">Error Type</th>
+              <th class="px-4 py-3">Message</th>
+              <th class="px-4 py-3">When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stagingErrors.map(row => (
+              <tr class="border-b border-red-100 hover:bg-red-50 align-top">
+                <td class="px-4 py-3 text-xs text-gray-600 font-mono">{row.staging_table}</td>
+                <td class="px-4 py-3 text-xs text-gray-400 font-mono">{row.staging_row_id ?? '—'}</td>
+                <td class="px-4 py-3 text-xs text-red-700 font-medium">{row.error_type}</td>
+                <td class="px-4 py-3 text-xs text-gray-700">{row.error_message}</td>
+                <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+</AdminLayout>
