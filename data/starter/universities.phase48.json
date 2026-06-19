@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Aalto University",
+    "country_code": "FI",
+    "official_url": "https://www.aalto.fi/en"
+  },
+  {
+    "name": "University of Helsinki",
+    "country_code": "FI",
+    "official_url": "https://www.helsinki.fi/en"
+  },
+  {
+    "name": "Tampere University",
+    "country_code": "FI",
+    "official_url": "https://www.tuni.fi/en"
+  },
+  {
+    "name": "University of Turku",
+    "country_code": "FI",
+    "official_url": "https://www.utu.fi/en"
+  },
+  {
+    "name": "University of Oulu",
+    "country_code": "FI",
+    "official_url": "https://www.oulu.fi/en"
+  },
+  {
+    "name": "University of Eastern Finland",
+    "country_code": "FI",
+    "official_url": "https://www.uef.fi/en"
+  },
+  {
+    "name": "University of Jyväskylä",
+    "country_code": "FI",
+    "official_url": "https://www.jyu.fi/en"
+  },
+  {
+    "name": "Åbo Akademi University",
+    "country_code": "FI",
+    "official_url": "https://www.abo.fi/en/"
+  }
+]
