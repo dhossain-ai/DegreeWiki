@@ -4,6 +4,87 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 43: Staged-to-Production Merge MVP Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add one-by-one create-new staged-to-production merge for approved staged records.
+Hard boundary: no bulk merge, no auto-merge, no update-existing, no programs merge.
+
+---
+
+### Files Created
+
+supabase/migrations/020_add_merged_status.sql:
+  Adds 'merged' to import_status CHECK constraint on all four staging tables.
+  Pattern: DROP CONSTRAINT + ADD CONSTRAINT (same as migrations 018 and 019).
+  Constraint names: staging_{table}_import_status_check (explicit, set by migration 019).
+  Final values: pending, processing, validated, duplicate_detected, needs_review,
+  approved, rejected, error, skipped, merged. All prior values preserved.
+
+src/lib/admin/importMerge.ts:
+  mergeApprovedRow(supabase, { entityType, rowId, batchId }):
+    Promise<{ok:true;productionId:string}|{ok:false;error:string}>.
+  Supported entity types: universities, scholarships, articles (programs deferred).
+  Entity type validated against MERGE_ALLOWED_ENTITY_TYPES allowlist before any DB access.
+  UUID validation on rowId and batchId before any DB access.
+  All staged data re-read from DB (never from form input).
+  import_status re-confirmed as 'approved' at merge time.
+  Slug uniqueness checked via maybeSingle() before insert; 23505 error caught on insert.
+  Universities: country_code resolved via countries.iso2; merge blocked if no match.
+  Scholarships: amount_min from extracted_amount; deadline_text from extracted_deadline (no date parse).
+  Articles: slug validated with strict /^[a-z0-9]+(?:-[a-z0-9]+)*$/ regex; content optional.
+  Post-merge: sets import_status='merged' and match_*_id to new production id.
+  review_notes unchanged. verification_events, data_sources, batch counts deferred.
+
+### Files Modified
+
+src/lib/admin/badges.ts:
+  Added 'merged' entry to IMPORT_STATUS_BADGE: 'bg-emerald-100 text-emerald-700'.
+
+src/pages/admin/imports/[id].astro:
+  Import: added mergeApprovedRow from importMerge.
+  State: added mergeError variable.
+  POST handler: added 'merge' action branch.
+    Checks: confirmation value ('yes'), batch type match, delegates to mergeApprovedRow.
+    On success: redirects to batch page.
+    On failure: sets mergeError for inline display.
+  HTML: added mergeError display block (amber, styled to match reviewError).
+  Universities table: merge form and merged text added to Actions column.
+    Merge form shown only when import_status === 'approved'.
+    'Merged to production.' text shown when import_status === 'merged'.
+  Scholarships table: same pattern.
+  Articles table: same pattern.
+  Programs table: no merge controls (programs merge deferred).
+
+docs/03-database-plan.md:
+  Replaced Phase 42 planning section with Phase 43 MVP implemented section.
+  Documents: field mappings, eligibility rules, post-merge behavior, deferred items.
+
+docs/06-status.md:
+  Added Phase 43 complete entry.
+
+docs/07-task-log.md:
+  This entry.
+
+---
+
+### Deferred
+
+- Programs merge (university_id, degree_level_id, country_id FKs not resolvable from staging)
+- update-existing mode (match columns in place; deferred to Phase 44)
+- article category FK mapping (extracted_category is plain text; lookup ambiguous)
+- scholarship currency (not in staging schema)
+- verification_events on merge
+- data_sources linkage on merge
+- import_batch count updates
+- bulk merge
+- auto-merge
+
+---
+
 ## 2026-06-19 - Phase 42: Staging Review + Safe Merge Planning Bundle
 
 Tool:

@@ -4,6 +4,7 @@ import { requireSuperAdmin } from '../../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
 import { applyReviewAction } from '../../../lib/admin/importReview'
+import { mergeApprovedRow } from '../../../lib/admin/importMerge'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -91,6 +92,7 @@ function numericOrNull(s: string): number | null {
 
 let formError: string | null = null
 let reviewError: string | null = null
+let mergeError: string | null = null
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
@@ -109,6 +111,29 @@ if (Astro.request.method === 'POST') {
       return Astro.redirect(`/admin/imports/${b.id}`)
     }
     reviewError = result.error
+  } else if (postAction === 'merge') {
+    const confirm = fd.get('confirm')?.toString().trim()
+    if (confirm !== 'yes') {
+      mergeError = 'Merge confirmation is required.'
+    } else {
+      const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+      const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
+
+      // Batch type must match entity type unless batch is mixed.
+      if (b.batch_type !== 'mixed' && b.batch_type !== rawEntityType) {
+        mergeError = 'Entity type does not match this batch type.'
+      } else {
+        const result = await mergeApprovedRow(supabase, {
+          entityType: rawEntityType,
+          rowId: rawRowId,
+          batchId: b.id,
+        })
+        if (result.ok) {
+          return Astro.redirect(`/admin/imports/${b.id}`)
+        }
+        mergeError = result.error
+      }
+    }
   } else {
     const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
 
@@ -423,6 +448,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
     </div>
   )}
 
+  {mergeError && (
+    <div class="mb-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+      Merge failed: {mergeError}
+    </div>
+  )}
+
   <!-- Add staged record form -->
   <details class="mb-6 rounded-lg border border-gray-200 bg-white" {...(formError !== null ? { open: true } : {})}>
     <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
@@ -635,6 +666,24 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
+                  {row.import_status === 'approved' && (
+                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="merge" />
+                      <input type="hidden" name="entity_type" value="universities" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
+                      <label class="flex items-start gap-1.5 text-gray-600">
+                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                        <span>I confirm this creates a production record.</span>
+                      </label>
+                      <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                        Merge to Production
+                      </button>
+                    </form>
+                  )}
+                  {row.import_status === 'merged' && (
+                    <p class="mt-2 text-emerald-700 font-medium">Merged to production.</p>
+                  )}
                 </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
@@ -769,6 +818,24 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
+                  {row.import_status === 'approved' && (
+                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="merge" />
+                      <input type="hidden" name="entity_type" value="scholarships" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
+                      <label class="flex items-start gap-1.5 text-gray-600">
+                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                        <span>I confirm this creates a production record.</span>
+                      </label>
+                      <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                        Merge to Production
+                      </button>
+                    </form>
+                  )}
+                  {row.import_status === 'merged' && (
+                    <p class="mt-2 text-emerald-700 font-medium">Merged to production.</p>
+                  )}
                 </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
@@ -838,6 +905,24 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
+                  {row.import_status === 'approved' && (
+                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="merge" />
+                      <input type="hidden" name="entity_type" value="articles" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
+                      <label class="flex items-start gap-1.5 text-gray-600">
+                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                        <span>I confirm this creates a production record.</span>
+                      </label>
+                      <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                        Merge to Production
+                      </button>
+                    </form>
+                  )}
+                  {row.import_status === 'merged' && (
+                    <p class="mt-2 text-emerald-700 font-medium">Merged to production.</p>
+                  )}
                 </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
