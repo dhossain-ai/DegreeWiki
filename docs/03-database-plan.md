@@ -149,69 +149,96 @@ Import flow:
 7. approve/reject/merge
 8. publish to live tables
 
-## Staged-to-Production Merge Rules (Phase 42 Planning — NOT YET IMPLEMENTED)
+## Staged-to-Production Merge Rules (Phase 43 MVP — Implemented)
 
-These rules document the intended future merge implementation.
-No production merge code exists yet. Do not implement until a dedicated merge phase is approved.
+Phase 43 implemented one-by-one create-new merge for approved staged rows.
+The implementation lives in `src/lib/admin/importMerge.ts`.
+The UI lives in `src/pages/admin/imports/[id].astro`.
 
-### Preconditions before any staged row may be merged
+### Implemented: Phase 43 MVP
 
-- `import_status` must be `approved`.
-- Actor must have `super_admin` role.
-- All required production fields must be present on the staged row (entity-specific, see below).
-- `duplicate_of_id` must be null or admin must have explicitly confirmed intent to proceed.
-- No unresolved `staging_errors` of type `validation_error` for the row (warnings acceptable).
-- `data_source_id` on the parent `import_batches` row should be linked where possible.
+Supported entity types:
+- universities (create-new only)
+- scholarships (create-new only)
+- articles (create-new only)
 
-### Merge modes
+Deferred entity types:
+- programs (requires university_id, degree_level_id, country_id FKs not available in staging)
 
-**Create:** insert a new production record when no matching production row exists.
-**Update:** patch an existing production record only when `match_*_id` is set,
-confirmed by the admin, and a second `confirm_overwrite=true` field is submitted.
-Without explicit overwrite confirmation, the merge endpoint must refuse to update.
+Deferred modes:
+- update-existing (all types) — match columns exist, implementation deferred to Phase 44
+- bulk merge — deferred indefinitely until single-record workflow is stable
+- auto-merge — never
 
-### Entity-specific future rules
+### Merge eligibility (enforced server-side in importMerge.ts)
 
-**Universities**
-- Safe to write: `name`, `official_url`, `country_id`.
-- Never overwrite `slug` if the university is already live and indexed.
-- Set `verification_status = 'pending'` on create; do not touch `is_verified`.
-- Do not overwrite `name` on update without explicit confirmation.
+- `import_status` must be `approved` (re-read from DB at merge time).
+- Entity type must be in allowlist: universities, scholarships, articles.
+- Row id and batch id must be valid UUIDs.
+- Staged row must belong to the current batch (`import_batch_id` match).
+- Batch type must match entity type or be `mixed`.
+- Confirmation checkbox must be present in POST (`confirm=yes`).
+- Required fields must be non-null (entity-specific).
+- Production slug must not already exist (uniqueness checked before insert).
 
-**Programs**
-- Safe to write: `title`, `degree_level_id`, `language`, `tuition_amount`, `application_deadline`.
-- Must link to a `university_id` via `match_university_id`; reject if university not found.
-- Never overwrite existing `tuition_amount` without explicit confirmation.
-- Set `content_status = 'draft'` on create; require separate publish action.
+### Field mapping (create-new)
 
-**Scholarships**
-- Safe to write: `name`, `amount_min`, `amount_max`, `currency`, `deadline`.
-- Never overwrite `eligibility_summary` if a richer value already exists in production.
-- Set `content_status = 'draft'` on create.
+**Universities:**
+- `name` ← `extracted_name` (required)
+- `slug` ← slugified from `extracted_name` (server-generated)
+- `country_id` ← looked up from `countries.iso2` using `extracted_country_code` (required; blocks if unresolved)
+- `official_url` ← `extracted_official_url` (optional, included if non-empty)
+- Defaults: `content_status='draft'`, `verification_status='unverified'`, `indexing_status='draft'`
 
-**Articles**
-- Safe to write: `title`, `slug`, `category`, `content` for new records only.
-- Never overwrite published `content` without explicit admin confirmation.
-- Set `content_status = 'draft'` on create.
+**Scholarships:**
+- `name` ← `extracted_name` (required)
+- `slug` ← slugified from `extracted_name` (server-generated)
+- `amount_min` ← `extracted_amount` (optional; currency not mapped — no currency in staging)
+- `deadline_text` ← `extracted_deadline` (optional; stored as text, no date parsing)
+- Defaults: `content_status='draft'`, `verification_status='unverified'`, `indexing_status='draft'`
 
-### verification_status and source_confidence defaults
+**Articles:**
+- `title` ← `extracted_title` (required)
+- `slug` ← `extracted_slug` re-read from DB and validated against strict regex (required)
+- `content` ← `extracted_content` (optional, included if non-empty)
+- `article_category_id` — deferred; category FK lookup ambiguous (text name vs slug)
+- Defaults: `content_status='draft'`, `verification_status='unverified'`, `indexing_status='draft'`
 
-- All merged records start with `verification_status = 'pending'` (or equivalent low-trust value).
-- `source_confidence` should reflect the import source type (manual = medium, AI = low).
-- A separate verification workflow promotes records to higher confidence after human review.
+### Post-merge behavior
+
+After successful insert:
+- Staging row `import_status` set to `'merged'` (terminal, non-reversible).
+- Relevant match column set to the new production id:
+  - universities → `match_university_id`
+  - scholarships → `match_scholarship_id`
+  - articles → `match_article_id`
+- `review_notes` left unchanged.
+- `verification_events` not written (deferred).
+- `data_sources` not linked (deferred).
+- `import_batch` counts not updated (deferred).
+
+### Deferred to Phase 44+
+
+- update-existing mode (match columns already exist in staging schema)
+- programs merge (needs university_id + degree_level_id + country_id FK resolution)
+- duplicate resolution workflow
+- verification_events write on merge
+- data_sources linkage on merge
+- article category FK mapping
+- scholarship currency mapping
+- field-level source tracking
+- bulk merge
+
+### Why bulk merge remains deferred
+
+Bulk merge removes per-record confirmation, preventing destructive overwrite detection.
+Risk too high until duplicate resolution is deterministic and field-level source tracking exists.
 
 ### verification_events
 
-- Not written automatically on merge.
-- A super admin should create a verification_event manually after confirming data accuracy.
-- Automated verification_events are deferred to a future verification pipeline phase.
-
-### Why bulk merge is deferred
-
-Bulk merge removes the per-record confirmation step that prevents destructive overwrites,
-especially in update mode. The risk is too high until duplicate resolution is deterministic
-and a field-level source tracking system is in place. Bulk merge will only be considered
-after the single-record merge workflow is proven stable in production.
+Not written automatically on merge.
+Super admin should create a verification_event manually after confirming data accuracy.
+Automated verification_events deferred to a future verification pipeline phase.
 
 ## Media Tables
 
