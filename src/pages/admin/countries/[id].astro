@@ -18,6 +18,7 @@ const { user, supabase } = guard
 const { id } = Astro.params
 
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS   = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
 
 type Values = {
   name: string
@@ -27,12 +28,13 @@ type Values = {
   continent: string
   overview: string
   content_status: string
+  verification_status: string
 }
 
 // Load existing record
 const { data: existing, error: loadError } = await supabase
   .from('countries')
-  .select('id, name, slug, iso2, iso3, continent, overview, content_status')
+  .select('id, name, slug, iso2, iso3, continent, overview, content_status, verification_status')
   .eq('id', id)
   .single()
 
@@ -49,6 +51,7 @@ type CountryRecord = {
   continent: string | null
   overview: string | null
   content_status: string
+  verification_status: string
 }
 const record = existing as CountryRecord
 
@@ -60,6 +63,7 @@ let values: Values = {
   continent: record.continent ?? '',
   overview: record.overview ?? '',
   content_status: record.content_status,
+  verification_status: record.verification_status,
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -74,6 +78,7 @@ if (Astro.request.method === 'POST') {
     continent: String(form.get('continent') ?? '').trim(),
     overview: String(form.get('overview') ?? '').trim(),
     content_status: String(form.get('content_status') ?? 'draft').trim(),
+    verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
   }
 
   if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -89,6 +94,8 @@ if (Astro.request.method === 'POST') {
   if (slugErr) e.slug = slugErr
   const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
   if (statusErr) e.content_status = statusErr
+  const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
+  if (verErr) e.verification_status = verErr
 
   errors = e
 
@@ -103,6 +110,7 @@ if (Astro.request.method === 'POST') {
         continent: values.continent || null,
         overview: values.overview || null,
         content_status: values.content_status,
+        verification_status: values.verification_status,
       })
       .eq('id', id)
 
@@ -180,6 +188,17 @@ if (Astro.request.method === 'POST') {
         ))}
       </select>
       {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
+    </div>
+
+    <div>
+      <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Verification Status</label>
+      <select id="verification_status" name="verification_status"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        {VERIFICATION_OPTIONS.map(s => (
+          <option value={s} selected={values.verification_status === s}>{s}</option>
+        ))}
+      </select>
+      {errors.verification_status && <p class="mt-1 text-xs text-red-600">{errors.verification_status}</p>}
     </div>
 
     <div class="flex gap-3 pt-2">
