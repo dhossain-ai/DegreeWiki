@@ -24,6 +24,7 @@ export const BATCH_TYPE_BADGE: Record<string, string> = {
   universities: 'bg-blue-100 text-blue-700',
   programs: 'bg-purple-100 text-purple-700',
   scholarships: 'bg-orange-100 text-orange-700',
+  articles: 'bg-teal-100 text-teal-700',
   mixed: 'bg-gray-100 text-gray-600',
 }
 

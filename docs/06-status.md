@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 40 — Import / Staging Foundation Bundle — complete.
+
 Phase 39 — Data Source + Verification Foundation Bundle — complete.
 
 Phase 38 — Program + Scholarship Advisor Boundary Plan — complete (docs only).
@@ -31,6 +33,46 @@ Phase 28 — AI Finder Production Hardening — complete.
 Phase 27 — Saved Finder Results Management — complete.
 
 Phase 26 — AI Finder Result Persistence — complete.
+
+## Last Completed Work
+
+Phase 40 — Import / Staging Foundation Bundle (complete):
+
+- Migration 018: Added `staging_articles` table (mirrors staging_universities/programs/scholarships
+  conventions: raw_data jsonb, extracted fields, match_article_id FK, import_status CHECK,
+  self-ref duplicate_of_id, reviewed_by/at, timestamps, trigger, 8 indexes, admin-only RLS).
+  Extended `import_batches.batch_type` CHECK to include `'articles'`.
+  Extended `staging_errors.staging_table` CHECK to include `'staging_articles'`.
+
+- badges.ts: Added `articles: 'bg-teal-100 text-teal-700'` to BATCH_TYPE_BADGE.
+
+- /admin/imports: Added manual "Create Import Batch" form (batch_type + notes, POST handler,
+  validates batch_type with validateIn, inserts with status=pending and zero counts, redirects
+  to new batch detail page on success). Added "View" link per row to detail page.
+
+- /admin/imports/[id]: New read-only detail page. Shows batch metadata (type, status, counts,
+  notes, linked data source, timestamps). Queries staging records for the batch's entity type
+  (or all four sections for mixed). Raw JSON shown only via JSON.stringify in <pre> — never
+  innerHTML or set:html. Staging errors shown in a separate section. No approve/reject actions.
+
+No CSV/file upload. No parsing. No AI extraction. No approve/merge workflow.
+No duplicate detection. No background jobs. No public UI changes. No new dependencies.
+
+Files created (2):
+  supabase/migrations/018_import_staging_articles.sql
+  src/pages/admin/imports/[id].astro
+
+Files modified (3):
+  src/lib/admin/badges.ts
+  src/pages/admin/imports.astro
+  docs/06-status.md, docs/07-task-log.md
+
+Validation results:
+  npm run build: see build check in task log.
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  innerHTML|set:html in new/modified files: 0 matches.
 
 ## Last Completed Work
 

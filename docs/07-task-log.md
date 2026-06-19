@@ -4,6 +4,86 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 40: Import / Staging Foundation Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Complete the import/staging foundation by adding the missing staging_articles table,
+extending batch type and error table constraints, adding a manual import batch creation
+form to /admin/imports, and adding a read-only /admin/imports/[id] detail page.
+No CSV/file upload, no parsing, no AI extraction, no approve/merge workflow.
+
+---
+
+### Files Created
+
+supabase/migrations/018_import_staging_articles.sql:
+  Additive. Three changes:
+  1. ALTER TABLE import_batches: drops and re-adds batch_type CHECK to include 'articles'.
+  2. ALTER TABLE staging_errors: drops and re-adds staging_table CHECK to include 'staging_articles'.
+  3. CREATE TABLE staging_articles: mirrors staging_universities/programs/scholarships conventions.
+     Columns: id, import_batch_id (FK→import_batches CASCADE), raw_data (jsonb),
+     extracted_title, extracted_slug, extracted_category, extracted_content,
+     match_article_id (FK→articles SET NULL), import_status (CHECK), duplicate_of_id (self-ref),
+     review_notes, reviewed_by_user_id (FK→user_profiles SET NULL), reviewed_at,
+     created_at, updated_at.
+     Trigger: set_staging_articles_updated_at → update_updated_at_column().
+     8 indexes (inc. composite batch+status). RLS: admin-only via manage_imports OR super_admin.
+
+src/pages/admin/imports/[id].astro:
+  New. Read-only detail page. requireSuperAdmin guard. Loads import_batches row by id (UUID
+  validated). Shows batch metadata panel (type, status, counts, notes, linked data source,
+  timestamps, batch ID). Queries staging table(s) depending on batch_type: universities →
+  staging_universities, programs → staging_programs, scholarships → staging_scholarships,
+  articles → staging_articles, mixed → all four. Each table shown in its own section with
+  key extracted fields, import_status badge, review_notes. Raw JSON shown collapsed via
+  <details><summary>/<pre>{JSON.stringify(...)}</pre> — never innerHTML/set:html. Staging
+  errors shown in a separate red-accented table. No approve/reject/merge actions.
+
+---
+
+### Files Modified
+
+src/lib/admin/badges.ts:
+  Added 'articles': 'bg-teal-100 text-teal-700' to BATCH_TYPE_BADGE.
+
+src/pages/admin/imports.astro:
+  Added BATCH_TYPES constant (5 values including 'articles').
+  Added POST handler: parses batch_type + notes, validates batch_type with validateIn,
+  inserts import_batches row (status=pending, all counts=0, created_by_user_id=user.id),
+  redirects to /admin/imports/{newBatch.id} on success.
+  Added "Create Import Batch" collapsible form (<details>) above the batch list.
+  Added "View" link column to batch list table rows linking to /admin/imports/{id}.
+  Updated heading sub-label from "Read-only" to batch count.
+
+---
+
+### Pre-implementation Checks Run
+
+1. Read migration 010 in full. Confirmed exact constraint names (auto-generated inline CHECK):
+   import_batches_batch_type_check and staging_errors_staging_table_check.
+2. Confirmed batch_type CHECK values: 'universities','programs','scholarships','mixed' (no 'articles').
+3. Confirmed staging_errors.staging_table CHECK: 'staging_universities','staging_programs',
+   'staging_scholarships','import_files','import_batches' (no 'staging_articles').
+4. Confirmed requireSuperAdmin() usage in imports.astro and AdminSidebar already links Imports.
+5. Confirmed articles table exists (migration 008) for match_article_id FK.
+6. Confirmed BATCH_TYPE_BADGE did not include 'articles'. Added teal variant.
+
+---
+
+### Security Checks
+
+- No service role in pages/components/layouts.
+- No createServiceClient in pages/components/layouts.
+- No public service key exposed.
+- No innerHTML / set:html added. Raw JSON rendered via JSON.stringify in <pre> text only.
+- No public route changes. Staged data never exposed publicly.
+- Both new/modified pages use requireSuperAdmin() guard.
+
+---
+
 ## 2026-06-19 - Phase 39: Data Source + Verification Foundation Bundle
 
 Tool:
