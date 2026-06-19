@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 46 — Import Quality Hardening Bundle — complete.
+
 Phase 45 — Structured File Import Bundle — complete.
 
 Phase 44 — Program Merge + Safe Update MVP Bundle — complete.
@@ -45,6 +47,82 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 46 — Import Quality Hardening Bundle (complete):
+
+- Added explicit "Run quality checks" admin action on the import batch detail page.
+  Admin clicks "Run quality checks" after adding staging rows; server runs deterministic
+  checks and writes results to staging_errors. No import_status changes. No production
+  writes. No auto-review, auto-approve, or auto-merge. Idempotent: re-running replaces
+  previous Phase 46 warnings without touching validation_warning entries.
+
+- New `src/lib/admin/importQuality.ts`:
+  Pure normalization helper: `normalizeForMatch(s)` — lowercase, trim, collapse whitespace.
+  Per-entity same-batch duplicate detection (in-memory, no DB):
+    `detectUniSameBatchDuplicates(rows)` — by normalized name; also by official URL if present.
+    `detectProgSameBatchDuplicates(rows)` — by normalized title + staging_university_id + degree_level_code.
+    `detectScholSameBatchDuplicates(rows)` — by normalized name.
+    `detectArtSameBatchDuplicates(rows)` — by exact slug; also by normalized title.
+  Per-entity production match detection (SELECT-only Supabase queries):
+    `detectUniProductionMatches(supabase, rows)` — ilike name match; eq official_url match.
+    `detectProgProductionMatches(supabase, rows)` — ilike title match on programs table.
+    `detectScholProductionMatches(supabase, rows)` — ilike name match on scholarships table.
+    `detectArtProductionMatches(supabase, rows)` — eq slug match; ilike title match on articles table.
+  Production queries use per-name parallel SELECT queries with Supabase ilike/eq (no .or() filter
+  strings — avoids fragility with special characters in names). False positives and false negatives
+  are acceptable — warnings are informational only.
+  All functions return `QualityWarning[]` — no DB writes inside the helper.
+  No Supabase production table INSERT/UPDATE/DELETE anywhere in this file.
+
+- Modified `src/pages/admin/imports/[id].astro`:
+  Added `_action=run_quality_checks` POST branch:
+    1. For each entity type in the batch (universities/programs/scholarships/articles or mixed):
+       Fetches up to 100 staging rows (fresh SELECT, not display-limit-constrained).
+    2. Calls same-batch and production-match helpers. Combines all QualityWarning results.
+    3. Deletes previous Phase 46 quality warnings for this batch only:
+         DELETE FROM staging_errors WHERE import_batch_id = batchId
+           AND error_type IN ('same_batch_duplicate', 'possible_production_match')
+       Validation warnings (error_type = 'validation_warning') are never touched.
+    4. Batch-inserts new staging_errors rows (if any warnings).
+    5. PRG redirect to ?quality=N.
+  Added `qualitySummary` URL param reading: reads ?quality=N param after redirect.
+  Added purple quality summary banner: "Quality checks complete. N warning(s) found."
+    or "No quality warnings found." — shown on GET after redirect.
+  Added red quality error banner: shown when quality check POST fails without redirect.
+  Added "Run quality checks" POST form above staging tables (visible when totalStaged > 0).
+  Existing per-row staging_errors display (errsByRowId map) automatically shows quality
+  warnings in the Actions column alongside validation warnings.
+  Existing review, merge, and bulk_import flows unchanged.
+
+- No migration. `staging_errors.error_type` is free-form TEXT — no CHECK constraint.
+  New error_type values 'same_batch_duplicate' and 'possible_production_match' work without schema changes.
+- No new npm dependencies.
+- No service role in pages/components/layouts.
+- No innerHTML / set:html.
+- No public UI changes.
+- No production INSERT/UPDATE/DELETE.
+
+Deferred to Phase 47+:
+  URL extraction from raw_data jsonb for programs/scholarships production-match.
+  Cross-batch duplicate detection (same record in two different batches).
+  Filter toggles on staging table UI ("warnings only", "duplicates only").
+  `duplicate_of_id` auto-population (remains human-set after review).
+  Async quality checks for very large batch sizes (current max 100 rows).
+
+Files created (1):
+  src/lib/admin/importQuality.ts
+
+Files modified (1):
+  src/pages/admin/imports/[id].astro
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 12.93s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  innerHTML|set:html in pages/components: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  insert/update/delete in importQuality.ts: 0 matches (SELECT-only).
+  git diff package.json package-lock.json: 0 lines (no dependency changes).
 
 Phase 45 — Structured File Import Bundle (complete):
 

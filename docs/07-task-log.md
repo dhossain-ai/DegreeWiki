@@ -4,6 +4,51 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 46: Import Quality Hardening Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add import-quality warning checks to the staging import workflow.
+Detect same-batch duplicates and possible production matches as advisory warnings.
+All warnings are non-destructive: no import_status changes, no production writes,
+no auto-review, no auto-approve, no auto-merge. Idempotent re-run replaces previous
+Phase 46 warnings only; validation warnings from Phase 45 are never touched.
+
+---
+
+### Files Created
+
+src/lib/admin/importQuality.ts
+  Pure normalization (normalizeForMatch), per-entity same-batch duplicate detection
+  (in-memory), per-entity production match detection (SELECT-only Supabase queries).
+  Returns QualityWarning[] from all functions. No DB writes inside helpers.
+  Eight exported functions: detectUniSameBatchDuplicates, detectUniProductionMatches,
+  detectProgSameBatchDuplicates, detectProgProductionMatches,
+  detectScholSameBatchDuplicates, detectScholProductionMatches,
+  detectArtSameBatchDuplicates, detectArtProductionMatches.
+
+### Files Modified
+
+src/pages/admin/imports/[id].astro
+  Added _action=run_quality_checks POST handler.
+  Added qualitySummary URL param read + purple summary banner.
+  Added qualityError state + red error banner.
+  Added "Run quality checks" POST form above staging tables.
+
+### Checks Passed
+
+npm run build: PASS (Server built in 12.93s, zero errors).
+service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+createServiceClient in pages/components/layouts: 0 matches.
+innerHTML|set:html in pages/components: 0 matches.
+PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+insert/update/delete in importQuality.ts: 0 matches.
+git diff package.json package-lock.json: 0 lines.
+
+---
+
 ## 2026-06-19 - Phase 45: Structured File Import Bundle
 
 Tool:
