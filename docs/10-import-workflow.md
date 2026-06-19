@@ -254,7 +254,7 @@ admin UI.
 
 Use the merged entity's admin edit page and Data Sources panel:
 
-- `source_type`: `official_website`
+- `source_type`: `official_university`
 - `confidence_level`: `high`
 - `is_primary_source`: `true`
 - URL: the official source page used for manual verification

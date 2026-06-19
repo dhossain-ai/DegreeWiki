@@ -4,6 +4,196 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 49: Full Starter University Import + Activation
+
+Tool:
+Codex (GPT-5)
+
+Goal:
+Complete the end-to-end activation of the Finland Phase 48 starter university
+pack using only the existing admin UI workflow: staging import, quality checks,
+row review, safe merge decisions, production source attachment, publishing,
+verification, docs updates, validation checks, commit, tag, and push. No
+direct SQL, no manual table edits outside admin flows, no service role usage,
+no schema changes, and no new dependencies.
+
+---
+
+### Operational Scope Completed
+
+- Created and used import batch:
+  `bd0805e8-3264-4e9c-82bc-099af5b78b23`
+- Imported the exact Phase 48 JSON starter pack into staging.
+- Ran quality checks.
+- Reviewed all 8 staged university rows.
+- Rejected duplicate staged rows instead of creating duplicate production rows.
+- Merged safe new rows with the existing one-row-at-a-time create-new flow.
+- Added official production data sources through admin university edit pages.
+- Published safe draft rows after source verification.
+- Verified admin and public visibility using the saved production slugs.
+- Updated docs and corrected the `official_website` wording mismatch to
+  `official_university`.
+
+### Import / Review Summary
+
+- Imported: 8
+- Warned: 0
+- Failed: 0
+- Quality-check warnings: 1
+- Warning type summary:
+  - validation_warning: 0
+  - same_batch_duplicate: 0
+  - possible_production_match: 1
+
+Only quality warning:
+- `possible_production_match` for `University of Helsinki`
+
+### Review / Merge Decisions
+
+Approved and merged with `create_new` (5):
+- Aalto University
+- Tampere University
+- University of Oulu
+- University of Eastern Finland
+- University of Jyväskylä
+
+Rejected as duplicates after production inspection (3):
+- University of Helsinki
+- University of Turku
+- Åbo Akademi University
+
+Helsinki decision:
+- Existing production `University of Helsinki` row was inspected first.
+- It was already the same institution, already published, and already had the
+  correct official URL `https://www.helsinki.fi/en`.
+- No safe update was needed.
+- The staged Helsinki row was rejected as a duplicate.
+
+Unexpected duplicate findings:
+- `University of Turku` already existed in production as a draft university row
+  with the correct official URL `https://www.utu.fi/en`.
+- `Åbo Akademi University` already existed in production as a draft university
+  row with the correct official URL `https://www.abo.fi/en/`.
+- Their staged rows were rejected as duplicates instead of creating new rows.
+
+### Production Activation Outcome
+
+Source records added (8):
+- Aalto University — `https://www.aalto.fi/en`
+- University of Helsinki — `https://www.helsinki.fi/en`
+- Tampere University — `https://www.tuni.fi/en`
+- University of Turku — `https://www.utu.fi/en`
+- University of Oulu — `https://www.oulu.fi/en`
+- University of Eastern Finland — `https://www.uef.fi/en`
+- University of Jyväskylä — `https://www.jyu.fi/en`
+- Åbo Akademi University — `https://www.abo.fi/en/`
+
+All 8 source rows used:
+- `source_type = official_university`
+- `confidence_level = high`
+- `source_status = active`
+- `is_primary_source = true`
+
+Publishing outcome:
+- Newly published from draft in this phase: 7
+- Already published and retained: 1 (`University of Helsinki`)
+- Final public Finland university total from this activation set: 8
+
+Verification status outcome:
+- All 8 Finland university rows were set to `partially_verified` after source
+  verification.
+
+### Tampere Manual Note
+
+- Tampere University had no automated admin warning.
+- The source `https://www.tuni.fi/en` is a shared Tampere Universities domain
+  covering both Tampere University and Tampere University of Applied Sciences.
+- Manual review accepted this URL as the official first-party web presence for
+  the Tampere University row in this starter pack, and the row was published.
+
+### Unicode / Slug Note
+
+- Two production names were corrected through the existing admin edit workflow
+  after merge/import handling:
+  - `University of Jyväskylä`
+  - `Åbo Akademi University`
+- Public verification used the actual saved slugs currently present in
+  production:
+  - `university-of-jyvskyl`
+  - `bo-akademi-university`
+
+### Verification Completed
+
+Admin verification:
+- `/admin/universities` showed all activated Finland rows.
+- Each activated university had the expected name, official URL, and published
+  or retained-published status.
+- Each activated university had one official primary data source attached.
+
+Public verification:
+- `/universities` listed all 8 Finland universities.
+- Detail pages loaded successfully for:
+  - `/universities/aalto-university`
+  - `/universities/university-of-helsinki`
+  - `/universities/tampere-university`
+  - `/universities/university-of-turku`
+  - `/universities/university-of-oulu`
+  - `/universities/university-of-eastern-finland`
+  - `/universities/university-of-jyvskyl`
+  - `/universities/bo-akademi-university`
+- Verified on public detail pages:
+  - correct university name
+  - country displayed as Finland
+  - official website link present
+  - `Partially Verified` badge present
+
+### Workflow Issue Observed
+
+- The import batch detail page continued to show some successfully merged
+  university staging rows as `approved` instead of clearly rendering them as
+  `merged`, even though the production rows existed and were subsequently
+  verified. No code change was made in this phase.
+
+### Files Modified
+
+docs/06-status.md
+  Updated current phase and added the Phase 49 completion summary and
+  validation results.
+
+docs/07-task-log.md
+  This entry.
+
+docs/10-import-workflow.md
+  Corrected post-merge source type wording from `official_website` to the
+  actual schema/UI value `official_university`.
+
+### Checks Run
+
+npm run build:
+  PASS (Cloudflare server build, Server built in 9.82s, zero errors).
+
+Security greps:
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts: 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts: 0 matches.
+  innerHTML|set:html in src/pages,src/components: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+
+Dependency check:
+  git diff package.json package-lock.json: 0 lines.
+
+### Explicit Exclusions Respected
+
+No direct SQL.
+No manual Supabase table edits outside approved admin UI flows.
+No service role usage.
+No import of programs, scholarships, or articles.
+No scraping or crawling.
+No new dependencies.
+No schema changes.
+No source-code changes in `src/`.
+
+---
+
 ## 2026-06-19 - Phase 48: Starter University Data Pack
 
 Tool:

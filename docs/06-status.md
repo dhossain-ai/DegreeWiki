@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 49 — Full Starter University Import + Activation — complete.
+
 Phase 48 — Starter University Data Pack — complete.
 
 Phase 47 — Initial Real Data Import Bundle — workflow and templates foundation — complete.
@@ -51,6 +53,87 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 49 — Full Starter University Import + Activation (complete):
+
+- Completed the Finland starter university activation run through the existing
+  admin UI workflow using batch
+  `bd0805e8-3264-4e9c-82bc-099af5b78b23`.
+  Phase 48 starter JSON was imported into staging, quality checks were run,
+  all 8 staged rows were reviewed, and no direct SQL or manual Supabase table
+  edits were used.
+
+- Import and review outcome:
+  8 rows imported, 0 warned, 0 failed.
+  Quality checks produced 1 warning:
+  `possible_production_match` for `University of Helsinki`.
+  No validation warnings. No same-batch duplicates.
+
+- Duplicate handling outcome:
+  `University of Helsinki` was rejected from staging after confirming an
+  existing correct production row already existed with
+  `https://www.helsinki.fi/en`.
+  `University of Turku` and `Åbo Akademi University` were also rejected from
+  staging after review because correct draft production rows already existed
+  with the expected official URLs.
+
+- Safe create-new merge outcome:
+  5 new production university rows were created from staging:
+  `Aalto University`, `Tampere University`, `University of Oulu`,
+  `University of Eastern Finland`, and `University of Jyväskylä`.
+  The two Unicode-name records later had their production names corrected
+  through the existing admin edit workflow so the public/admin UI now shows the
+  correct names.
+
+- Source activation outcome:
+  Added 8 official production data sources through the existing admin university
+  edit pages, one for each activated Finland university, using:
+  `source_type = official_university`, `confidence_level = high`,
+  `source_status = active`, `is_primary_source = true`.
+  Tampere University kept the manually reviewed shared-domain source
+  `https://www.tuni.fi/en`; this was accepted as the official first-party web
+  presence for the university row and recorded as a note in the task log.
+
+- Publishing outcome:
+  Published 7 draft Finland university rows after source verification:
+  `Aalto University`, `Tampere University`, `University of Turku`,
+  `University of Oulu`, `University of Eastern Finland`,
+  `University of Jyväskylä`, and `Åbo Akademi University`.
+  `University of Helsinki` was already published and remained published.
+  All 8 Finland universities were set to `verification_status =
+  partially_verified` after the official source check.
+
+- Verification outcome:
+  `/admin/universities` showed all activated Finland rows.
+  Public `/universities` listed all 8 Finland universities.
+  Public detail pages loaded successfully for the actual saved slugs:
+  `aalto-university`, `university-of-helsinki`, `tampere-university`,
+  `university-of-turku`, `university-of-oulu`,
+  `university-of-eastern-finland`, `university-of-jyvskyl`,
+  and `bo-akademi-university`.
+  Each verified public detail page showed the correct university name, Finland
+  as country, the official URL, and the `Partially Verified` badge.
+
+- Workflow/documentation follow-up:
+  Updated `docs/10-import-workflow.md` to use the real schema/UI source type
+  value `official_university` instead of `official_website`.
+  Observed one admin workflow issue during the run:
+  some merged staging university rows still rendered as `approved` on the batch
+  detail page instead of clearly showing `merged`, even though the production
+  rows were created successfully. No code change was made in Phase 49.
+
+Files modified (3):
+  docs/06-status.md
+  docs/07-task-log.md
+  docs/10-import-workflow.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 9.82s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts: 0 matches.
+  createServiceClient in src/pages,src/components,src/layouts: 0 matches.
+  innerHTML|set:html in src/pages,src/components: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  git diff package.json package-lock.json: 0 lines (no dependency changes).
 
 Phase 48 — Starter University Data Pack (complete):
 
