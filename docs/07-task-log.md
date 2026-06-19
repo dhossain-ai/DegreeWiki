@@ -4,6 +4,120 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 45: Structured File Import Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Add paste-based JSON array bulk import into existing staging tables.
+Admin pastes a JSON array, selects entity type, server parses/validates/inserts.
+Staging only. No production writes. No auto-review. No auto-merge.
+CSV and file upload deferred.
+
+---
+
+### Files Created
+
+src/lib/admin/importParse.ts:
+  New pure/deterministic JSON array parser and per-entity field mapper.
+  No Supabase calls — intentional; batch-scope DB validation stays in the page handler.
+  Exports:
+    MAX_BULK_ROWS = 100.
+    BulkParsedRow type: { rawData, fields: Record<string, string | number | null>, parseWarnings }.
+    BulkParseResult type: discriminated union ok/error.
+    parseBulkJson(input, entityType): BulkParseResult.
+  Error returns: empty input, non-JSON, non-array, array length > MAX_BULK_ROWS.
+  Non-object array elements: excluded from rows[], counted in nonObjectCount (caller
+    adds to failed count).
+  Entity field mappers:
+    mapUniversity: name → extracted_name; country_code; official_url.
+    mapProgram: title; degree_level_code; language; tuition_amount (numeric); deadline;
+      staging_university_id — UUID regex check at parse time; batch-scope check in page.
+      Invalid UUID format: null + parseWarning.
+    mapScholarship: name; amount (numeric); deadline.
+    mapArticle: title; slug; category; content.
+  All str() coercions return null for empty/null/undefined.
+  num() returns null for empty/non-numeric values.
+
+### Files Modified
+
+src/pages/admin/imports/[id].astro:
+  Imports: added parseBulkJson from importParse.
+  Variables: added bulkImportError (string | null).
+  Added _action=bulk_import POST branch (inserted between merge and single-row branches):
+    1. entity_type validated against VALID_ENTITY_TYPES allowlist.
+    2. Batch type / entity type mismatch check (same rule as single-row entry).
+    3. parseBulkJson() called on textarea value.
+    4. Programs only: batch-scoped SELECT on staging_universities for candidate
+       staging_university_ids; invalid IDs set to null + warning added to that row.
+    5. Per-row loop:
+       a. validateStagedRecord() called on string-coerced field values.
+       b. Parse warnings + validation warnings combined.
+       c. import_status = 'validated' (0 warnings) or 'pending' (any warnings).
+       d. Entity-specific INSERT into staging table (.select('id').single()).
+       e. DB error: console.error(code only); insertFailed = true; no staging_errors.
+    6. errorEntries[] collected; single batch staging_errors INSERT after loop.
+    7. import_batches counts updated (best-effort UPDATE; failure is console.error only):
+         total_records   += rows.length + nonObjectCount
+         processed_count += inserted
+         error_count     += failed (non-objects + DB failures; warnings not included)
+    8. return Astro.redirect(.../admin/imports/${id}?imported=N&warned=N&failed=N).
+  Added bulkSummary URL param reading (GET section, before staging data queries):
+    importedParam from searchParams; bulkSummary null when absent.
+  Template additions (above manual-entry <details>):
+    Green summary banner: shown when bulkSummary !== null; shows inserted/warned/failed counts.
+      Warned rows: prompts to check Staging Errors section.
+      Failed count: shown in red if > 0.
+    Red bulkImportError banner: shown when bulkImportError is set.
+    Bulk JSON Import <details> section:
+      Auto-opens when bulkImportError is set.
+      Entity type select for mixed batches; hidden field for typed batches.
+      Textarea (rows=10, font-mono text-xs, entity-specific placeholder).
+      Field key hint below textarea per entity type.
+      Submit button "Import Rows" (POST _action=bulk_import).
+  No changes to existing manual-entry form, review actions, or merge actions.
+
+docs/06-status.md:
+  Current phase updated to Phase 45. Phase 45 completed work block added.
+
+docs/07-task-log.md:
+  This entry.
+
+### Batch Count Semantics (documented in code comment)
+
+total_records: rows received = all array items (including non-objects that failed).
+processed_count: rows successfully inserted into staging (validated or pending; both count).
+error_count: rows that failed to insert = non-object parse failures + DB insert errors.
+Validation warnings: tracked in staging_errors; do NOT increment error_count.
+
+### Deferred
+
+CSV import (textarea or file) — needs robust quoting/encoding parser.
+File upload + Supabase Storage + import_files rows — storage_path NOT NULL blocks paste use.
+Async/background processing — not needed for ≤100 rows.
+Duplicate detection during import.
+staging_university_id auto-resolution by university name.
+Programs update-existing mode.
+
+### Checks Run
+
+npm run build: PASS (Cloudflare server build, Server built in 4.63s, zero errors).
+
+Security greps (pages/components/layouts):
+  service_role / SERVICE_ROLE / SUPABASE_SERVICE: 0 matches.
+  createServiceClient: 0 matches.
+  innerHTML / set:html: 0 matches.
+  PUBLIC_SUPABASE_SERVICE / PUBLIC_.*SERVICE in src/: 0 matches.
+
+importParse.ts Supabase grep: 1 match — JSDoc comment "no Supabase calls" only.
+  No imports or function calls referencing Supabase.
+
+Dependency check:
+  git diff package.json package-lock.json: 0 lines — no new dependencies added.
+
+---
+
 ## 2026-06-19 - Phase 44: Program Merge + Safe Update MVP Bundle
 
 Tool:

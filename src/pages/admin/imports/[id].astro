@@ -5,6 +5,7 @@ import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
 import { applyReviewAction } from '../../../lib/admin/importReview'
 import { mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
+import { parseBulkJson } from '../../../lib/admin/importParse'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -93,6 +94,7 @@ function numericOrNull(s: string): number | null {
 let formError: string | null = null
 let reviewError: string | null = null
 let mergeError: string | null = null
+let bulkImportError: string | null = null
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
@@ -135,6 +137,230 @@ if (Astro.request.method === 'POST') {
           return Astro.redirect(`/admin/imports/${b.id}`)
         }
         mergeError = result.error
+      }
+    }
+  } else if (postAction === 'bulk_import') {
+    const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+
+    if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
+      bulkImportError = 'Invalid entity type.'
+    } else if (b.batch_type !== 'mixed' && b.batch_type !== rawEntityType) {
+      bulkImportError = 'Entity type does not match this batch type.'
+    } else {
+      const entityType = rawEntityType as StagedEntityType
+      const jsonInput = fd.get('bulk_json')?.toString() ?? ''
+
+      const parseResult = parseBulkJson(jsonInput, entityType)
+
+      if (!parseResult.ok) {
+        bulkImportError = parseResult.error
+      } else {
+        const { rows, nonObjectCount } = parseResult
+
+        // For programs: batch-validate staging_university_ids against this batch.
+        // Validation is split from importParse.ts (pure) to keep Supabase calls here.
+        const validStagingUniIds = new Set<string>()
+        if (entityType === 'programs' && rows.length > 0) {
+          const candidateIds = [
+            ...new Set(
+              rows
+                .map(r => r.fields.staging_university_id)
+                .filter((v): v is string => typeof v === 'string'),
+            ),
+          ]
+          if (candidateIds.length > 0) {
+            const { data: validUnis } = await supabase
+              .from('staging_universities')
+              .select('id')
+              .in('id', candidateIds)
+              .eq('import_batch_id', b.id)
+            for (const u of validUnis ?? []) {
+              validStagingUniIds.add((u as { id: string }).id)
+            }
+          }
+        }
+
+        let inserted = 0
+        let warned = 0
+        let failed = nonObjectCount
+
+        type ErrorEntry = {
+          import_batch_id: string
+          staging_table: string
+          staging_row_id: string
+          error_type: string
+          error_message: string
+        }
+        const errorEntries: ErrorEntry[] = []
+        const stagingTableName = STAGING_TABLE_NAME[entityType]
+
+        for (const row of rows) {
+          const resolvedFields = { ...row.fields }
+          const rowWarnings = [...row.parseWarnings]
+
+          // For programs: reject staging_university_id that is not in this batch.
+          if (entityType === 'programs') {
+            const stagingUniId = resolvedFields.staging_university_id as string | null
+            if (stagingUniId !== null && !validStagingUniIds.has(stagingUniId)) {
+              resolvedFields.staging_university_id = null
+              rowWarnings.push('staging_university_id does not belong to this batch and was set to null')
+            }
+          }
+
+          // Convert field values to strings for validateStagedRecord.
+          const vals: Record<string, string> = {
+            extracted_name: String(resolvedFields.extracted_name ?? ''),
+            extracted_country_code: String(resolvedFields.extracted_country_code ?? ''),
+            extracted_official_url: String(resolvedFields.extracted_official_url ?? ''),
+            extracted_title: String(resolvedFields.extracted_title ?? ''),
+            extracted_degree_level_code: String(resolvedFields.extracted_degree_level_code ?? ''),
+            extracted_language: String(resolvedFields.extracted_language ?? ''),
+            extracted_tuition_amount: resolvedFields.extracted_tuition_amount != null
+              ? String(resolvedFields.extracted_tuition_amount) : '',
+            extracted_deadline: String(resolvedFields.extracted_deadline ?? ''),
+            extracted_amount: resolvedFields.extracted_amount != null
+              ? String(resolvedFields.extracted_amount) : '',
+            extracted_slug: String(resolvedFields.extracted_slug ?? ''),
+            extracted_category: String(resolvedFields.extracted_category ?? ''),
+            extracted_content: String(resolvedFields.extracted_content ?? ''),
+          }
+
+          const { warnings: validationWarnings } = validateStagedRecord(entityType, vals)
+          const allWarnings = [...rowWarnings, ...validationWarnings]
+          const importStatus = allWarnings.length === 0 ? 'validated' : 'pending'
+
+          let insertedId: string | null = null
+          let insertFailed = false
+
+          if (entityType === 'universities') {
+            const { data, error } = await supabase
+              .from('staging_universities')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: row.rawData,
+                extracted_name: (resolvedFields.extracted_name as string | null) ?? null,
+                extracted_country_code: (resolvedFields.extracted_country_code as string | null) ?? null,
+                extracted_official_url: (resolvedFields.extracted_official_url as string | null) ?? null,
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) {
+              console.error('[bulk_import] staging_universities insert failed:', error?.code)
+              insertFailed = true
+            } else {
+              insertedId = (data as { id: string }).id
+            }
+          } else if (entityType === 'programs') {
+            const { data, error } = await supabase
+              .from('staging_programs')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: row.rawData,
+                extracted_title: (resolvedFields.extracted_title as string | null) ?? null,
+                extracted_degree_level_code: (resolvedFields.extracted_degree_level_code as string | null) ?? null,
+                extracted_language: (resolvedFields.extracted_language as string | null) ?? null,
+                extracted_tuition_amount: (resolvedFields.extracted_tuition_amount as number | null) ?? null,
+                extracted_deadline: (resolvedFields.extracted_deadline as string | null) ?? null,
+                staging_university_id: (resolvedFields.staging_university_id as string | null) ?? null,
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) {
+              console.error('[bulk_import] staging_programs insert failed:', error?.code)
+              insertFailed = true
+            } else {
+              insertedId = (data as { id: string }).id
+            }
+          } else if (entityType === 'scholarships') {
+            const { data, error } = await supabase
+              .from('staging_scholarships')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: row.rawData,
+                extracted_name: (resolvedFields.extracted_name as string | null) ?? null,
+                extracted_amount: (resolvedFields.extracted_amount as number | null) ?? null,
+                extracted_deadline: (resolvedFields.extracted_deadline as string | null) ?? null,
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) {
+              console.error('[bulk_import] staging_scholarships insert failed:', error?.code)
+              insertFailed = true
+            } else {
+              insertedId = (data as { id: string }).id
+            }
+          } else {
+            const { data, error } = await supabase
+              .from('staging_articles')
+              .insert({
+                import_batch_id: b.id,
+                raw_data: row.rawData,
+                extracted_title: (resolvedFields.extracted_title as string | null) ?? null,
+                extracted_slug: (resolvedFields.extracted_slug as string | null) ?? null,
+                extracted_category: (resolvedFields.extracted_category as string | null) ?? null,
+                extracted_content: (resolvedFields.extracted_content as string | null) ?? null,
+                import_status: importStatus,
+              })
+              .select('id')
+              .single()
+            if (error || !data) {
+              console.error('[bulk_import] staging_articles insert failed:', error?.code)
+              insertFailed = true
+            } else {
+              insertedId = (data as { id: string }).id
+            }
+          }
+
+          if (insertFailed) {
+            failed++
+          } else if (insertedId) {
+            inserted++
+            if (allWarnings.length > 0) {
+              warned++
+              for (const w of allWarnings) {
+                errorEntries.push({
+                  import_batch_id: b.id,
+                  staging_table: stagingTableName,
+                  staging_row_id: insertedId,
+                  error_type: 'validation_warning',
+                  error_message: w,
+                })
+              }
+            }
+          }
+        }
+
+        // Batch-insert all staging_errors at once.
+        if (errorEntries.length > 0) {
+          await supabase.from('staging_errors').insert(errorEntries)
+        }
+
+        // Update import_batches counts (best-effort; failure is non-fatal).
+        // Semantics: total_records = rows received; processed_count = rows inserted
+        // into staging (validated or pending); error_count = rows that failed to
+        // insert (non-object parse failures + DB insert errors). Validation warnings
+        // do not count as errors — warned rows still insert successfully.
+        const totalReceived = rows.length + nonObjectCount
+        if (totalReceived > 0) {
+          const { error: countErr } = await supabase
+            .from('import_batches')
+            .update({
+              total_records: b.total_records + totalReceived,
+              processed_count: b.processed_count + inserted,
+              error_count: b.error_count + failed,
+            })
+            .eq('id', b.id)
+          if (countErr) {
+            console.error('[bulk_import] batch count update failed:', countErr.code)
+          }
+        }
+
+        return Astro.redirect(
+          `/admin/imports/${b.id}?imported=${inserted}&warned=${warned}&failed=${failed}`,
+        )
       }
     }
   } else {
@@ -263,6 +489,16 @@ if (Astro.request.method === 'POST') {
     }
   }
 }
+
+// ---- Bulk import summary (from PRG redirect query params) ----
+const importedParam = Astro.url.searchParams.get('imported')
+const bulkSummary = importedParam !== null
+  ? {
+      imported: Math.max(0, parseInt(importedParam, 10) || 0),
+      warned: Math.max(0, parseInt(Astro.url.searchParams.get('warned') ?? '0', 10) || 0),
+      failed: Math.max(0, parseInt(Astro.url.searchParams.get('failed') ?? '0', 10) || 0),
+    }
+  : null
 
 // ---- GET: load staging data ----
 
@@ -510,6 +746,85 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
       Merge failed: {mergeError}
     </div>
   )}
+
+  {bulkSummary && (
+    <div class="mb-4 rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+      Bulk import complete: {bulkSummary.imported} row{bulkSummary.imported !== 1 ? 's' : ''} inserted
+      {bulkSummary.warned > 0 && ` (${bulkSummary.warned} with validation warnings)`}
+      {bulkSummary.failed > 0
+        ? <span class="text-red-700">, {bulkSummary.failed} failed to insert.</span>
+        : '.'}
+      {bulkSummary.warned > 0 && ' Check the Staging Errors section below for details.'}
+    </div>
+  )}
+
+  {bulkImportError && (
+    <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      Bulk import error: {bulkImportError}
+    </div>
+  )}
+
+  <!-- Bulk JSON Import form -->
+  <details class="mb-4 rounded-lg border border-blue-200 bg-white" {...(bulkImportError !== null ? { open: true } : {})}>
+    <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
+      <span class="text-blue-500 text-base leading-none">↑</span>
+      Bulk JSON Import
+    </summary>
+    <div class="px-4 py-4 border-t border-gray-100">
+      <form method="POST" class="space-y-4">
+        <input type="hidden" name="_action" value="bulk_import" />
+        {b.batch_type === 'mixed' ? (
+          <div>
+            <label class={LABEL_CLS}>Entity Type <span class="text-red-500">*</span></label>
+            <select name="entity_type" required class={INPUT_CLS}>
+              <option value="">Select type…</option>
+              <option value="universities">University</option>
+              <option value="programs">Program</option>
+              <option value="scholarships">Scholarship</option>
+              <option value="articles">Article</option>
+            </select>
+          </div>
+        ) : (
+          <input type="hidden" name="entity_type" value={b.batch_type} />
+        )}
+        <div>
+          <label class={LABEL_CLS}>JSON Array <span class="text-red-500">*</span></label>
+          <textarea
+            name="bulk_json"
+            rows={10}
+            required
+            class={INPUT_CLS + ' font-mono text-xs'}
+            placeholder={
+              b.batch_type === 'universities'
+                ? '[{\n  "name": "University of Example",\n  "country_code": "GB",\n  "official_url": "https://example.ac.uk"\n}]'
+                : b.batch_type === 'programs'
+                ? '[{\n  "title": "MSc Computer Science",\n  "degree_level_code": "msc",\n  "tuition_amount": 15000,\n  "staging_university_id": "<uuid>"\n}]'
+                : b.batch_type === 'scholarships'
+                ? '[{\n  "name": "Global Excellence Award",\n  "amount": 5000,\n  "deadline": "2026-05-01"\n}]'
+                : b.batch_type === 'articles'
+                ? '[{\n  "title": "How to Apply",\n  "slug": "how-to-apply",\n  "content": "Article body..."\n}]'
+                : '[{ ... }, { ... }]'
+            }
+          ></textarea>
+          <p class="mt-1 text-xs text-gray-400">
+            Paste a JSON array of objects. Maximum 100 rows per paste.
+            {b.batch_type === 'universities' && ' Keys: name, country_code, official_url.'}
+            {b.batch_type === 'programs' && ' Keys: title, degree_level_code, language, tuition_amount, deadline, staging_university_id.'}
+            {b.batch_type === 'scholarships' && ' Keys: name, amount, deadline.'}
+            {b.batch_type === 'articles' && ' Keys: title, slug, category, content.'}
+          </p>
+        </div>
+        <div>
+          <button
+            type="submit"
+            class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+          >
+            Import Rows
+          </button>
+        </div>
+      </form>
+    </div>
+  </details>
 
   <!-- Add staged record form -->
   <details class="mb-6 rounded-lg border border-gray-200 bg-white" {...(formError !== null ? { open: true } : {})}>

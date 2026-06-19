@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 45 — Structured File Import Bundle — complete.
+
 Phase 44 — Program Merge + Safe Update MVP Bundle — complete.
 
 Phase 43 — Staged-to-Production Merge MVP Bundle — complete.
@@ -43,6 +45,79 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 45 — Structured File Import Bundle (complete):
+
+- Added paste-based JSON array bulk import into existing staging tables.
+  Admin opens a batch, pastes a JSON array into a textarea, selects entity type
+  (auto-selected for non-mixed batches), and submits. Server parses, validates, inserts.
+
+- New `src/lib/admin/importParse.ts`:
+  Pure/deterministic JSON array parser and per-entity field mapper. No Supabase calls.
+  `parseBulkJson(input, entityType)` returns `{ ok, rows, nonObjectCount }` or
+  `{ ok: false, error }`. Handles: empty input, non-JSON, non-array, arrays > 100 rows,
+  non-object array elements (counted as failures, excluded from rows). Entity mappers:
+    universities — name → extracted_name, country_code, official_url.
+    programs — title, degree_level_code, language, tuition_amount, deadline,
+               staging_university_id (UUID format-checked; batch-scope validated in page).
+    scholarships — name, amount (numeric), deadline.
+    articles — title, slug, category, content.
+
+- Modified `src/pages/admin/imports/[id].astro`:
+  Added `_action=bulk_import` POST branch:
+    1. Entity type and batch type validated against allowlists.
+    2. JSON input parsed via `parseBulkJson()`.
+    3. For programs: batch-scoped SELECT on staging_universities to validate any
+       staging_university_id values (must belong to same import_batch_id); invalid
+       IDs set to null with a validation warning added to that row.
+    4. Per-row: `validateStagedRecord()` called (existing); all warnings (parse +
+       validation) combined; import_status = 'validated' if zero warnings, 'pending'
+       if any.
+    5. Per-row staging INSERT (universities / programs / scholarships / articles).
+       DB errors: server-side console.error only; row counted as failed; no raw error
+       to browser.
+    6. All staging_errors rows (for warned rows that inserted) batch-inserted at end.
+    7. import_batches counts updated (best-effort; failure non-fatal):
+         total_records   += received (all array items including non-objects)
+         processed_count += inserted (rows that made it into staging, warned or not)
+         error_count     += failed (non-object items + DB insert errors)
+       Validation warnings are NOT counted as error_count — warned rows still insert
+       and are counted in processed_count only.
+    8. PRG redirect to `?imported=N&warned=N&failed=N`.
+  Added bulkSummary URL param reading on GET; green summary banner on page.
+  Added Bulk JSON Import <details> section above the manual-entry form.
+  Existing manual-entry form, review actions, and merge actions unchanged.
+
+- No migration.
+- No new npm dependencies.
+- JSON-only paste import. CSV deferred. File upload / import_files deferred.
+- No production table writes.
+- No auto-review, auto-approve, or auto-merge.
+- No service role in pages/components/layouts.
+- No innerHTML / set:html.
+- No public UI changes.
+
+Deferred to Phase 46+:
+  CSV import (textarea or file).
+  File upload + Supabase Storage + import_files row creation.
+  Async/background processing for large batches.
+  Duplicate detection during import.
+  staging_university_id auto-resolution by university name.
+  Programs update-existing mode.
+
+Files created (1):
+  src/lib/admin/importParse.ts
+
+Files modified (1):
+  src/pages/admin/imports/[id].astro
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 4.63s, zero errors).
+  service_role / SERVICE_ROLE / SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  innerHTML / set:html in pages/components/layouts: 0 matches.
+  PUBLIC_SUPABASE_SERVICE / PUBLIC_.*SERVICE in src/: 0 matches.
+  git diff package.json package-lock.json: 0 lines (no dependency changes).
 
 Phase 44 — Program Merge + Safe Update MVP Bundle (complete):
 
