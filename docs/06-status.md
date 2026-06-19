@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 44 — Program Merge + Safe Update MVP Bundle — complete.
+
 Phase 43 — Staged-to-Production Merge MVP Bundle — complete.
 
 Phase 42 — Staging Review + Safe Merge Planning Bundle — complete.
@@ -41,6 +43,57 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 44 — Program Merge + Safe Update MVP Bundle (complete):
+
+- No migration required. All required match columns and enum values already existed.
+
+- `src/lib/admin/importMerge.ts` extended:
+  - `MergeEntityType` union now includes `'programs'`.
+  - `MergeAction` type exported: `'create_new' | 'update_existing'`.
+  - `mergeApprovedRow()` accepts optional `action` param (defaults to `'create_new'`).
+  - `mergeProgram()`: create-new for programs. Resolves university_id via
+    staging_university_id → staging_universities.match_university_id chain.
+    Resolves country_id from production university. Resolves degree_level_id from
+    active degree_levels.code. Slug generated with 4-step fallback sequence
+    (title / title+code / title+code+uniSlug / title+code+shortUniId).
+    Optional: language_of_instruction, tuition_min_amount. Defaults: draft/unverified/draft.
+    Blocked if: staging_university_id null, staged university not merged,
+    degree_level_code not found, country_id missing, all slug candidates conflict.
+  - `updateExistingRow()` exported: dispatches to entity-specific update-existing helpers.
+  - `updateExistingUniversity()`: patches official_url if null in production and
+    staging extracted_official_url is non-empty. Errors if nothing safe to patch.
+  - `updateExistingScholarship()`: patches amount_min and/or deadline_text if null
+    in production and staging has values. Errors if nothing safe to patch.
+  - `updateExistingArticle()`: patches content if null/empty in production and
+    staging extracted_content is non-empty. Errors if nothing safe to patch.
+  - All update-existing helpers: re-read staged row at POST time; verify approved
+    status; verify match target exists; patch-if-empty only; mark staged 'merged'
+    after successful patch; leave match_*_id and review_notes unchanged.
+
+- `src/pages/admin/imports/[id].astro` extended:
+  - Type definitions updated: StagingUniversity + match_university_id,
+    StagingProgram + staging_university_id + match_program_id,
+    StagingScholarship + match_scholarship_id, StagingArticle + match_article_id.
+  - SELECT queries extended to fetch the new columns.
+  - Program eligibility batch-resolved after data load (no N+1):
+    collect unique staging_university_ids from approved program rows → batch-fetch
+    staging_universities.match_university_id → build Map<rowId, ProgEligibility>.
+  - POST handler: reads merge_action ('create_new'|'update_existing'); passes action
+    to mergeApprovedRow. Defaults to 'create_new' for any unrecognised value.
+  - University actions cell: create-new shown when match_university_id null;
+    update-existing shown when match_university_id set; both require confirmation.
+  - Scholarship actions cell: same pattern (amount_min + deadline_text patch note).
+  - Article actions cell: same pattern (content patch note).
+  - Program actions cell: create-new form shown only when eligibility chain resolves;
+    blocked reason shown otherwise. No update-existing for programs.
+
+- Deferred to Phase 45+:
+  - programs update-existing mode
+  - manual production university picker for programs
+  - bulk merge, auto-merge, duplicate resolution
+  - verification_events on merge, data_sources linkage
+  - article category FK, scholarship currency
 
 Phase 42 — Staging Review + Safe Merge Planning Bundle (complete):
 

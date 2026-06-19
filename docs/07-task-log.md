@@ -4,6 +4,92 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 44: Program Merge + Safe Update MVP Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Extend staged-to-production merge with program create-new merge (FK chain–gated)
+and safe update-existing mode for universities, scholarships, and articles.
+No migration. No bulk merge. No destructive overwrite.
+
+---
+
+### Files Modified
+
+src/lib/admin/importMerge.ts:
+  MergeEntityType: extended to include 'programs'.
+  MergeAction type exported: 'create_new' | 'update_existing'.
+  mergeApprovedRow(): added optional action param (defaults 'create_new').
+    Routes update_existing to updateExistingRow(); enforces UPDATE_EXISTING_TYPES allowlist.
+    Routes programs create_new to mergeProgram().
+  updateExistingRow(): exported dispatcher to entity-specific update-existing helpers.
+  updateExistingUniversity(): re-reads staged row; verifies approved + match_university_id;
+    reads production university; patches official_url patch-if-empty; errors if nothing to patch;
+    marks staged 'merged' after success.
+  updateExistingScholarship(): patches amount_min + deadline_text patch-if-empty.
+  updateExistingArticle(): patches content patch-if-empty.
+  mergeProgram(): six-step validation + resolution:
+    1. Read staged row; check approved, match_program_id null, title+code+staging_uni present.
+    2. staging_university_id → staging_universities.match_university_id (must be non-null).
+    3. match_university_id → universities (id, country_id, slug); country_id must exist.
+    4. extracted_degree_level_code → degree_levels.code (active=true) → degree_level_id.
+    5. Slug fallback sequence: title / title+code / title+code+uniSlug / title+code+shortUniId.
+    6. Insert program draft; set staging match_program_id + status=merged.
+  All merge functions: re-read from DB at call time; batch+row scoped; 23505 caught.
+
+src/pages/admin/imports/[id].astro:
+  Imports: added MergeAction type from importMerge.
+  StagingUniversity type: added match_university_id.
+  StagingProgram type: added staging_university_id, match_program_id.
+  StagingScholarship type: added match_scholarship_id.
+  StagingArticle type: added match_article_id.
+  SELECT queries: extended to fetch new columns.
+  Program eligibility computation block (after data load):
+    Filters approved programs without match_program_id.
+    Batch-fetches staging_universities.match_university_id for unique staging_university_ids.
+    Builds Map<rowId, ProgEligibility> — no N+1 queries.
+  POST merge handler: reads merge_action; normalises to MergeAction; passes to mergeApprovedRow.
+  University merge UI: create_new when match_university_id null; update_existing when set.
+  Scholarship merge UI: create_new when match_scholarship_id null; update_existing when set.
+  Article merge UI: create_new when match_article_id null; update_existing when set.
+  Program merge UI: create_new form when progEligibility.canMerge true;
+    blocked message with reason when canMerge false; nothing when already merged.
+  All update-existing forms: orange button; confirmation checkbox; field patch note.
+  No fake disabled buttons. No set:html. No service role. No new dependencies.
+
+docs/03-database-plan.md:
+  Updated Phase 43 merge rules section title and deferred list.
+  Added Phase 44 program merge rules, update-existing rules, and deferred list.
+
+docs/06-status.md:
+  Current phase updated to Phase 44. Last completed work block added.
+
+docs/07-task-log.md:
+  This entry.
+
+### Checks Run
+
+npm run build: passed — no type errors, no build warnings on changed files.
+
+Security greps (pages/components/layouts):
+  service_role / SERVICE_ROLE / SUPABASE_SERVICE: 0 matches.
+  createServiceClient: 0 matches.
+  PUBLIC_SUPABASE_SERVICE / PUBLIC_.*SERVICE: 0 matches.
+  innerHTML / set:html: 0 matches.
+
+npm run check: not present in this project.
+
+### Deferred
+
+Programs update-existing mode. Manual production university picker.
+Bulk merge. Auto-merge. Duplicate resolution workflow.
+verification_events on merge. data_sources linkage.
+Article category FK. Scholarship currency mapping.
+
+---
+
 ## 2026-06-19 - Phase 43: Staged-to-Production Merge MVP Bundle
 
 Tool:
