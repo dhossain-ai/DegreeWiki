@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 39 — Data Source + Verification Foundation Bundle — complete.
+
 Phase 38 — Program + Scholarship Advisor Boundary Plan — complete (docs only).
 
 Phase 37 — AI Chat Routing + Static Response Bundle — complete.
@@ -31,6 +33,65 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 39 — Data Source + Verification Foundation Bundle (complete):
+
+- Migration 017: Added `last_verified_at timestamptz` to `articles` table.
+  Articles was the only content table missing this column; all other content tables
+  (countries, universities, programs, scholarships) already had it. SourceBox.astro
+  can now display a verified-at date for articles.
+
+- Admin countries edit: Added `verification_status` select field (same 6-option enum
+  as programs/scholarships/articles). Updated SELECT, type, values, validation, UPDATE.
+
+- Admin universities edit: Added `verification_status` select field. Also added a
+  Data Sources panel below the main edit form.
+
+- Admin programs edit: Added Data Sources panel below the main edit form.
+
+- Admin scholarships edit: Added Data Sources panel below the main edit form.
+
+Data Sources panel (universities, programs, scholarships):
+- Lists all `data_sources` rows linked to the entity via polymorphic entity_type + entity_id.
+- Displays: source_url (clickable), source_type, confidence_level, source_status,
+  source_title, primary badge. No admin notes exposed.
+- Add-source form: source_url (required), source_type, confidence_level, source_status,
+  source_title (optional), is_primary_source checkbox. Uses `_action=add_source` hidden
+  field to discriminate from the main entity edit POST on the same page.
+- On success: redirects to same page (prevents double-submit, shows new row immediately).
+- On error: renders inline error above the form; main entity edit state preserved.
+- SSR session client only. RLS enforces super_admin access (SELECT + INSERT via
+  `manage_data_sources OR super_admin`). No service role.
+
+No new tables. No import pipeline. No user-facing features. No new dependencies.
+Public pages unchanged. SourceBox.astro unchanged.
+
+Files created (1):
+
+  supabase/migrations/017_articles_last_verified_at.sql:
+    Additive/idempotent. One ALTER TABLE ADD COLUMN IF NOT EXISTS.
+    No index (no current filter/sort on last_verified_at for articles).
+
+Files modified (4):
+
+  src/pages/admin/countries/[id].astro:
+    Added VERIFICATION_OPTIONS constant. Added verification_status to SELECT,
+    CountryRecord type, Values type, initial values, POST parsing, validation,
+    UPDATE call, and HTML form (select element before Save buttons).
+
+  src/pages/admin/universities/[id].astro:
+    Added VERIFICATION_OPTIONS + SOURCE_TYPE/CONFIDENCE/SOURCE_STATUS constants.
+    Added verification_status everywhere (same as countries). Added DataSourceRow type,
+    data_sources query, sourceError variable, add_source POST branch, Verification
+    section in edit form, Data Sources panel HTML section after form.
+
+  src/pages/admin/programs/[id].astro:
+    Added SOURCE_TYPE/CONFIDENCE/SOURCE_STATUS constants. Added DataSourceRow type,
+    data_sources query, sourceError variable, add_source POST branch (wraps existing
+    edit logic in else), Data Sources panel HTML section after form.
+
+  src/pages/admin/scholarships/[id].astro:
+    Same changes as programs. entity_type = 'scholarship'.
 
 Phase 35 — Saved Result Chat UI Foundation (complete):
 

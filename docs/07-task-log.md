@@ -4,6 +4,83 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 39: Data Source + Verification Foundation Bundle
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Surface the existing source/verification foundation with the smallest safe additive changes.
+One migration to fix a missing column on articles. Admin verification_status fields added to
+countries and universities (consistent with programs/scholarships/articles). Data sources panel
+added to program/university/scholarship admin detail pages backed by the existing data_sources
+table (migration 009). No new tables, no new dependencies, no public-facing changes.
+
+---
+
+### Files Created
+
+supabase/migrations/017_articles_last_verified_at.sql:
+  Additive, idempotent. ALTER TABLE public.articles ADD COLUMN IF NOT EXISTS last_verified_at timestamptz.
+  Articles was the only content table missing this column.
+
+---
+
+### Files Modified
+
+src/pages/admin/countries/[id].astro:
+  Added VERIFICATION_OPTIONS constant (6 values matching programs/scholarships).
+  Added verification_status to: SELECT query, CountryRecord type, Values type,
+  initial values, POST form parsing, validateIn check, UPDATE call, HTML form select element.
+
+src/pages/admin/universities/[id].astro:
+  Added VERIFICATION_OPTIONS, SOURCE_TYPE_OPTIONS, CONFIDENCE_OPTIONS, SOURCE_STATUS_OPTIONS constants.
+  Added verification_status everywhere (same pattern as countries).
+  Added DataSourceRow type, data_sources SELECT query (entity_type='university', entity_id=id).
+  Added sourceError variable. Added add_source POST branch with if/else discriminating on
+  _action hidden field; on success redirects to same page; on error sets sourceError.
+  Added Verification section (select) to edit form HTML.
+  Added Data Sources panel HTML below main form: lists linked sources, add-source form
+  with source_url (required), source_type, confidence_level, source_status, source_title,
+  is_primary_source. SSR session client. RLS enforced (super_admin required).
+
+src/pages/admin/programs/[id].astro:
+  Added SOURCE_TYPE_OPTIONS, CONFIDENCE_OPTIONS, SOURCE_STATUS_OPTIONS constants.
+  Added DataSourceRow type, data_sources SELECT (entity_type='program').
+  Added sourceError variable. Added add_source POST branch (same _action pattern as universities).
+  Existing entity edit logic wrapped in else block. Added Data Sources panel HTML after form.
+
+src/pages/admin/scholarships/[id].astro:
+  Same changes as programs. entity_type='scholarship'.
+
+---
+
+### Pre-implementation Checks Run
+
+1. Read migration 009 in full before writing any admin source UI.
+2. Confirmed data_sources schema: polymorphic entity_type + entity_id, source_url NOT NULL,
+   source_type/confidence_level/source_status with CHECK constraints and DEFAULTs.
+   No FK on entity_id (by design — see migration 009 header comment).
+3. Confirmed RLS: SELECT and INSERT both reachable by super_admin (requireSuperAdmin guard
+   on all admin pages satisfies `has_role('super_admin')`). manage_data_sources permission
+   not required because super_admin satisfies the OR condition directly.
+4. Confirmed admin pages are fully editable (POST handlers exist on all four pages).
+   Universities was missing verification_status; countries was missing verification_status.
+   Programs and scholarships already had it.
+
+---
+
+### Security Checks
+
+- No service role in pages/components/layouts.
+- No createServiceClient in pages/components/layouts.
+- No public service key exposed.
+- No innerHTML / set:html added.
+- Public pages unchanged. data_sources not joinable from any public route.
+- Admin notes field from data_sources not exposed (source_title only, which is descriptive).
+
+---
+
 ## 2026-06-19 - Phase 37: AI Chat Routing + Static Response Bundle
 
 Tool:
