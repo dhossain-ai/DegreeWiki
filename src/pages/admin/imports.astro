@@ -2,12 +2,55 @@
 import AdminLayout from '../../layouts/AdminLayout.astro'
 import { requireSuperAdmin } from '../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
+import { type FormErrors, validateIn } from '../../lib/admin/validate'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
 if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
 
 const { user, supabase } = guard
+
+const BATCH_TYPES = ['universities', 'programs', 'scholarships', 'articles', 'mixed'] as const
+
+type Values = { batch_type: string; notes: string }
+let values: Values = { batch_type: '', notes: '' }
+let formErrors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = {
+    batch_type: String(form.get('batch_type') ?? '').trim(),
+    notes: String(form.get('notes') ?? '').trim(),
+  }
+
+  const e: FormErrors = {}
+  const typeErr = validateIn(values.batch_type, BATCH_TYPES, 'Batch type')
+  if (typeErr) e.batch_type = typeErr
+  formErrors = e
+
+  if (Object.keys(formErrors).length === 0) {
+    const { data: newBatch, error: insertError } = await supabase
+      .from('import_batches')
+      .insert({
+        batch_type: values.batch_type,
+        import_status: 'pending',
+        total_records: 0,
+        processed_count: 0,
+        error_count: 0,
+        notes: values.notes || null,
+        created_by_user_id: user.id,
+      })
+      .select('id')
+      .single()
+
+    if (insertError || !newBatch) {
+      serverError = 'Could not create batch. Please try again.'
+    } else {
+      return Astro.redirect(`/admin/imports/${newBatch.id}`)
+    }
+  }
+}
 
 const { data, error } = await supabase
   .from('import_batches')
@@ -29,8 +72,44 @@ const rows = (data ?? []) as ImportBatchRow[]
 <AdminLayout title="Imports — DegreeWiki Admin" activePath="/admin/imports" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-bold text-gray-900">Import Batches</h1>
-    <span class="text-sm text-gray-400">Read-only · {rows.length} shown</span>
+    <span class="text-sm text-gray-400">{rows.length} batch{rows.length !== 1 ? 'es' : ''}</span>
   </div>
+
+  <details class="mb-6 border border-gray-200 rounded-lg bg-white">
+    <summary class="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer select-none hover:bg-gray-50 rounded-lg">
+      + Create Import Batch
+    </summary>
+    <div class="px-4 pb-4 pt-3 border-t border-gray-200">
+      {serverError && (
+        <div class="mb-3 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+      )}
+      <form method="post" class="space-y-3 max-w-sm">
+        <div>
+          <label for="batch_type" class="block text-sm font-medium text-gray-700 mb-1">Batch Type *</label>
+          <select id="batch_type" name="batch_type"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="">— select a type —</option>
+            {BATCH_TYPES.map(t => (
+              <option value={t} selected={values.batch_type === t}>{t}</option>
+            ))}
+          </select>
+          {formErrors.batch_type && <p class="mt-1 text-xs text-red-600">{formErrors.batch_type}</p>}
+        </div>
+        <div>
+          <label for="notes" class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <textarea id="notes" name="notes" rows="2"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            placeholder="Optional: describe the source or purpose of this batch">{values.notes}</textarea>
+        </div>
+        <div class="flex gap-3 pt-1">
+          <button type="submit"
+            class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+            Create Batch
+          </button>
+        </div>
+      </form>
+    </div>
+  </details>
 
   {error ? (
     <p class="text-sm text-red-600 py-4">Could not load data.</p>
@@ -47,6 +126,7 @@ const rows = (data ?? []) as ImportBatchRow[]
             <th class="px-4 py-3">Processed</th>
             <th class="px-4 py-3">Errors</th>
             <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
@@ -70,6 +150,9 @@ const rows = (data ?? []) as ImportBatchRow[]
                 </span>
               </td>
               <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3">
+                <a href={`/admin/imports/${row.id}`} class="text-xs text-blue-600 hover:underline">View</a>
+              </td>
             </tr>
           ))}
         </tbody>
