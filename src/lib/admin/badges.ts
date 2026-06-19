@@ -18,6 +18,7 @@ export const IMPORT_STATUS_BADGE: Record<string, string> = {
   rejected: 'bg-red-100 text-red-600',
   error: 'bg-red-200 text-red-800',
   skipped: 'bg-gray-100 text-gray-400',
+  merged: 'bg-emerald-100 text-emerald-700',
 }
 
 export const BATCH_TYPE_BADGE: Record<string, string> = {
