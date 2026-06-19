@@ -17,11 +17,15 @@ const { user, supabase } = guard
 const { id } = Astro.params
 
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS   = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const SOURCE_TYPE_OPTIONS    = ['official_university', 'government', 'third_party', 'aggregator', 'user_submitted'] as const
+const CONFIDENCE_OPTIONS     = ['high', 'medium', 'low', 'unknown'] as const
+const SOURCE_STATUS_OPTIONS  = ['active', 'broken', 'redirected', 'archived'] as const
 
 // Load existing record
 const { data: existing, error: loadError } = await supabase
   .from('universities')
-  .select('id, name, slug, country_id, city_id, official_url, overview, content_status')
+  .select('id, name, slug, country_id, city_id, official_url, overview, content_status, verification_status')
   .eq('id', id)
   .single()
 
@@ -38,6 +42,16 @@ type UniversityRecord = {
   official_url: string | null
   overview: string | null
   content_status: string
+  verification_status: string
+}
+type DataSourceRow = {
+  id: string
+  source_url: string
+  source_title: string | null
+  source_type: string
+  confidence_level: string
+  source_status: string
+  is_primary_source: boolean
 }
 const record = existing as UniversityRecord
 
@@ -52,6 +66,14 @@ type CityOption = { id: string; name: string; country_id: string }
 const countries = (countriesData ?? []) as CountryOption[]
 const cities = (citiesData ?? []) as CityOption[]
 
+const { data: sourcesData } = await supabase
+  .from('data_sources')
+  .select('id, source_url, source_title, source_type, confidence_level, source_status, is_primary_source')
+  .eq('entity_type', 'university')
+  .eq('entity_id', id)
+  .order('is_primary_source', { ascending: false })
+const sources = (sourcesData ?? []) as DataSourceRow[]
+
 type Values = {
   name: string
   slug: string
@@ -60,6 +82,7 @@ type Values = {
   official_url: string
   overview: string
   content_status: string
+  verification_status: string
 }
 
 let values: Values = {
@@ -70,12 +93,34 @@ let values: Values = {
   official_url: record.official_url ?? '',
   overview: record.overview ?? '',
   content_status: record.content_status,
+  verification_status: record.verification_status,
 }
 let errors: FormErrors = {}
 let serverError = ''
+let sourceError = ''
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
+
+  if (form.get('_action') === 'add_source') {
+    const srcUrl = String(form.get('source_url') ?? '').trim()
+    if (!srcUrl) {
+      sourceError = 'Source URL is required.'
+    } else {
+      const { error: srcErr } = await supabase.from('data_sources').insert({
+        entity_type: 'university',
+        entity_id: id,
+        source_url: srcUrl,
+        source_type: String(form.get('source_type') ?? 'third_party').trim() || 'third_party',
+        confidence_level: String(form.get('confidence_level') ?? 'unknown').trim() || 'unknown',
+        source_status: String(form.get('source_status') ?? 'active').trim() || 'active',
+        source_title: String(form.get('source_title') ?? '').trim() || null,
+        is_primary_source: form.get('is_primary_source') === 'true',
+      })
+      if (srcErr) { sourceError = 'Could not add source.' }
+      else { return Astro.redirect(Astro.url.pathname) }
+    }
+  } else {
   values = {
     name: String(form.get('name') ?? '').trim(),
     slug: String(form.get('slug') ?? '').trim(),
@@ -84,6 +129,7 @@ if (Astro.request.method === 'POST') {
     official_url: String(form.get('official_url') ?? '').trim(),
     overview: String(form.get('overview') ?? '').trim(),
     content_status: String(form.get('content_status') ?? 'draft').trim(),
+    verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
   }
 
   if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -97,6 +143,8 @@ if (Astro.request.method === 'POST') {
   if (slugErr) e.slug = slugErr
   const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
   if (statusErr) e.content_status = statusErr
+  const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
+  if (verErr) e.verification_status = verErr
 
   errors = e
 
@@ -111,6 +159,7 @@ if (Astro.request.method === 'POST') {
         official_url: values.official_url || null,
         overview: values.overview || null,
         content_status: values.content_status,
+        verification_status: values.verification_status,
       })
       .eq('id', id)
 
@@ -124,6 +173,7 @@ if (Astro.request.method === 'POST') {
       return Astro.redirect('/admin/universities')
     }
   }
+  } // end else (entity edit)
 }
 ---
 <AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/universities" userEmail={user.email ?? ''}>
@@ -198,6 +248,17 @@ if (Astro.request.method === 'POST') {
       {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
     </div>
 
+    <div>
+      <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Verification Status</label>
+      <select id="verification_status" name="verification_status"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        {VERIFICATION_OPTIONS.map(s => (
+          <option value={s} selected={values.verification_status === s}>{s}</option>
+        ))}
+      </select>
+      {errors.verification_status && <p class="mt-1 text-xs text-red-600">{errors.verification_status}</p>}
+    </div>
+
     <div class="flex gap-3 pt-2">
       <button type="submit"
         class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
@@ -206,4 +267,83 @@ if (Astro.request.method === 'POST') {
       <a href="/admin/universities" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
     </div>
   </form>
+
+  <!-- Data Sources Panel -->
+  <div class="mt-8 border-t border-gray-200 pt-6 max-w-xl">
+    <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Data Sources</h2>
+
+    {sources.length > 0 ? (
+      <div class="space-y-2 mb-6">
+        {sources.map(s => (
+          <div class="px-3 py-2 bg-gray-50 rounded border border-gray-200 text-sm">
+            <div class="flex items-start gap-2">
+              {s.is_primary_source && (
+                <span class="shrink-0 inline-block px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded">primary</span>
+              )}
+              <a href={s.source_url} target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 hover:underline break-all font-mono text-xs">{s.source_url}</a>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">
+              {s.source_type} · {s.confidence_level} confidence · {s.source_status}
+              {s.source_title ? ` · ${s.source_title}` : ''}
+            </p>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <p class="text-sm text-gray-400 mb-6">No sources linked yet.</p>
+    )}
+
+    <form method="post" class="space-y-3">
+      <input type="hidden" name="_action" value="add_source" />
+      <p class="text-xs font-semibold text-gray-600 mb-2">Add a source</p>
+      {sourceError && <p class="text-xs text-red-600 mb-2">{sourceError}</p>}
+      <div class="space-y-3 bg-gray-50 p-4 rounded border border-gray-200">
+        <div>
+          <label for="source_url" class="block text-sm font-medium text-gray-700 mb-1">URL *</label>
+          <input type="url" id="source_url" name="source_url" placeholder="https://..."
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label for="source_type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <select id="source_type" name="source_type"
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {SOURCE_TYPE_OPTIONS.map(t => <option value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label for="confidence_level" class="block text-sm font-medium text-gray-700 mb-1">Confidence</label>
+            <select id="confidence_level" name="confidence_level"
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {CONFIDENCE_OPTIONS.map(t => <option value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label for="source_status_input" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <select id="source_status_input" name="source_status"
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {SOURCE_STATUS_OPTIONS.map(t => <option value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label for="source_title" class="block text-sm font-medium text-gray-700 mb-1">Title (optional)</label>
+          <input type="text" id="source_title" name="source_title" placeholder="e.g. Official university homepage"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="checkbox" id="is_primary_source" name="is_primary_source" value="true"
+            class="h-4 w-4 text-blue-600 rounded border-gray-300" />
+          <label for="is_primary_source" class="text-sm text-gray-700">Primary source</label>
+        </div>
+        <div>
+          <button type="submit"
+            class="px-3 py-1.5 text-xs font-medium bg-gray-700 text-white rounded-md hover:bg-gray-800">
+            Add Source
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
 </AdminLayout>
