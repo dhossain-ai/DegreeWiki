@@ -4,7 +4,7 @@ import { requireSuperAdmin } from '../../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
 import { applyReviewAction } from '../../../lib/admin/importReview'
-import { mergeApprovedRow } from '../../../lib/admin/importMerge'
+import { mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -118,6 +118,8 @@ if (Astro.request.method === 'POST') {
     } else {
       const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
       const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
+      const rawMergeAction = fd.get('merge_action')?.toString().trim() ?? 'create_new'
+      const mergeAction: MergeAction = rawMergeAction === 'update_existing' ? 'update_existing' : 'create_new'
 
       // Batch type must match entity type unless batch is mixed.
       if (b.batch_type !== 'mixed' && b.batch_type !== rawEntityType) {
@@ -127,6 +129,7 @@ if (Astro.request.method === 'POST') {
           entityType: rawEntityType,
           rowId: rawRowId,
           batchId: b.id,
+          action: mergeAction,
         })
         if (result.ok) {
           return Astro.redirect(`/admin/imports/${b.id}`)
@@ -268,6 +271,7 @@ type StagingUniversity = {
   extracted_name: string | null
   extracted_country_code: string | null
   extracted_official_url: string | null
+  match_university_id: string | null
   import_status: string
   review_notes: string | null
   reviewed_by_user_id: string | null
@@ -279,6 +283,8 @@ type StagingProgram = {
   id: string
   extracted_title: string | null
   extracted_degree_level_code: string | null
+  staging_university_id: string | null
+  match_program_id: string | null
   import_status: string
   review_notes: string | null
   reviewed_by_user_id: string | null
@@ -290,6 +296,7 @@ type StagingScholarship = {
   id: string
   extracted_name: string | null
   extracted_amount: number | null
+  match_scholarship_id: string | null
   import_status: string
   review_notes: string | null
   reviewed_by_user_id: string | null
@@ -302,6 +309,7 @@ type StagingArticle = {
   extracted_title: string | null
   extracted_slug: string | null
   extracted_category: string | null
+  match_article_id: string | null
   import_status: string
   review_notes: string | null
   reviewed_by_user_id: string | null
@@ -328,7 +336,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showUniversities
     ? supabase
         .from('staging_universities')
-        .select('id, extracted_name, extracted_country_code, extracted_official_url, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, extracted_name, extracted_country_code, extracted_official_url, match_university_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -336,7 +344,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showPrograms
     ? supabase
         .from('staging_programs')
-        .select('id, extracted_title, extracted_degree_level_code, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, extracted_title, extracted_degree_level_code, staging_university_id, match_program_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -344,7 +352,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showScholarships
     ? supabase
         .from('staging_scholarships')
-        .select('id, extracted_name, extracted_amount, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, extracted_name, extracted_amount, match_scholarship_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -352,7 +360,7 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
   showArticles
     ? supabase
         .from('staging_articles')
-        .select('id, extracted_title, extracted_slug, extracted_category, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, extracted_title, extracted_slug, extracted_category, match_article_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
         .limit(50)
@@ -377,6 +385,55 @@ for (const e of stagingErrors) {
     const existing = errsByRowId.get(e.staging_row_id) ?? []
     existing.push(e)
     errsByRowId.set(e.staging_row_id, existing)
+  }
+}
+
+// Batch-resolve program merge eligibility (avoid N+1)
+type ProgEligibility = { canMerge: true } | { canMerge: false; reason: string }
+const progEligibility = new Map<string, ProgEligibility>()
+
+if (stagingPrograms.length > 0) {
+  const mergeCandidates = stagingPrograms.filter(
+    r => r.import_status === 'approved' && !r.match_program_id
+  )
+  const stagingUniIds = [...new Set(
+    mergeCandidates.map(r => r.staging_university_id).filter((id): id is string => id != null)
+  )]
+
+  // id → match_university_id
+  const stagingUniMatchMap = new Map<string, string | null>()
+  if (stagingUniIds.length > 0) {
+    const { data: stagingUnis } = await supabase
+      .from('staging_universities')
+      .select('id, match_university_id')
+      .in('id', stagingUniIds)
+    for (const su of (stagingUnis ?? [])) {
+      stagingUniMatchMap.set(
+        (su as { id: string; match_university_id: string | null }).id,
+        (su as { id: string; match_university_id: string | null }).match_university_id
+      )
+    }
+  }
+
+  for (const prog of mergeCandidates) {
+    if (!prog.staging_university_id) {
+      progEligibility.set(prog.id, { canMerge: false, reason: 'No linked staging university.' })
+      continue
+    }
+    if (!stagingUniMatchMap.has(prog.staging_university_id)) {
+      progEligibility.set(prog.id, { canMerge: false, reason: 'Staging university row not found.' })
+      continue
+    }
+    const matchUniId = stagingUniMatchMap.get(prog.staging_university_id)
+    if (!matchUniId) {
+      progEligibility.set(prog.id, {
+        canMerge: false,
+        reason: 'Linked staging university has not been merged yet. Merge the university first.',
+      })
+      continue
+    }
+    // FK chain looks complete — degree_level and country_id checked server-side at merge time
+    progEligibility.set(prog.id, { canMerge: true })
   }
 }
 
@@ -666,11 +723,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
-                  {row.import_status === 'approved' && (
+                  {row.import_status === 'approved' && !row.match_university_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
                       <input type="hidden" name="_action" value="merge" />
                       <input type="hidden" name="entity_type" value="universities" />
                       <input type="hidden" name="row_id" value={row.id} />
+                      <input type="hidden" name="merge_action" value="create_new" />
                       <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
                       <label class="flex items-start gap-1.5 text-gray-600">
                         <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
@@ -678,6 +736,23 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </label>
                       <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
                         Merge to Production
+                      </button>
+                    </form>
+                  )}
+                  {row.import_status === 'approved' && row.match_university_id && (
+                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="merge" />
+                      <input type="hidden" name="entity_type" value="universities" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <input type="hidden" name="merge_action" value="update_existing" />
+                      <p class="text-amber-700 font-medium">Update existing production university.</p>
+                      <p class="text-gray-500">Will patch <code>official_url</code> only if currently empty in production.</p>
+                      <label class="flex items-start gap-1.5 text-gray-600">
+                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                        <span>I confirm this writes to a production record.</span>
+                      </label>
+                      <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
+                        Update Existing
                       </button>
                     </form>
                   )}
@@ -751,6 +826,36 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
+                  {row.import_status === 'approved' && !row.match_program_id && (() => {
+                    const elig = progEligibility.get(row.id)
+                    if (!elig) return null
+                    if (!elig.canMerge) {
+                      return (
+                        <p class="mt-2 border-t border-gray-100 pt-2 text-red-700">
+                          Cannot merge: {elig.reason}
+                        </p>
+                      )
+                    }
+                    return (
+                      <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                        <input type="hidden" name="_action" value="merge" />
+                        <input type="hidden" name="entity_type" value="programs" />
+                        <input type="hidden" name="row_id" value={row.id} />
+                        <input type="hidden" name="merge_action" value="create_new" />
+                        <p class="text-amber-700 font-medium">This will create a new draft production program.</p>
+                        <label class="flex items-start gap-1.5 text-gray-600">
+                          <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                          <span>I confirm this creates a production record.</span>
+                        </label>
+                        <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                          Merge to Production
+                        </button>
+                      </form>
+                    )
+                  })()}
+                  {row.import_status === 'merged' && (
+                    <p class="mt-2 text-emerald-700 font-medium">Merged to production.</p>
+                  )}
                 </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
@@ -818,11 +923,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
-                  {row.import_status === 'approved' && (
+                  {row.import_status === 'approved' && !row.match_scholarship_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
                       <input type="hidden" name="_action" value="merge" />
                       <input type="hidden" name="entity_type" value="scholarships" />
                       <input type="hidden" name="row_id" value={row.id} />
+                      <input type="hidden" name="merge_action" value="create_new" />
                       <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
                       <label class="flex items-start gap-1.5 text-gray-600">
                         <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
@@ -830,6 +936,23 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </label>
                       <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
                         Merge to Production
+                      </button>
+                    </form>
+                  )}
+                  {row.import_status === 'approved' && row.match_scholarship_id && (
+                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="merge" />
+                      <input type="hidden" name="entity_type" value="scholarships" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <input type="hidden" name="merge_action" value="update_existing" />
+                      <p class="text-amber-700 font-medium">Update existing production scholarship.</p>
+                      <p class="text-gray-500">Will patch <code>amount_min</code> and <code>deadline_text</code> only if currently empty in production.</p>
+                      <label class="flex items-start gap-1.5 text-gray-600">
+                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                        <span>I confirm this writes to a production record.</span>
+                      </label>
+                      <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
+                        Update Existing
                       </button>
                     </form>
                   )}
@@ -905,11 +1028,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </div>
                     </form>
                   </details>
-                  {row.import_status === 'approved' && (
+                  {row.import_status === 'approved' && !row.match_article_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
                       <input type="hidden" name="_action" value="merge" />
                       <input type="hidden" name="entity_type" value="articles" />
                       <input type="hidden" name="row_id" value={row.id} />
+                      <input type="hidden" name="merge_action" value="create_new" />
                       <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
                       <label class="flex items-start gap-1.5 text-gray-600">
                         <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
@@ -917,6 +1041,23 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                       </label>
                       <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
                         Merge to Production
+                      </button>
+                    </form>
+                  )}
+                  {row.import_status === 'approved' && row.match_article_id && (
+                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
+                      <input type="hidden" name="_action" value="merge" />
+                      <input type="hidden" name="entity_type" value="articles" />
+                      <input type="hidden" name="row_id" value={row.id} />
+                      <input type="hidden" name="merge_action" value="update_existing" />
+                      <p class="text-amber-700 font-medium">Update existing production article.</p>
+                      <p class="text-gray-500">Will patch <code>content</code> only if currently empty in production.</p>
+                      <label class="flex items-start gap-1.5 text-gray-600">
+                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                        <span>I confirm this writes to a production record.</span>
+                      </label>
+                      <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
+                        Update Existing
                       </button>
                     </form>
                   )}
