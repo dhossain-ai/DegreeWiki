@@ -4,6 +4,8 @@ Last updated: 2026-06-19
 
 ## Current Phase
 
+Phase 41 — Manual Staged Record Entry + Validation Preview — complete.
+
 Phase 40 — Import / Staging Foundation Bundle — complete.
 
 Phase 39 — Data Source + Verification Foundation Bundle — complete.
@@ -33,6 +35,41 @@ Phase 28 — AI Finder Production Hardening — complete.
 Phase 27 — Saved Finder Results Management — complete.
 
 Phase 26 — AI Finder Result Persistence — complete.
+
+## Last Completed Work
+
+Phase 41 — Manual Staged Record Entry + Validation Preview (complete):
+
+- New `src/lib/admin/importValidation.ts`: pure validation helpers. `parseRawData()` validates
+  JSON and blocks insert on malformed input. `validateStagedRecord()` runs deterministic
+  field-level checks per entity type (universities: name/URL/country code; programs: title/tuition;
+  scholarships: name/amount; articles: title/slug/content length). No AI, no external calls.
+
+- `/admin/imports/[id]`: Added POST handler for manual staged row creation. Entity-type-prefixed
+  form field names (uni_*, prog_*, sch_*, art_*) avoid name collisions in the mixed-batch form.
+  For non-mixed batches: hidden `entity_type` input, only the relevant fieldset shown.
+  For mixed batches: entity type `<select>` + all four labeled fieldsets visible; server reads
+  only the selected entity's prefixed fields. Invalid JSON blocks insert with inline form error.
+  On clean insert: import_status='validated'. On warnings: import_status='pending' plus one
+  staging_errors row per warning (error_type='validation_warning'). No needs_review used.
+  Redirect to same page on success. No approve/reject/delete buttons added.
+
+No schema migration. No new dependencies. No service role. No innerHTML/set:html.
+No production table writes. No approve/merge workflow.
+
+Files created (1):
+  src/lib/admin/importValidation.ts
+
+Files modified (3):
+  src/pages/admin/imports/[id].astro
+  docs/06-status.md, docs/07-task-log.md
+
+Validation results:
+  npm run build: passed (Server built in 8.01s).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in pages/components/layouts: 0 matches.
+  createServiceClient in pages/components/layouts: 0 matches.
+  PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE in src/: 0 matches.
+  innerHTML|set:html in pages/components: 0 matches.
 
 ## Last Completed Work
 

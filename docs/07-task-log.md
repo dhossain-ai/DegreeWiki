@@ -4,6 +4,88 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-19 - Phase 41: Manual Staged Record Entry + Validation Preview
+
+Tool:
+Claude (claude-sonnet-4-6)
+
+Goal:
+Allow super admins to manually add staged records into existing import batches and preview
+deterministic validation warnings. Store rows only in staging tables. Store validation warnings
+in staging_errors. No file upload, no AI, no approve/merge, no production table writes.
+
+---
+
+### Files Created
+
+src/lib/admin/importValidation.ts:
+  New. Pure functions only — no DB access, no external calls.
+  `parseRawData(raw: string)`: returns `{ ok: true, value }` for valid JSON object or empty string;
+    returns `{ ok: false, error }` for invalid JSON or non-object value. Used to block insert.
+  `validateStagedRecord(entityType, values)`: returns `{ warnings: string[] }` from deterministic
+    field checks:
+      universities: warn if extracted_name missing; warn if extracted_official_url missing or
+        invalid URL; warn if extracted_country_code non-empty but not 2 chars.
+      programs: warn if extracted_title missing; warn if extracted_tuition_amount non-numeric.
+      scholarships: warn if extracted_name missing; warn if extracted_amount non-numeric.
+      articles: warn if extracted_title missing; warn if extracted_slug missing or fails
+        /^[a-z0-9-]+$/; warn if extracted_content non-empty but < 50 chars.
+  Private `isValidUrl()` uses `new URL()` — no network calls.
+
+---
+
+### Files Modified
+
+src/pages/admin/imports/[id].astro:
+  Added import of parseRawData, validateStagedRecord, StagedEntityType from importValidation.ts.
+  Added helper constants: VALID_ENTITY_TYPES, ENTITY_PREFIX (uni_/prog_/sch_/art_),
+    STAGING_TABLE_NAME map, nullIfEmpty(), numericOrNull().
+  Added POST handler block (before GET data loading):
+    - Reads entity_type from form; validates against VALID_ENTITY_TYPES.
+    - Rejects entity_type that doesn't match batch_type (unless batch is mixed).
+    - Calls parseRawData(); if invalid JSON sets formError and falls through to render.
+    - Reads entity-type-prefixed form fields (e.g., uni_extracted_name for universities).
+    - Calls validateStagedRecord(); assigns import_status='validated' (no warnings) or
+      import_status='pending' (warnings present). Does not use needs_review.
+    - Inserts into correct staging table (literal table name per entity branch, not dynamic).
+    - On insert failure: sets formError, falls through to render.
+    - On success: if warnings exist, inserts one staging_errors row per warning
+      (error_type='validation_warning', staging_table=staging_*, staging_row_id=inserted.id).
+      Then redirects to /admin/imports/{b.id}.
+  Added "Add Staged Record" <details> collapsible form between batch metadata and records tables.
+    Form uses entity-type-prefixed input names to avoid name collisions (extracted_name shared by
+    universities and scholarships; extracted_title shared by programs and articles;
+    extracted_deadline shared by programs and scholarships).
+    Non-mixed batches: hidden entity_type input, only the relevant <fieldset> shown.
+    Mixed batches: entity type <select> (required) + all four labeled <fieldset> groups visible;
+      server reads only the selected entity's prefixed fields via ENTITY_PREFIX map.
+    Shared raw_data textarea at bottom (no prefix needed, no name collision).
+    Form opens automatically (open attribute) if formError is set.
+    Inline error banner shown if formError is set.
+    No approve/reject/delete buttons. No JS required.
+  No changes to GET data loading or existing staging record tables.
+  Added INPUT_CLS and LABEL_CLS string constants for form styling consistency.
+
+---
+
+### Checks Run
+
+npm run build: passed — Server built in ~8s, no errors.
+Get-ChildItem src/pages,src/components,src/layouts | Select-String "service_role|SERVICE_ROLE|SUPABASE_SERVICE": 0 matches.
+Get-ChildItem src/pages,src/components,src/layouts | Select-String "createServiceClient": 0 matches.
+Get-ChildItem src/ | Select-String "PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE": 0 matches.
+Get-ChildItem src/pages,src/components | Select-String "innerHTML|set:html": 0 matches.
+
+---
+
+### Deferred
+
+CSV/XLSX/JSON upload · AI extraction · scraping · background jobs · approve/reject/merge workflow ·
+production table writes · row editing/deletion · duplicate detection · field-level source tracking ·
+data_quality_checks integration · public display of staged data.
+
+---
+
 ## 2026-06-19 - Phase 40: Import / Staging Foundation Bundle
 
 Tool:

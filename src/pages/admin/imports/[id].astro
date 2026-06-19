@@ -2,6 +2,7 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { requireSuperAdmin } from '../../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -49,6 +50,174 @@ if (b.data_source_id) {
     .single()
   dataSource = (ds ?? null) as DataSourceRow | null
 }
+
+// ---- Manual staged record creation ----
+// Form uses entity-type-prefixed field names to avoid collisions in the
+// mixed-batch case where all four entity groups are visible at once:
+//   uni_*   → staging_universities fields
+//   prog_*  → staging_programs fields
+//   sch_*   → staging_scholarships fields
+//   art_*   → staging_articles fields
+//   raw_data → shared for all entity types
+
+const VALID_ENTITY_TYPES: readonly StagedEntityType[] = ['universities', 'programs', 'scholarships', 'articles']
+
+const ENTITY_PREFIX: Record<StagedEntityType, string> = {
+  universities: 'uni_',
+  programs: 'prog_',
+  scholarships: 'sch_',
+  articles: 'art_',
+}
+
+const STAGING_TABLE_NAME: Record<StagedEntityType, string> = {
+  universities: 'staging_universities',
+  programs: 'staging_programs',
+  scholarships: 'staging_scholarships',
+  articles: 'staging_articles',
+}
+
+function nullIfEmpty(s: string): string | null {
+  const v = s.trim()
+  return v || null
+}
+
+function numericOrNull(s: string): number | null {
+  const v = s.trim()
+  if (!v) return null
+  const n = Number(v)
+  return isNaN(n) ? null : n
+}
+
+let formError: string | null = null
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData()
+  const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+
+  if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
+    formError = 'Invalid entity type.'
+  } else {
+    const entityType = rawEntityType as StagedEntityType
+
+    if (b.batch_type !== 'mixed' && b.batch_type !== entityType) {
+      formError = 'Entity type does not match this batch type.'
+    } else {
+      const rawDataStr = fd.get('raw_data')?.toString() ?? ''
+      const rawDataResult = parseRawData(rawDataStr)
+
+      if (!rawDataResult.ok) {
+        formError = rawDataResult.error
+      } else {
+        const rawData = rawDataResult.value
+        const pfx = ENTITY_PREFIX[entityType]
+        const fv = (key: string) => fd.get(`${pfx}${key}`)?.toString() ?? ''
+
+        // Build values for validation (validator expects un-prefixed keys)
+        const vals: Record<string, string> = {
+          extracted_name: fv('extracted_name'),
+          extracted_country_code: fv('extracted_country_code'),
+          extracted_official_url: fv('extracted_official_url'),
+          extracted_title: fv('extracted_title'),
+          extracted_degree_level_code: fv('extracted_degree_level_code'),
+          extracted_language: fv('extracted_language'),
+          extracted_tuition_amount: fv('extracted_tuition_amount'),
+          extracted_deadline: fv('extracted_deadline'),
+          extracted_amount: fv('extracted_amount'),
+          extracted_slug: fv('extracted_slug'),
+          extracted_category: fv('extracted_category'),
+          extracted_content: fv('extracted_content'),
+        }
+
+        const { warnings } = validateStagedRecord(entityType, vals)
+        const importStatus = warnings.length === 0 ? 'validated' : 'pending'
+
+        let insertedId: string | null = null
+        let insertFailed = false
+
+        if (entityType === 'universities') {
+          const { data, error } = await supabase
+            .from('staging_universities')
+            .insert({
+              import_batch_id: b.id,
+              raw_data: rawData,
+              extracted_name: nullIfEmpty(vals.extracted_name),
+              extracted_country_code: nullIfEmpty(vals.extracted_country_code),
+              extracted_official_url: nullIfEmpty(vals.extracted_official_url),
+              import_status: importStatus,
+            })
+            .select('id')
+            .single()
+          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+        } else if (entityType === 'programs') {
+          const { data, error } = await supabase
+            .from('staging_programs')
+            .insert({
+              import_batch_id: b.id,
+              raw_data: rawData,
+              extracted_title: nullIfEmpty(vals.extracted_title),
+              extracted_degree_level_code: nullIfEmpty(vals.extracted_degree_level_code),
+              extracted_language: nullIfEmpty(vals.extracted_language),
+              extracted_tuition_amount: numericOrNull(vals.extracted_tuition_amount),
+              extracted_deadline: nullIfEmpty(vals.extracted_deadline),
+              import_status: importStatus,
+            })
+            .select('id')
+            .single()
+          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+        } else if (entityType === 'scholarships') {
+          const { data, error } = await supabase
+            .from('staging_scholarships')
+            .insert({
+              import_batch_id: b.id,
+              raw_data: rawData,
+              extracted_name: nullIfEmpty(vals.extracted_name),
+              extracted_amount: numericOrNull(vals.extracted_amount),
+              extracted_deadline: nullIfEmpty(vals.extracted_deadline),
+              import_status: importStatus,
+            })
+            .select('id')
+            .single()
+          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+        } else {
+          const { data, error } = await supabase
+            .from('staging_articles')
+            .insert({
+              import_batch_id: b.id,
+              raw_data: rawData,
+              extracted_title: nullIfEmpty(vals.extracted_title),
+              extracted_slug: nullIfEmpty(vals.extracted_slug),
+              extracted_category: nullIfEmpty(vals.extracted_category),
+              extracted_content: nullIfEmpty(vals.extracted_content),
+              import_status: importStatus,
+            })
+            .select('id')
+            .single()
+          if (error || !data) { insertFailed = true } else { insertedId = (data as { id: string }).id }
+        }
+
+        if (insertFailed) {
+          formError = 'Failed to insert staged record. Please try again.'
+        } else if (insertedId) {
+          if (warnings.length > 0) {
+            const rowId = insertedId
+            await supabase.from('staging_errors').insert(
+              warnings.map(w => ({
+                import_batch_id: b.id,
+                staging_table: STAGING_TABLE_NAME[entityType],
+                staging_row_id: rowId,
+                error_type: 'validation_warning',
+                error_message: w,
+              }))
+            )
+          }
+          return Astro.redirect(`/admin/imports/${b.id}`)
+        }
+      }
+    }
+  }
+}
+
+// ---- GET: load staging data ----
 
 type StagingUniversity = {
   id: string
@@ -151,6 +320,9 @@ const stagingArticles = (artResult.data ?? []) as StagingArticle[]
 const stagingErrors = (errResult.data ?? []) as StagingError[]
 
 const totalStaged = stagingUniversities.length + stagingPrograms.length + stagingScholarships.length + stagingArticles.length
+
+const INPUT_CLS = 'block w-full rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
+const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
 ---
 <AdminLayout title={`Import Batch — DegreeWiki Admin`} activePath="/admin/imports" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
@@ -208,6 +380,156 @@ const totalStaged = stagingUniversities.length + stagingPrograms.length + stagin
       <span class="text-xs text-gray-400 font-mono">{b.id}</span>
     </div>
   </div>
+
+  <!-- Add staged record form -->
+  <details class="mb-6 rounded-lg border border-gray-200 bg-white" {...(formError !== null ? { open: true } : {})}>
+    <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
+      <span class="text-gray-400 text-base leading-none">+</span>
+      Add Staged Record
+    </summary>
+    <div class="px-4 py-4 border-t border-gray-100">
+      {formError && (
+        <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {formError}
+        </div>
+      )}
+      <form method="POST" class="space-y-4">
+        {b.batch_type === 'mixed' ? (
+          <div>
+            <label class={LABEL_CLS}>Entity Type <span class="text-red-500">*</span></label>
+            <select name="entity_type" required class={INPUT_CLS}>
+              <option value="">Select type…</option>
+              <option value="universities">University</option>
+              <option value="programs">Program</option>
+              <option value="scholarships">Scholarship</option>
+              <option value="articles">Article</option>
+            </select>
+            <p class="mt-1 text-xs text-gray-400">Fill in the section matching the selected type. Fields from other sections are ignored.</p>
+          </div>
+        ) : (
+          <input type="hidden" name="entity_type" value={b.batch_type} />
+        )}
+
+        {/* University fields */}
+        {showUniversities && (
+          <fieldset class="border border-gray-200 rounded-md p-3">
+            <legend class="px-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">University</legend>
+            <div class="space-y-3 mt-1">
+              <div>
+                <label class={LABEL_CLS}>Name</label>
+                <input type="text" name="uni_extracted_name" class={INPUT_CLS} placeholder="University of Example" />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class={LABEL_CLS}>Country Code</label>
+                  <input type="text" name="uni_extracted_country_code" maxlength="2" class={INPUT_CLS} placeholder="US" />
+                </div>
+                <div>
+                  <label class={LABEL_CLS}>Official URL</label>
+                  <input type="text" name="uni_extracted_official_url" class={INPUT_CLS} placeholder="https://example.edu" />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        )}
+
+        {/* Program fields */}
+        {showPrograms && (
+          <fieldset class="border border-gray-200 rounded-md p-3">
+            <legend class="px-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Program</legend>
+            <div class="space-y-3 mt-1">
+              <div>
+                <label class={LABEL_CLS}>Title</label>
+                <input type="text" name="prog_extracted_title" class={INPUT_CLS} placeholder="MSc Computer Science" />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class={LABEL_CLS}>Degree Level Code</label>
+                  <input type="text" name="prog_extracted_degree_level_code" class={INPUT_CLS} placeholder="msc" />
+                </div>
+                <div>
+                  <label class={LABEL_CLS}>Language</label>
+                  <input type="text" name="prog_extracted_language" class={INPUT_CLS} placeholder="English" />
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class={LABEL_CLS}>Tuition Amount</label>
+                  <input type="text" name="prog_extracted_tuition_amount" class={INPUT_CLS} placeholder="15000" />
+                </div>
+                <div>
+                  <label class={LABEL_CLS}>Deadline</label>
+                  <input type="text" name="prog_extracted_deadline" class={INPUT_CLS} placeholder="2026-03-01" />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        )}
+
+        {/* Scholarship fields */}
+        {showScholarships && (
+          <fieldset class="border border-gray-200 rounded-md p-3">
+            <legend class="px-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Scholarship</legend>
+            <div class="space-y-3 mt-1">
+              <div>
+                <label class={LABEL_CLS}>Name</label>
+                <input type="text" name="sch_extracted_name" class={INPUT_CLS} placeholder="Global Excellence Scholarship" />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class={LABEL_CLS}>Amount</label>
+                  <input type="text" name="sch_extracted_amount" class={INPUT_CLS} placeholder="5000" />
+                </div>
+                <div>
+                  <label class={LABEL_CLS}>Deadline</label>
+                  <input type="text" name="sch_extracted_deadline" class={INPUT_CLS} placeholder="2026-05-01" />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        )}
+
+        {/* Article fields */}
+        {showArticles && (
+          <fieldset class="border border-gray-200 rounded-md p-3">
+            <legend class="px-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Article</legend>
+            <div class="space-y-3 mt-1">
+              <div>
+                <label class={LABEL_CLS}>Title</label>
+                <input type="text" name="art_extracted_title" class={INPUT_CLS} placeholder="How to Apply for a Scholarship" />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class={LABEL_CLS}>Slug</label>
+                  <input type="text" name="art_extracted_slug" class={INPUT_CLS} placeholder="how-to-apply-for-scholarship" />
+                </div>
+                <div>
+                  <label class={LABEL_CLS}>Category</label>
+                  <input type="text" name="art_extracted_category" class={INPUT_CLS} placeholder="scholarships" />
+                </div>
+              </div>
+              <div>
+                <label class={LABEL_CLS}>Content</label>
+                <textarea name="art_extracted_content" rows="4" class={INPUT_CLS} placeholder="Article body text…"></textarea>
+              </div>
+            </div>
+          </fieldset>
+        )}
+
+        <div>
+          <label class={LABEL_CLS}>Raw Data (JSON, optional)</label>
+          <textarea name="raw_data" rows="3" class={INPUT_CLS} placeholder={'{"source": "manual"}'}></textarea>
+          <p class="mt-1 text-xs text-gray-400">Must be a valid JSON object if provided. Leave blank to default to {}.</p>
+        </div>
+
+        <div>
+          <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1">
+            Add Record
+          </button>
+        </div>
+      </form>
+    </div>
+  </details>
 
   {totalStaged === 0 && stagingErrors.length === 0 ? (
     <p class="text-sm text-gray-500 py-2">No staged records or errors for this batch yet.</p>
