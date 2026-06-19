@@ -149,26 +149,57 @@ Import flow:
 7. approve/reject/merge
 8. publish to live tables
 
-## Staged-to-Production Merge Rules (Phase 43 MVP — Implemented)
+## Staged-to-Production Merge Rules (Phase 44 MVP — Implemented)
 
-Phase 43 implemented one-by-one create-new merge for approved staged rows.
-The implementation lives in `src/lib/admin/importMerge.ts`.
-The UI lives in `src/pages/admin/imports/[id].astro`.
+Phase 43 + Phase 44 implement one-by-one staged-to-production merge.
+Implementation: `src/lib/admin/importMerge.ts`.
+UI: `src/pages/admin/imports/[id].astro`.
 
-### Implemented: Phase 43 MVP
+### Implemented: Phase 44 MVP
 
-Supported entity types:
-- universities (create-new only)
-- scholarships (create-new only)
-- articles (create-new only)
+Create-new supported entity types:
+- universities
+- scholarships
+- articles
+- programs (FK chain–gated: staging_university_id must link to a merged staged university)
 
-Deferred entity types:
-- programs (requires university_id, degree_level_id, country_id FKs not available in staging)
+Update-existing supported entity types:
+- universities (patches official_url if null in production)
+- scholarships (patches amount_min and/or deadline_text if null in production)
+- articles (patches content if null in production)
+
+Deferred entity types (update-existing):
+- programs update-existing — deferred to Phase 45+
 
 Deferred modes:
-- update-existing (all types) — match columns exist, implementation deferred to Phase 44
-- bulk merge — deferred indefinitely until single-record workflow is stable
+- bulk merge — deferred indefinitely
 - auto-merge — never
+
+### Program Merge — FK Resolution Chain
+
+Requirement: staged program must have staging_university_id set.
+Resolution:
+  staging_programs.staging_university_id
+    → staging_universities.match_university_id (must be non-null; university must be merged first)
+    → universities.id (university_id), universities.country_id (country_id)
+  staging_programs.extracted_degree_level_code
+    → degree_levels.code WHERE is_active = true → degree_levels.id (degree_level_id)
+
+Blocked if: staging_university_id null, university not yet merged,
+  degree_level_code not found/inactive, production university missing country_id,
+  all slug candidates conflict.
+
+Slug sequence: slugify(title) → title+code → title+code+uniSlug → title+code+shortUniId.
+
+### Update-Existing Rules
+
+- import_status must be 'approved'.
+- Relevant match_*_id must be set and must resolve to an existing production row.
+- Patch only allowlisted fields.
+- Patch only if production field is currently null/empty.
+- Never update: slug, content_status, verification_status, indexing_status.
+- If nothing safe to patch → return safe error; do not mark merged.
+- After successful patch → staging import_status = 'merged'; match_*_id unchanged.
 
 ### Merge eligibility (enforced server-side in importMerge.ts)
 
