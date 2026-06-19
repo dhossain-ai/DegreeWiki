@@ -1,0 +1,125 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import { sanitizeAuthRedirect } from '../lib/auth/redirect'
+import { createClient } from '../lib/supabase/server'
+
+const MIN_PASSWORD_LENGTH = 8
+
+const supabase = createClient(Astro.cookies, Astro.request)
+const redirectTo = sanitizeAuthRedirect(Astro.url.searchParams.get('redirect'))
+
+const { data: { user } } = await supabase.auth.getUser()
+if (user) {
+  return Astro.redirect(redirectTo)
+}
+
+let errorMessage: string | null = null
+let successMessage: string | null = null
+let emailValue = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  const email = String(form.get('email') ?? '').trim()
+  const password = String(form.get('password') ?? '')
+  const confirmPassword = String(form.get('confirm_password') ?? '')
+
+  emailValue = email
+
+  if (!email || !password || !confirmPassword) {
+    errorMessage = 'Enter your email and password to create an account.'
+  } else if (password.length < MIN_PASSWORD_LENGTH) {
+    errorMessage = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+  } else if (password !== confirmPassword) {
+    errorMessage = 'Password and confirm password must match.'
+  } else {
+    const emailRedirectUrl = new URL('/auth/callback', Astro.url)
+    emailRedirectUrl.searchParams.set('redirect', redirectTo)
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: emailRedirectUrl.toString(),
+      },
+    })
+
+    if (error) {
+      errorMessage = 'Could not create your account right now. Please try again.'
+    } else if (data.session) {
+      return Astro.redirect(redirectTo)
+    } else if (data.user) {
+      successMessage = 'Check your email to confirm your account, then sign in to continue.'
+    } else {
+      errorMessage = 'Could not create your account right now. Please try again.'
+    }
+  }
+}
+---
+<BaseLayout title="Create your account — DegreeWiki" noindex={true}>
+  <main class="max-w-sm mx-auto p-8">
+    <h1 class="text-2xl font-bold mb-3">Create your student account</h1>
+    <p class="text-sm text-gray-600 mb-6">
+      Save your Fit Finder preferences and come back to your program results anytime.
+      Already have an account?
+      <a href={`/login?redirect=${encodeURIComponent(redirectTo)}`} class="text-blue-600 hover:underline"> Sign in</a>.
+    </p>
+    <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded mb-4 px-3 py-2">
+      Do not enter sensitive documents, passport details, bank information, or transcripts.
+    </p>
+    {successMessage && (
+      <div class="text-blue-700 bg-blue-50 border border-blue-200 rounded mb-4 px-3 py-2 text-sm">
+        <p>{successMessage}</p>
+        <p class="mt-2">
+          <a href={`/login?redirect=${encodeURIComponent(redirectTo)}`} class="font-medium text-blue-700 hover:underline">Go to sign in</a>
+        </p>
+      </div>
+    )}
+    {errorMessage && (
+      <p class="text-red-700 bg-red-50 border border-red-200 rounded mb-4 px-3 py-2 text-sm">{errorMessage}</p>
+    )}
+    <form method="post" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium mb-1" for="email">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          required
+          autocomplete="email"
+          value={emailValue}
+          class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1" for="password">Password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          required
+          minlength={MIN_PASSWORD_LENGTH}
+          autocomplete="new-password"
+          class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1" for="confirm_password">Confirm password</label>
+        <input
+          id="confirm_password"
+          name="confirm_password"
+          type="password"
+          required
+          minlength={MIN_PASSWORD_LENGTH}
+          autocomplete="new-password"
+          class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      <button
+        type="submit"
+        class="w-full bg-blue-600 text-white py-2 rounded font-medium hover:bg-blue-700 transition-colors"
+      >
+        Create account
+      </button>
+    </form>
+  </main>
+</BaseLayout>

@@ -6,12 +6,10 @@ import { SITE_URL } from '../lib/site'
 const supabase = createClient(Astro.cookies, Astro.request)
 
 const [
-  authResult,
   { data: latestProgramsData },
   { data: latestScholarshipsData },
   { data: latestGuidesData },
 ] = await Promise.all([
-  supabase.auth.getUser(),
   supabase
     .from('programs')
     .select('id, title, slug, universities(name), degree_levels(name)')
@@ -32,7 +30,6 @@ const [
     .limit(3),
 ])
 
-const user               = authResult.data.user
 const latestPrograms     = latestProgramsData     ?? []
 const latestScholarships = latestScholarshipsData ?? []
 const latestGuides       = latestGuidesData       ?? []
@@ -223,21 +220,5 @@ function formatDeadline(d: string | null, dt: string | null): string | null {
       </div>
     </section>
   )}
-
-  <!-- Auth/admin secondary row -->
-  <div class="max-w-5xl mx-auto px-4 py-6 border-t border-gray-100">
-    {user ? (
-      <div class="flex flex-wrap items-center gap-4 text-xs text-gray-400">
-        <span>Signed in as <span class="text-gray-600">{user.email}</span></span>
-        <a href="/account" class="text-blue-400 hover:underline">Account</a>
-        <a href="/admin" class="text-blue-400 hover:underline">Admin dashboard</a>
-        <form method="post" action="/api/auth/logout" class="inline">
-          <button type="submit" class="text-red-400 hover:underline cursor-pointer">Logout</button>
-        </form>
-      </div>
-    ) : (
-      <a href="/login" class="text-xs text-gray-400 hover:text-blue-500">Sign in</a>
-    )}
-  </div>
 
 </PublicLayout>

@@ -1,12 +1,17 @@
 ---
+import { sanitizeAuthRedirect } from '../../lib/auth/redirect'
 import { createClient } from '../../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 const code = Astro.url.searchParams.get('code')
+const redirectTo = sanitizeAuthRedirect(Astro.url.searchParams.get('redirect'))
 
 if (code) {
-  await supabase.auth.exchangeCodeForSession(code)
+  const { error } = await supabase.auth.exchangeCodeForSession(code)
+  if (error) {
+    return Astro.redirect('/login?auth=error')
+  }
 }
 
-return Astro.redirect('/')
+return Astro.redirect(redirectTo)
 ---
