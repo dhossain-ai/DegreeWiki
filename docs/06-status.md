@@ -4,6 +4,8 @@ Last updated: 2026-06-21
 
 ## Current Phase
 
+Phase 52 — Country Role Flags + Fit Finder AI Pipeline Reliability — complete.
+
 Phase 51C — Fit Finder UX + No-Match Clarity Fix — complete.
 
 Phase 51B — Student Dashboard + AI Entry Bundle — complete.
@@ -61,6 +63,95 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 52 — Country Role Flags + Fit Finder AI Pipeline Reliability (complete):
+
+- Added `is_origin_enabled` and `is_destination_enabled` boolean columns to the
+  `countries` table via `supabase/migrations/021_country_role_flags.sql`.
+  Both default to `false`. Backfill: all currently published countries are set to
+  both `true`. Two partial indexes added: `idx_countries_origin_enabled` and
+  `idx_countries_destination_enabled`. No RLS change.
+
+- Added `data/starter/countries.phase52.json`: 18 origin-only country rows
+  (Bangladesh, India, Nepal, Pakistan, Sri Lanka, Nigeria, Ghana, Kenya, Vietnam,
+  Philippines, Indonesia, Malaysia, China, Turkey, Egypt, Morocco, South Korea,
+  Japan). Each row: `is_origin_enabled = true`, `is_destination_enabled = false`,
+  `content_status = published`, `indexing_status = noindex`. Admin must create
+  these rows via `/admin/countries/new` using the seed file as reference.
+
+- Updated admin country forms:
+  - `src/pages/admin/countries/new.astro` — added "Country roles" fieldset with
+    two checkboxes: "Can be selected as student origin / current country" and
+    "Can be selected as study destination". Both include in INSERT.
+  - `src/pages/admin/countries/[id].astro` — same checkboxes; loads existing
+    values from DB; includes in UPDATE.
+  - `src/pages/admin/countries/index.astro` — added Role column with badges:
+    Origin (green), Destination (blue), Both (purple), None (gray).
+
+- Updated `src/pages/fit-finder/index.astro`:
+  - Split one countries query into two: `originCountries`
+    (`.eq('is_origin_enabled', true)`) and `destinationCountries`
+    (`.eq('is_destination_enabled', true)`).
+  - "Where are you from?" uses `originCountries`. Label updated.
+    Helper: "Your home country or the country where you currently live."
+  - "Countries you want to study in" checkbox list uses `destinationCountries`.
+  - Validation uses the correct set for each field.
+  - Label/helper text updated: degree level, budget (per academic year note),
+    English score (example: IELTS 6.5, TOEFL 90, or PTE 62).
+  - Coverage note refined: "...Broadening destinations will expand matches as
+    more data is added."
+
+- Updated `src/pages/programs/index.astro`: country filter now queries
+  `.eq('is_destination_enabled', true)`. Origin-only countries excluded.
+
+- Updated `src/pages/universities/index.astro`: same change.
+
+- Scholarships public page: no country filter exists — no change needed.
+
+- Updated `src/pages/fit-finder/result.astro`: added dev-only persist warning.
+  When `import.meta.env.DEV && pageState === 'ready' && matches.length > 0 &&
+  savedResultId === null`, a yellow developer note is shown:
+  "Developer note: this result displayed but was not saved. Check that
+  SUPABASE_SERVICE_ROLE_KEY is set in the server/runtime environment."
+  Not visible in production.
+
+No schema migration beyond 021. No new dependencies. No service-role exposure
+in pages/components/layouts. No RLS weakening. No admin guard changes.
+No matching algorithm changes. No AI chat behavior changes.
+
+Files created (2):
+  supabase/migrations/021_country_role_flags.sql
+  data/starter/countries.phase52.json
+
+Files modified (7):
+  src/pages/admin/countries/new.astro
+  src/pages/admin/countries/[id].astro
+  src/pages/admin/countries/index.astro
+  src/pages/fit-finder/index.astro
+  src/pages/programs/index.astro
+  src/pages/universities/index.astro
+  src/pages/fit-finder/result.astro
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, zero errors).
+  npm run check: not runnable — no check script defined.
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient|PUBLIC_GEMINI|PUBLIC_.*API_KEY
+    in src/pages,src/components,src/layouts: 0 matches.
+
+Manual verification performed:
+  GET /admin/countries/new: origin/destination checkboxes render in "Country roles" fieldset.
+  GET /admin/countries/[id]: existing values load; checkboxes reflect DB state.
+  GET /admin/countries: Role badge column visible (Origin/Destination/Both/None).
+  GET /fit-finder: "Where are you from?" label present; origin countries in dropdown;
+    destination countries in checkbox list; coverage note updated.
+  GET /programs: country filter dropdown shows only destination-enabled countries.
+  GET /universities: country filter dropdown shows only destination-enabled countries.
+  Result page template: dev warning conditional renders correctly in DEV mode.
+
+Manual verification not performed:
+  Live end-to-end with real SUPABASE_SERVICE_ROLE_KEY to confirm persist warning
+    disappears when key is present.
+  Admin creation of 18 origin-country seed rows (operational step, not code).
 
 Phase 51C — Fit Finder UX + No-Match Clarity Fix (complete):
 

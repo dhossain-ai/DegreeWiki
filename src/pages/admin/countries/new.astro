@@ -26,9 +26,11 @@ type Values = {
   continent: string
   overview: string
   content_status: string
+  is_origin_enabled: boolean
+  is_destination_enabled: boolean
 }
 
-let values: Values = { name: '', slug: '', iso2: '', iso3: '', continent: '', overview: '', content_status: 'draft' }
+let values: Values = { name: '', slug: '', iso2: '', iso3: '', continent: '', overview: '', content_status: 'draft', is_origin_enabled: false, is_destination_enabled: false }
 let errors: FormErrors = {}
 let serverError = ''
 
@@ -42,6 +44,8 @@ if (Astro.request.method === 'POST') {
     continent: String(form.get('continent') ?? '').trim(),
     overview: String(form.get('overview') ?? '').trim(),
     content_status: String(form.get('content_status') ?? 'draft').trim(),
+    is_origin_enabled: form.get('is_origin_enabled') === 'on',
+    is_destination_enabled: form.get('is_destination_enabled') === 'on',
   }
 
   if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -69,6 +73,8 @@ if (Astro.request.method === 'POST') {
       continent: values.continent || null,
       overview: values.overview || null,
       content_status: values.content_status,
+      is_origin_enabled: values.is_origin_enabled,
+      is_destination_enabled: values.is_destination_enabled,
     })
 
     if (error) {
@@ -138,6 +144,22 @@ if (Astro.request.method === 'POST') {
       <textarea id="overview" name="overview" rows={4}
         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{values.overview}</textarea>
     </div>
+
+    <fieldset class="border border-gray-200 rounded-md p-3">
+      <legend class="text-sm font-medium text-gray-700 px-1">Country roles</legend>
+      <div class="space-y-2 mt-1">
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="is_origin_enabled" checked={values.is_origin_enabled}
+            class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+          Can be selected as student origin / current country
+        </label>
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="is_destination_enabled" checked={values.is_destination_enabled}
+            class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+          Can be selected as study destination
+        </label>
+      </div>
+    </fieldset>
 
     <div>
       <label for="content_status" class="block text-sm font-medium text-gray-700 mb-1">Status *</label>

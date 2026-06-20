@@ -4,6 +4,63 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 52: Country Role Flags + Fit Finder AI Pipeline Reliability
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Add country role flags (is_origin_enabled, is_destination_enabled) to the
+countries table. Seed 18 origin-only countries. Update admin country forms with
+role toggles. Split Fit Finder origin/destination country queries. Update public
+destination filters. Improve Fit Finder wording. Add dev-only persist warning.
+
+Changes:
+
+Migration 021_country_role_flags.sql:
+- ADD COLUMN IF NOT EXISTS is_origin_enabled boolean NOT NULL DEFAULT false
+- ADD COLUMN IF NOT EXISTS is_destination_enabled boolean NOT NULL DEFAULT false
+- Backfill: UPDATE countries SET is_origin_enabled=true, is_destination_enabled=true
+  WHERE content_status='published'
+- CREATE INDEX IF NOT EXISTS idx_countries_origin_enabled
+- CREATE INDEX IF NOT EXISTS idx_countries_destination_enabled
+- No RLS change.
+
+data/starter/countries.phase52.json:
+- 18 origin-only rows (Bangladesh, India, Nepal, Pakistan, Sri Lanka, Nigeria,
+  Ghana, Kenya, Vietnam, Philippines, Indonesia, Malaysia, China, Turkey, Egypt,
+  Morocco, South Korea, Japan).
+- is_origin_enabled=true, is_destination_enabled=false, content_status=published,
+  indexing_status=noindex. For admin manual creation via /admin/countries/new.
+
+Admin country forms:
+- new.astro and [id].astro: "Country roles" fieldset with two checkboxes.
+  Values parsed from form, included in INSERT/UPDATE.
+- index.astro: Role badge column (Origin/Destination/Both/None).
+
+Fit Finder split:
+- fit-finder/index.astro: originCountries query (is_origin_enabled=true) for
+  "Where are you from?"; destinationCountries query (is_destination_enabled=true)
+  for "Countries you want to study in". Validation uses correct set per field.
+- Labels/helpers updated: degree level, budget (per academic year), English score
+  (IELTS/TOEFL/PTE example). Coverage note refined.
+
+Public destination filters:
+- programs/index.astro: country filter .eq('is_destination_enabled', true).
+- universities/index.astro: same.
+- Scholarships public page: no country filter exists — no change needed.
+
+Dev-only persist warning:
+- fit-finder/result.astro: yellow note when import.meta.env.DEV && pageState===
+  'ready' && matches.length > 0 && savedResultId===null.
+  Not visible in production.
+
+Outcome:
+- npm run build: PASS
+- No service-role in pages/components/layouts.
+- No RLS weakening. No admin guard change. No new dependencies.
+- No matching algorithm change. No AI chat change.
+
 ## 2026-06-21 - Phase 51C: Fit Finder UX + No-Match Clarity Fix
 
 Tool:

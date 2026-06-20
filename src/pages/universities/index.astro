@@ -21,7 +21,7 @@ const [
   { data: countriesData },
   { data: citiesData },
 ] = await Promise.all([
-  supabase.from('countries').select('id, name').order('name'),
+  supabase.from('countries').select('id, name').eq('is_destination_enabled', true).order('name'),
   supabase.from('cities').select('id, name').order('name'),
 ])
 

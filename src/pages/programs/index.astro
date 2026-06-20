@@ -38,7 +38,7 @@ const [
   { data: degreeLevelsData },
   { data: subjectsData },
 ] = await Promise.all([
-  supabase.from('countries').select('id, name').order('name'),
+  supabase.from('countries').select('id, name').eq('is_destination_enabled', true).order('name'),
   supabase.from('cities').select('id, name').order('name'),
   supabase.from('universities').select('id, name, slug').order('name'),
   supabase.from('degree_levels').select('id, name').order('display_order'),
