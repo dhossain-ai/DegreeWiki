@@ -11,7 +11,14 @@ const START_PREF_MAX = 80
 const NOTES_MAX = 1000
 
 type FormErrors = Record<string, string>
-type LookupOption = { id: string; name: string }
+type LookupOption = {
+  id: string
+  name: string
+  slug?: string | null
+  code?: string | null
+  iso2?: string | null
+  iso3?: string | null
+}
 
 type Values = {
   current_country_id: string
@@ -78,6 +85,91 @@ function fromForm(form: FormData): Values {
 
 const isUUID = (value: string) => UUID_RE.test(value)
 
+type LookupIndex = Map<string, string>
+
+function normalizeLookupKey(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function buildLookupIndex(options: LookupOption[]): LookupIndex {
+  const index = new Map<string, string>()
+
+  const register = (candidate: string | null | undefined, id: string) => {
+    const normalized = normalizeLookupKey(String(candidate ?? ''))
+    if (!normalized) return
+    index.set(normalized, id)
+  }
+
+  for (const option of options) {
+    register(option.id, option.id)
+    register(option.name, option.id)
+    register(option.slug, option.id)
+    register(option.code, option.id)
+    register(option.iso2, option.id)
+    register(option.iso3, option.id)
+  }
+
+  return index
+}
+
+function normalizeLookupValue(value: string, index: LookupIndex): string | null {
+  if (!value) return null
+  const byLookup = index.get(normalizeLookupKey(value))
+  if (byLookup) return byLookup
+  return isUUID(value) ? value : null
+}
+
+function normalizeLookupValues(values: string[], index: LookupIndex): { values: string[]; invalid: string[] } {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  const invalid: string[] = []
+
+  for (const value of values) {
+    const resolved = normalizeLookupValue(value, index)
+    if (!resolved) {
+      invalid.push(value)
+      continue
+    }
+    if (seen.has(resolved)) continue
+    seen.add(resolved)
+    normalized.push(resolved)
+  }
+
+  return { values: normalized, invalid }
+}
+
+function normalizeLookupSelections(
+  values: Values,
+  countries: LookupOption[],
+  degreeLevels: LookupOption[],
+  subjects: LookupOption[],
+): { values: Values; invalid: Record<string, string[]> } {
+  const countryIndex = buildLookupIndex(countries)
+  const degreeLevelIndex = buildLookupIndex(degreeLevels)
+  const subjectIndex = buildLookupIndex(subjects)
+
+  const currentCountryId = normalizeLookupValue(values.current_country_id, countryIndex)
+  const degreeLevelId = normalizeLookupValue(values.target_degree_level_id, degreeLevelIndex)
+  const targetCountries = normalizeLookupValues(values.student_profile_countries, countryIndex)
+  const targetSubjects = normalizeLookupValues(values.student_profile_subjects, subjectIndex)
+
+  return {
+    values: {
+      ...values,
+      current_country_id: currentCountryId ?? '',
+      target_degree_level_id: degreeLevelId ?? '',
+      student_profile_countries: targetCountries.values,
+      student_profile_subjects: targetSubjects.values,
+    },
+    invalid: {
+      current_country_id: values.current_country_id && !currentCountryId ? [values.current_country_id] : [],
+      target_degree_level_id: values.target_degree_level_id && !degreeLevelId ? [values.target_degree_level_id] : [],
+      student_profile_countries: targetCountries.invalid,
+      student_profile_subjects: targetSubjects.invalid,
+    },
+  }
+}
+
 function validateNumber(value: string, label: string, min: number): string | null {
   if (!value) return null
   const n = Number(value)
@@ -92,27 +184,32 @@ function validateValues(
   degreeLevels: LookupOption[],
   subjects: LookupOption[],
 ): FormErrors {
+  const normalized = normalizeLookupSelections(values, countries, degreeLevels, subjects)
+  Object.assign(values, normalized.values)
+
   const errors: FormErrors = {}
   const countryIds = new Set(countries.map(c => c.id))
   const degreeLevelIds = new Set(degreeLevels.map(d => d.id))
   const subjectIds = new Set(subjects.map(s => s.id))
 
   if (values.current_country_id) {
-    if (!isUUID(values.current_country_id) || !countryIds.has(values.current_country_id)) {
+    if (normalized.invalid.current_country_id.length > 0 || !countryIds.has(values.current_country_id)) {
       errors.current_country_id = 'Select a valid current country.'
     }
   }
 
   if (values.target_degree_level_id) {
-    if (!isUUID(values.target_degree_level_id) || !degreeLevelIds.has(values.target_degree_level_id)) {
+    if (normalized.invalid.target_degree_level_id.length > 0 || !degreeLevelIds.has(values.target_degree_level_id)) {
       errors.target_degree_level_id = 'Select a valid degree level.'
     }
   }
 
-  const badTargetCountry = values.student_profile_countries.find(id => !isUUID(id) || !countryIds.has(id))
+  const badTargetCountry = normalized.invalid.student_profile_countries[0]
+    ?? values.student_profile_countries.find(id => !countryIds.has(id))
   if (badTargetCountry) errors.student_profile_countries = 'Select valid target countries.'
 
-  const badSubject = values.student_profile_subjects.find(id => !isUUID(id) || !subjectIds.has(id))
+  const badSubject = normalized.invalid.student_profile_subjects[0]
+    ?? values.student_profile_subjects.find(id => !subjectIds.has(id))
   if (badSubject) errors.student_profile_subjects = 'Select valid subjects.'
 
   const budgetMinErr = validateNumber(values.budget_min, 'Minimum budget', 0)
@@ -165,9 +262,9 @@ const [
   { data: subjectsData, error: subjectsError },
   { data: { user } },
 ] = await Promise.all([
-  supabase.from('countries').select('id, name').order('name'),
-  supabase.from('degree_levels').select('id, name, display_order').order('display_order'),
-  supabase.from('subjects').select('id, name').order('name'),
+  supabase.from('countries').select('id, name, slug, iso2, iso3').order('name'),
+  supabase.from('degree_levels').select('id, code, name, display_order').order('display_order'),
+  supabase.from('subjects').select('id, name, slug').order('name'),
   supabase.auth.getUser(),
 ])
 
