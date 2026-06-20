@@ -49,6 +49,15 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 - Never use the `PUBLIC_` prefix for Gemini or service-role secrets.
 - Never commit `.env.local`, `.dev.vars`, or `.dev.vars.*`.
 
+**Important — Saved-result and chat persistence in local dev:**
+`SUPABASE_SERVICE_ROLE_KEY` is required for Fit Finder result persistence
+(`persistFinderResult`) and AI chat message persistence (`persistChatTurn`).
+If it is absent from `.env.local` or `.dev.vars`, both functions return silently
+without inserting rows. Rule-based matches and the AI summary will still render
+correctly, but no `ai_finder_results` row will be created and `/fit-finder/results`
+will appear empty. Set `SUPABASE_SERVICE_ROLE_KEY` in your local env file to enable
+full end-to-end persistence locally.
+
 Example `.dev.vars`:
 
 ```bash

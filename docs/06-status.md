@@ -1,8 +1,10 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-20
+Last updated: 2026-06-21
 
 ## Current Phase
+
+Phase 51C — Fit Finder UX + No-Match Clarity Fix — complete.
 
 Phase 51B — Student Dashboard + AI Entry Bundle — complete.
 
@@ -59,6 +61,77 @@ Phase 27 — Saved Finder Results Management — complete.
 Phase 26 — AI Finder Result Persistence — complete.
 
 ## Last Completed Work
+
+Phase 51C — Fit Finder UX + No-Match Clarity Fix (complete):
+
+- Replaced native `<select multiple>` boxes for target countries and subjects with
+  scrollable checkbox groups in `src/pages/fit-finder/index.astro`. Users no longer
+  need Ctrl/Shift to select multiple items. Field names `student_profile_countries`
+  and `student_profile_subjects` are unchanged — `form.getAll()` continues to work.
+  Checked state persists after validation failure and on GET when saved preferences
+  are loaded.
+
+- Renamed labels and added helper text:
+  - "Current country" → "Your current country" with hint "Where you live right now."
+  - "Target countries" → "Countries you want to study in" with hint "Select every
+    destination you are open to."
+  - "Subjects of interest" → "What do you want to study?" with hint "Select one or
+    more subject areas."
+  - Target degree level: added hint "Choose the degree level you want to study next."
+
+- Added data coverage note near the top of the Fit Finder form: "DegreeWiki currently
+  has the strongest starter data for Finland master's programmes. More countries,
+  bachelor's programmes, and scholarships are being added." Displayed as a calm blue
+  info bar — not an error.
+
+- Improved no-match state in `src/pages/fit-finder/result.astro`:
+  - New heading: "No strong matches found for your preferences"
+  - Candidate-checked count shown when > 0
+  - Zero-candidate message shown when no published programmes exist at all
+  - Conditional degree-level note: when `degreeLevelName` is set and candidates were
+    checked, displays "DegreeWiki currently has limited or no published programmes
+    for {degreeLevelName}" and suggests trying a different degree level
+  - Actionable bullet list: add Finland, broaden subjects, try different degree level,
+    remove budget filter
+  - Data coverage footnote explaining starter data is strongest for Finland master's
+
+- Added local-dev persist note to `docs/08-ai-deployment-checklist.md`: clarifies that
+  `SUPABASE_SERVICE_ROLE_KEY` must be set in `.env.local` / `.dev.vars` for
+  `persistFinderResult` to insert rows. Without it, result display still works but
+  `/fit-finder/results` appears empty.
+
+- No schema migration. No matching algorithm changes. No AI chat behavior changes.
+  No service-role usage in pages/components/layouts. No RLS weakening. No admin changes.
+  No new dependencies.
+
+Files modified (4):
+  src/pages/fit-finder/index.astro
+  src/pages/fit-finder/result.astro
+  docs/06-status.md
+  docs/07-task-log.md
+
+Files modified (1 — deployment notes):
+  docs/08-ai-deployment-checklist.md
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 4.20s, zero errors).
+  npm run check: not runnable — no `check` script defined; `@astrojs/check` not installed.
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient|PUBLIC_GEMINI|PUBLIC_.*API_KEY
+    in src/pages: 0 matches.
+
+Manual verification performed:
+  GET /fit-finder: checkbox groups render for target countries and subjects; no Ctrl/Shift
+    instruction visible; helper text present; coverage note visible.
+  POST /fit-finder with checkboxes selected: form submits correctly; form.getAll() collects
+    checked values via standard checkbox POST behavior (same as multi-select).
+  Validation failure: checked selections preserved via `checked={isSelected(...)}` on re-render.
+  Saved preferences on GET: existing profile country/subject IDs render as checked.
+  GET /fit-finder/result no-match state: improved copy with degree-level note and tips.
+  GET /fit-finder/results: behavior unchanged.
+
+Manual verification not performed:
+  live end-to-end persist with real SUPABASE_SERVICE_ROLE_KEY configured locally
+  live AI summary with real GEMINI_API_KEY configured locally
 
 Phase 51B — Student Dashboard + AI Entry Bundle (complete):
 

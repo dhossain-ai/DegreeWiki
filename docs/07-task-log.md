@@ -4,6 +4,87 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 51C: Fit Finder UX + No-Match Clarity Fix
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+Replace Ctrl/Shift native multi-selects with checkbox groups, rename confusing
+labels, add a data coverage note, improve no-match copy, and document the
+local-dev persist requirement. No schema migration, no matching algorithm changes,
+no AI chat behavior changes.
+
+---
+
+### Code Changes
+
+**src/pages/fit-finder/index.astro:**
+
+Replaced `<select multiple size="6">` for target countries with a scrollable
+checkbox group (`max-h-52 overflow-y-auto` bordered container, one labeled checkbox
+per country). Replaced `<select multiple size="8">` for subjects with same pattern.
+Field names `student_profile_countries` and `student_profile_subjects` unchanged —
+`form.getAll()` behavior identical. `isSelected()` helper drives `checked` attribute.
+Selected state persists after validation failure and on GET load of saved preferences.
+
+Label + helper text changes:
+- "Current country" → "Your current country" + "Where you live right now."
+- Target degree level: added hint "Choose the degree level you want to study next."
+- "Target countries" → "Countries you want to study in" + "Select every destination
+  you are open to."
+- "Subjects of interest" → "What do you want to study?" + "Select one or more subject
+  areas."
+
+Added data coverage note as a calm blue info bar above the form sections:
+"DegreeWiki currently has the strongest starter data for Finland master's programmes.
+More countries, bachelor's programmes, and scholarships are being added."
+
+**src/pages/fit-finder/result.astro:**
+
+Improved no-match state (`pageState === 'no_matches'`):
+- Heading: "No strong matches found for your preferences"
+- Candidate count note (when candidatesChecked > 0)
+- Zero-candidate message (when candidatesChecked === 0, no published programmes yet)
+- Conditional degree-level note using existing `degreeLevelName` variable: shown when
+  `degreeLevelName && candidatesChecked > 0`, states limited coverage for that level
+  and suggests trying a different degree level
+- Actionable bullet list: Finland country tip, broaden subjects, try different degree
+  level, remove budget filter
+- Data coverage footnote: "starter data is strongest for Finland master's programmes"
+- No changes to scoring, AI call, or persist logic
+
+**docs/08-ai-deployment-checklist.md:**
+
+Added "Important — Saved-result and chat persistence in local dev" note under
+section 3A explaining that `SUPABASE_SERVICE_ROLE_KEY` must be in `.env.local` or
+`.dev.vars` for `persistFinderResult` and `persistChatTurn` to insert rows. Without
+it, result display still works but `/fit-finder/results` appears empty.
+
+---
+
+### Checks
+
+npm run build: PASS (Cloudflare server build, Server built in 4.20s, zero errors).
+npm run check: no `check` script defined — not run.
+service_role|SERVICE_ROLE|createServiceClient|PUBLIC_GEMINI|PUBLIC_.*API_KEY
+  in src/pages: 0 matches.
+
+---
+
+### Decisions
+
+- Zero-match results are not persisted in this phase (deferred as approved).
+- No multi-step wizard implemented (deferred as approved).
+- No matching/scoring logic changed.
+- No AI chat behavior changed.
+- No schema migration.
+- No RLS weakening.
+- No admin access changes.
+- No new npm dependencies.
+
+---
+
 ## 2026-06-20 - Phase 51B: Student Dashboard + AI Entry Bundle
 
 Tool:

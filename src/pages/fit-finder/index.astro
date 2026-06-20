@@ -450,8 +450,11 @@ const isSelected = (items: string[], id: string) => items.includes(id)
   <div class="max-w-5xl mx-auto px-4 py-8">
     <div class="max-w-2xl">
       <h1 class="text-2xl font-bold text-gray-900 mb-2">Fit Finder</h1>
-      <p class="text-sm text-gray-600 mb-6">
+      <p class="text-sm text-gray-600 mb-4">
         Save your study preferences to see possible program matches based on your inputs.
+      </p>
+      <p class="text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-md px-3 py-2 mb-2">
+        DegreeWiki currently has the strongest starter data for Finland master's programmes. More countries, bachelor's programmes, and scholarships are being added.
       </p>
     </div>
 
@@ -473,13 +476,14 @@ const isSelected = (items: string[], id: string) => items.includes(id)
         <h2 class={sectionHeadClass}>Study preferences</h2>
         <div class="space-y-4">
           <div>
-            <label for="current_country_id" class={labelClass}>Current country</label>
+            <label for="current_country_id" class={labelClass}>Your current country</label>
             <select id="current_country_id" name="current_country_id" class={selectClass}>
               <option value="">Select a country</option>
               {countries.map(country => (
                 <option value={country.id} selected={values.current_country_id === country.id}>{country.name}</option>
               ))}
             </select>
+            <p class={hintClass}>Where you live right now.</p>
             {errors.current_country_id && <p class={errorClass}>{errors.current_country_id}</p>}
           </div>
 
@@ -491,28 +495,47 @@ const isSelected = (items: string[], id: string) => items.includes(id)
                 <option value={level.id} selected={values.target_degree_level_id === level.id}>{level.name}</option>
               ))}
             </select>
+            <p class={hintClass}>Choose the degree level you want to study next.</p>
             {errors.target_degree_level_id && <p class={errorClass}>{errors.target_degree_level_id}</p>}
           </div>
 
           <div>
-            <label for="student_profile_countries" class={labelClass}>Target countries</label>
-            <select id="student_profile_countries" name="student_profile_countries" multiple size="6" class={selectClass}>
+            <p class={labelClass}>Countries you want to study in</p>
+            <div class="max-h-52 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white">
               {countries.map(country => (
-                <option value={country.id} selected={isSelected(values.student_profile_countries, country.id)}>{country.name}</option>
+                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="student_profile_countries"
+                    value={country.id}
+                    checked={isSelected(values.student_profile_countries, country.id)}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                  />
+                  <span class="text-sm text-gray-800">{country.name}</span>
+                </label>
               ))}
-            </select>
-            <p class={hintClass}>Use Ctrl or Shift to select more than one country.</p>
+            </div>
+            <p class={hintClass}>Select every destination you are open to.</p>
             {errors.student_profile_countries && <p class={errorClass}>{errors.student_profile_countries}</p>}
           </div>
 
           <div>
-            <label for="student_profile_subjects" class={labelClass}>Subjects of interest</label>
-            <select id="student_profile_subjects" name="student_profile_subjects" multiple size="8" class={selectClass}>
+            <p class={labelClass}>What do you want to study?</p>
+            <div class="max-h-56 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white">
               {subjects.map(subject => (
-                <option value={subject.id} selected={isSelected(values.student_profile_subjects, subject.id)}>{subject.name}</option>
+                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="student_profile_subjects"
+                    value={subject.id}
+                    checked={isSelected(values.student_profile_subjects, subject.id)}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                  />
+                  <span class="text-sm text-gray-800">{subject.name}</span>
+                </label>
               ))}
-            </select>
-            <p class={hintClass}>Use Ctrl or Shift to select more than one subject.</p>
+            </div>
+            <p class={hintClass}>Select one or more subject areas.</p>
             {errors.student_profile_subjects && <p class={errorClass}>{errors.student_profile_subjects}</p>}
           </div>
         </div>

@@ -578,23 +578,42 @@ const pageTitle = 'Possible program matches'
 
         {pageState === 'no_matches' ? (
           <div class="max-w-2xl border border-gray-200 rounded-lg p-5 bg-gray-50">
-            <h2 class="text-base font-semibold text-gray-900 mb-2">No preference matches found</h2>
+            <h2 class="text-base font-semibold text-gray-900 mb-2">No strong matches found for your preferences</h2>
             {candidatesChecked > 0 && (
               <p class="text-sm text-gray-600 mb-2">
-                {candidatesChecked} published program{candidatesChecked === 1 ? '' : 's'} checked against your preferences.
+                {candidatesChecked} published programme{candidatesChecked === 1 ? '' : 's'} checked against your preferences — none scored above zero.
               </p>
             )}
-            <p class="text-sm text-gray-600 mb-4">
-              {savedSignalCount === 1
-                ? 'No programs matched your single saved preference. Try adding a target degree level, preferred countries, subjects, or a budget to widen your results.'
-                : 'No programs matched all of your preferences. Try broadening your subject or country choices, or browse all programs to explore.'}
+            {candidatesChecked === 0 && (
+              <p class="text-sm text-gray-600 mb-2">
+                No published programmes are available yet. This is expected during early data build-out.
+              </p>
+            )}
+            {degreeLevelName && candidatesChecked > 0 && (
+              <p class="text-sm text-gray-600 mb-2">
+                DegreeWiki currently has limited or no published programmes for{' '}
+                <strong class="font-medium text-gray-800">{degreeLevelName}</strong>.
+                {' '}If your goal allows it, try selecting a different degree level — master's programmes have the most coverage right now.
+              </p>
+            )}
+            <p class="text-sm text-gray-600 mb-2">
+              Things that can help:
+            </p>
+            <ul class="list-disc pl-5 text-sm text-gray-600 mb-4 space-y-1">
+              <li>Add or broaden your target countries — try including Finland.</li>
+              <li>Add or change your subjects of interest.</li>
+              <li>Try a different degree level if your goals are flexible.</li>
+              <li>Remove the budget filter temporarily to see more candidates.</li>
+            </ul>
+            <p class="text-xs text-gray-500 mb-4">
+              DegreeWiki's starter data is strongest for Finland master's programmes. More countries, degree levels, and scholarships are being added regularly.
             </p>
             <div class="flex flex-wrap gap-3">
               <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                 Update preferences
               </a>
               <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-white">
-                Browse all programs
+                Browse all programmes
               </a>
             </div>
           </div>
