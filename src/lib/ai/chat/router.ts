@@ -36,7 +36,7 @@ const HELP_RE =
 // Requests for guaranteed outcomes — must include an admission/visa/scholarship term.
 // Avoids over-matching: "will I get a response?" does not match.
 const GUARANTEE_RE =
-  /\bwill\s+i\s+(get|receive)\s+(admission|a\s+scholarship|my\s+visa)\b|\bam\s+i\s+guaranteed\b|\bguarantee\b.{0,60}\b(admission|visa|scholarship|accepted|eligib)\b|\bwill\s+(my\s+)?(visa|application)\s+be\s+(approved|accepted)\b|\bwill\s+i\s+be\s+(admitted|accepted|given\s+a\s+scholarship)\b/i
+  /\bwill\s+i\s+(get|receive)\s+(admitted|accepted|admission|a\s+scholarship|my\s+visa)\b|\bwill\s+i\s+get\s+(into|accepted\s+by|admitted\s+(to|into|by))\b|\bam\s+i\s+guaranteed\b|\bguarantee\b.{0,60}\b(admission|visa|scholarship|accepted|eligib)\b|\bwill\s+(my\s+)?(visa|application)\s+be\s+(approved|accepted)\b|\bwill\s+i\s+be\s+(admitted|accepted|given\s+a\s+scholarship)\b/i
 
 // Requests for programs outside the saved result.
 // Requires a search/find verb or an explicit "outside/beyond" qualifier.
