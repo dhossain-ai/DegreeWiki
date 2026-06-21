@@ -1,8 +1,91 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21 (Phase 55C)
+Last updated: 2026-06-21 (Phase 55E)
 
 ## Current Phase
+
+Phase 55E — Program Discovery Redesign Bundle — complete.
+Redesigned `src/pages/programs/index.astro` as the core public discovery page using
+the Phase 55B public design system. No schema changes, no auth/admin changes, no new
+npm dependencies, no new Supabase columns.
+
+Key deliverables:
+- `src/pages/programs/index.astro`: Full rewrite. Uses PublicLayout + ProgramCard +
+  Container from the design system. Previous plain-HTML list replaced with:
+    1. Page header band (surface bg, border-b, h1 + subtitle)
+    2. Keyword search bar (44px height, rounded-[10px], search icon, Clear all link)
+    3. Active filter chips — dismissible, link-based, primary-surface color; one chip
+       per active param (q, degree_level, subject, country, city, university, language,
+       study_mode, delivery_mode, tuition_max)
+    4. Two-column layout (md+ breakpoint): left filter rail + right results column
+    5. Filter rail: degree_level, subject, country, language of instruction, study mode,
+       max tuition — all backed by real DB queries; Apply filters button at bottom
+    6. Mobile layout: filter rail in `<details open>` collapsible panel above results;
+       summary toggle hidden on desktop via `md:hidden`; always-open via open attr
+    7. Results count: "N programs found" or "200+" with over-limit notice
+    8. Program result cards: full ProgramCard.astro anatomy per result — monogram,
+       degree badge, subject, title, university link, country code + location, language,
+       tuition display, View details + Save + Compare buttons (visual placeholders)
+    9. Empty state (two variants: no-match-with-filters vs no-programs-published)
+- Query changes (safe, no schema migration):
+    - `degree_levels(name, code)` — added `code` for abbreviateDegree()
+    - `countries(name, iso2)` — added `iso2` for ProgramCard.countryCode badge
+    - All other query logic (filters, ordering, limit, count) unchanged from prior page
+- Helper functions added to frontmatter:
+    - `abbreviateDegree(code, name)` → "MSc"/"BSc"/"PhD"/"MBA"/name fallback
+    - `tuitionDisplay(p)` → { display, per } with EUR/USD/GBP symbol mapping
+    - `buildUrlWithout(param)` → chip remove URL preserving all other params
+- Filters in rail: degree_level, subject, country, language, study_mode, tuition_max
+- Filters via URL params only (chip display, no rail): city, university, delivery_mode
+- Filters intentionally deferred: save state, compare tray, pagination, sort control,
+  verified-only toggle, scholarship-only toggle (no schema cols for these)
+- No fake filters: all displayed filters map to real DB query conditions
+
+No migrations. No schema changes. No RLS changes. No AI/auth/admin changes.
+No new npm dependencies. No other public pages changed.
+No set:html, no innerHTML, no service_role in new files.
+Build: PASS (Server built in 4.26s, zero errors).
+Security grep: no matches.
+XSS grep: no matches.
+
+Phase 55D — Homepage Visual QA + Responsive Polish — complete.
+Reviewed the Phase 55C homepage against the locked design references and made
+targeted visual polish fixes. No new features, no schema changes, no auth or
+admin changes.
+
+Key fixes applied:
+- `src/components/ui/SectionHeader.astro`: Increased section heading from `text-xl`
+  (20px) to `text-2xl` (24px) and added `tracking-[-0.015em]` to match the
+  reference's 24px / tight-tracked section headings throughout all public pages.
+- `src/components/public/home/HomeHero.astro`: Full hero polish pass —
+  changed hero section background from `bg-surface` (white) to `bg-canvas` (warm
+  off-white) so the search form floats as a distinct white card; added card
+  container (`bg-surface border border-edge rounded-2xl shadow`) wrapping the
+  search form; added green trust eyebrow badge above the H1 ("Program data
+  verified against official university sources") matching the reference; updated
+  H1 copy to "Find and compare degrees abroad" (tighter, reference-matched);
+  updated subtitle to reference-matched copy; changed form label style from
+  `text-xs font-medium text-muted` (lowercase) to
+  `text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]`
+  (uppercase, slate-light color, reference-matched); updated input/select
+  border-radius from `rounded-lg` (8px) to `rounded-[10px]` (reference value);
+  updated padding from `py-2.5` (10px) to `py-[11px]` (reference value);
+  updated search button height to `h-[44px]` and border-radius to `rounded-[10px]`.
+- `src/pages/index.astro`: Changed featured programs layout from
+  `grid grid-cols-1 lg:grid-cols-2 gap-4` (2-column grid cramping side-action-panel
+  cards) to `flex flex-col gap-[14px]` (full-width vertical stack matching reference).
+
+Visual QA scope — viewports checked conceptually against code:
+- 375px mobile: hero chips wrap, search fields stack full-width, nav links hidden
+- 768px tablet: search fields flex-row at md breakpoint, cards full-width
+- 1280px desktop: 1200px container centred, full-width program cards as reference
+- 1440px wide desktop: container max-width enforced, canvas background visible
+
+No migrations. No schema changes. No RLS changes. No AI/auth/admin changes.
+No new npm dependencies.
+Build: PASS (Server built in 6.77s, zero errors).
+Security grep: no matches.
+XSS grep: no matches.
 
 Phase 55C — Homepage Redesign Implementation — complete.
 Rewrote `src/pages/index.astro` from a basic placeholder into a full education-search

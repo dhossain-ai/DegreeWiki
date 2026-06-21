@@ -4,6 +4,222 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 55E: Program Discovery Redesign Bundle
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Redesign the public programs listing page (`/programs`) using the Phase 55B public
+design system. Replace the plain admin-style listing with a structured
+search/discovery page matching the locked design direction.
+
+Pre-implementation reading:
+- docs/design/public-ui-direction.md — layout/filter/card direction
+- docs/design/public-design-system.md — token and component spec
+- docs/06-status.md, docs/07-task-log.md
+- src/pages/programs/index.astro — existing page (starting point)
+- src/components/public/cards/ProgramCard.astro — full anatomy card
+- src/components/ui/ (Container, Section, SectionHeader, Button, Badge, Card)
+- src/components/public/ (SearchField, SearchChip, PublicNav, PublicFooter)
+- src/styles/global.css — design tokens
+- src/layouts/PublicLayout.astro
+
+Files changed (1):
+  src/pages/programs/index.astro — full rewrite
+
+Page/layout implemented:
+- Page header band: surface bg, border-b, h1 "Search Programs" + subtitle
+- Full-width keyword search bar: 44px height, search icon, rounded-[10px],
+  Search button, Clear all link (shown when hasFilters)
+- Active filter chips: dismissible link-based chips using primary-surface/border
+  tokens; one chip per active filter with × remove link
+- Two-column layout at md+ breakpoint: left filter rail (60-64px wide) + right
+  results column (flex-1)
+- Filter rail:
+  - Mobile: `<details open>` collapsible panel; summary shows "Filters (N)"
+    with chevron; chevron animates on open/close via CSS
+  - Desktop: summary hidden via `md:hidden`; content always visible (open attr)
+  - Header row with "Filters" label + "Clear all" link (desktop only)
+  - Filter groups: degree level, subject, country, language of instruction,
+    study mode, max tuition — each with uppercase label + select/input
+  - Apply filters button at bottom of rail
+- Results column: results count ("N programs found" / "200+"), ProgramCard list
+- Empty state: search icon, context-aware heading + copy + CTA button
+
+Filters supported in rail (all backed by real DB query):
+  degree_level, subject, country, language, study_mode, tuition_max
+
+Filters supported via URL params only (chip display, no rail selector):
+  city, university, delivery_mode (existing behavior preserved)
+
+Filters intentionally deferred (no schema column to back them):
+  verified-only toggle, scholarship-only toggle, save state, compare tray,
+  pagination, sort control
+
+Query changes (no schema migration):
+- Added `code` to degree_levels select → abbreviateDegree() helper
+- Added `iso2` to countries select → ProgramCard countryCode badge
+- All filter application logic and query structure preserved from prior page
+
+Helper functions added:
+- abbreviateDegree(code, name): maps master→MSc, bachelor→BSc, phd→PhD, mba→MBA
+- tuitionDisplay(p): { display, per } with EUR/USD/GBP symbol prefix
+- buildUrlWithout(param): builds chip remove URL preserving other params
+
+Components used:
+  PublicLayout, Container (ui/), ProgramCard (public/cards/)
+  No new components created — all logic inline in page frontmatter + template
+
+Mobile behavior:
+  - Keyword bar: full width, always visible
+  - Filter rail: `<details open>` collapsible, shows active count in summary
+  - Program cards: full width, stacked vertically
+  - Empty state: full width, centered
+
+No migrations. No schema changes. No RLS changes. No AI/auth/admin changes.
+No new npm dependencies. No other public pages changed.
+
+Validation results:
+  npm run build: PASS (Server built in 4.26s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient
+    in src/pages/programs, src/components/public/: 0 matches.
+  set:html|innerHTML
+    in src/pages/programs, src/components/public/: 0 matches.
+
+Remaining risks:
+  - `degree_levels.code` values assumed to be "master"/"bachelor"/"phd"/"mba";
+    if DB uses different codes, abbreviateDegree() falls back to name — safe.
+  - `countries.iso2` assumed populated; if null, countryCode badge is omitted — safe.
+  - Filter rail mobile open/close state resets on page navigation (SSR page) — expected.
+  - city and university filters have no rail selector; users set them only via URL;
+    large university list is still loaded for chip display (existing convention).
+
+## 2026-06-21 - Phase 55D: Homepage Visual QA + Responsive Polish
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Visual QA pass comparing the Phase 55C homepage implementation against the locked
+Phase 55A design references. Make small, safe polish fixes only. No new features.
+
+Pre-fix reading:
+- docs/design/public-ui-direction.md — locked design direction
+- docs/design/public-design-system.md — token and component spec
+- docs/design/degreewiki-homepage-reference.html — locked visual reference
+- docs/design/degreewiki-program-card-reference.html — locked card reference
+- src/pages/index.astro, src/components/public/home/HomeHero.astro
+- src/components/public/PublicNav.astro, PublicFooter.astro
+- src/components/public/cards/ProgramCard.astro
+- src/components/ui/ (all primitives), src/styles/global.css
+
+Visual issues found and fixed:
+
+1. SectionHeader h2 size (all public pages)
+   - Issue: `text-xl` (20px) — reference uses 24px section headings
+   - Fix: changed to `text-2xl` (24px) + `tracking-[-0.015em]` to match reference
+   - File: src/components/ui/SectionHeader.astro
+
+2. Hero background (homepage)
+   - Issue: hero was `bg-surface border-b border-edge` (white section) — search form
+     invisible against white page; no visual hierarchy between hero and form
+   - Fix: changed to `bg-canvas` so the white search card floats on the warm
+     off-white background, matching the reference's canvas-with-card hierarchy
+   - File: src/components/public/home/HomeHero.astro
+
+3. Hero search form — missing card container
+   - Issue: search inputs sat bare in the page with no container; reference wraps
+     all search fields in a white card with border and shadow
+   - Fix: added `bg-surface border border-edge rounded-2xl p-[18px]
+     shadow-[0_6px_30px_rgba(11,31,58,0.06)]` card container around the form
+   - File: src/components/public/home/HomeHero.astro
+
+4. Hero search form labels (lowercase, wrong color)
+   - Issue: labels used `text-xs font-medium text-muted` (lowercase, 64748b);
+     reference uses uppercase, slate-light (94a3b8), semibold, tracked
+   - Fix: changed to `text-[11px] font-semibold text-slate-light uppercase
+     tracking-[0.05em]` — matches reference exactly
+   - File: src/components/public/home/HomeHero.astro
+
+5. Hero missing trust eyebrow
+   - Issue: reference has a green "Program data verified against official university
+     sources" pill badge above the H1 as the first trust signal; hero jumped
+     straight to H1
+   - Fix: added the eyebrow using `text-verified bg-verified-surface
+     border-verified-border rounded-full` — uses approved token set
+   - File: src/components/public/home/HomeHero.astro
+
+6. Hero H1 copy and subtitle
+   - Issue: "Find study-abroad programs\nwith source-backed confidence" — wordy and
+     redundant once trust eyebrow is present
+   - Fix: updated to "Find and compare degrees abroad" (reference-matched); subtitle
+     updated to reference copy: "Search bachelor's and master's programs,
+     scholarships, universities, and study guides for international students."
+   - File: src/components/public/home/HomeHero.astro
+
+7. Hero input/select padding and border-radius
+   - Issue: `py-2.5 rounded-lg` (10px vertical, 8px radius) vs reference's
+     `py-[11px] rounded-[10px]` (11px vertical, 10px radius)
+   - Fix: updated to reference values
+   - File: src/components/public/home/HomeHero.astro
+
+8. Hero search button
+   - Issue: button did not have fixed height to align with reference's `height:44px`
+   - Fix: added `h-[44px]` and updated to `rounded-[10px]`
+   - File: src/components/public/home/HomeHero.astro
+
+9. Featured programs layout (homepage)
+   - Issue: `grid grid-cols-1 lg:grid-cols-2 gap-4` — 2-column grid on desktop
+     makes ProgramCards with a 180px side-action-panel look cramped and squished
+   - Reference shows full-width vertical stack for featured programs
+   - Fix: changed to `flex flex-col gap-[14px]` — full-width stacked cards
+   - File: src/pages/index.astro
+
+Items not changed (acceptable as-is):
+- PublicNav: structure and spacing match reference; no issues found
+- PublicFooter: dark navy footer matches reference; no issues found
+- ProgramCard: anatomy matches reference; Save/Compare placeholder state is correct
+- Destinations grid: kept 2/3-col (no image area, 4-col would make cards too narrow)
+- FitFinderMiniPanel: current steps list is cleaner than reference's mockup grid
+- Study goal chips: chip layout acceptable; richer tiles deferred to Phase 55E+
+- Mobile hamburger: nav collapses correctly (links hidden on mobile via hidden md:flex)
+- Section tone alternation: canvas/surface rhythm retained
+
+Accessibility verified (code-level):
+- One H1 only (HomeHero) ✓
+- H2 hierarchy: SectionHeader h2s + FitFinderMiniPanel h2 + CTA h2 — all semantic ✓
+- H3 in cards (ProgramCard, DestinationCard, GuideCard) ✓
+- All form inputs have explicit <label for> associations ✓
+- Save/Compare buttons have aria-label reflecting state ✓
+- Focus-visible global rule in global.css ✓
+- No color-only information conveyance ✓
+
+Files changed (3):
+  src/components/ui/SectionHeader.astro — h2 size + tracking
+  src/components/public/home/HomeHero.astro — full hero polish pass
+  src/pages/index.astro — featured programs layout
+
+Files modified (docs):
+  docs/06-status.md
+  docs/07-task-log.md
+
+Validation results:
+  npm run build: PASS (Server built in 6.77s, zero errors)
+  grep service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient
+    in src/pages/index.astro src/components/public/: 0 matches
+  grep set:html|innerHTML
+    in src/pages/index.astro src/components/public/: 0 matches
+
+Manual visual verification not performed (no live server session):
+  Rendered output inspected via static code analysis against reference HTML
+  All viewport behaviors derived from Tailwind responsive utility analysis
+
+Recommended next phase: Phase 55E — Program Search/Listings Redesign
+  Implement the two-column filter rail + results layout for /programs
+
+---
+
 ## 2026-06-21 - Phase 55C: Homepage Redesign Implementation
 
 Tool:
