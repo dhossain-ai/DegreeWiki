@@ -18,73 +18,86 @@ const bachelorLevel = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'b
 const masterLevel   = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'master')
 ---
 
-<section class="bg-surface border-b border-edge">
-  <Container width="wide" class="py-14 sm:py-20">
+<section class="bg-canvas">
+  <Container width="wide" class="py-12 sm:py-[52px]">
 
-    <div class="max-w-2xl mb-10">
-      <h1 class="text-[2.25rem] sm:text-[2.625rem] font-bold text-ink leading-[1.15] tracking-[-0.02em] mb-4">
-        Find study-abroad programs<br class="hidden sm:inline" />
-        with source-backed confidence
+    <div class="max-w-[760px] mb-8">
+      {/* Trust eyebrow badge */}
+      <div class="inline-flex items-center gap-[7px] text-[12.5px] font-semibold text-verified bg-verified-surface border border-verified-border px-[11px] py-[5px] rounded-full mb-[18px]">
+        <span class="w-1.5 h-1.5 rounded-full bg-verified flex-none" aria-hidden="true"></span>
+        Program data verified against official university sources
+      </div>
+      <h1 class="text-[2.625rem] sm:text-[2.875rem] font-bold text-ink leading-[1.08] tracking-[-0.025em] mb-4">
+        Find and compare<br class="hidden sm:inline" />
+        degrees abroad
       </h1>
-      <p class="text-lg text-ink-tertiary leading-relaxed">
-        Search verified bachelor's and master's programs at universities worldwide.
-        Every listing is source-checked and updated regularly.
+      <p class="text-[18px] text-ink-tertiary leading-relaxed max-w-[620px]">
+        Search bachelor's and master's programs, scholarships, universities, and study guides for international students.
       </p>
     </div>
 
-    <form method="GET" action="/programs" class="mb-6">
-      <div class="flex flex-col md:flex-row gap-3">
-        <div class="flex-1">
-          <label for="hero-q" class="block text-xs font-medium text-muted mb-1">Keywords</label>
-          <input
-            id="hero-q"
-            name="q"
-            type="search"
-            placeholder="e.g. Computer Science, Medicine…"
-            autocomplete="off"
-            class="w-full rounded-lg border border-edge bg-surface px-4 py-2.5 text-sm text-ink
-                   placeholder:text-muted focus-visible:outline-none focus-visible:border-primary"
-          />
+    {/* Search card */}
+    <div class="bg-surface border border-edge rounded-2xl p-[18px] shadow-[0_6px_30px_rgba(11,31,58,0.06)] mb-6">
+      <form method="GET" action="/programs">
+        <div class="flex flex-col md:flex-row gap-3 items-end">
+          <div class="flex-[2_1_240px] min-w-0 flex flex-col gap-[7px]">
+            <label for="hero-q" class="block text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]">
+              What do you want to study?
+            </label>
+            <input
+              id="hero-q"
+              name="q"
+              type="search"
+              placeholder="e.g. Data Science, Law, Medicine"
+              autocomplete="off"
+              class="w-full rounded-[10px] border border-edge bg-surface px-[13px] py-[11px] text-sm text-ink
+                     placeholder:text-slate-light focus-visible:outline-none focus-visible:border-primary transition-colors"
+            />
+          </div>
+          <div class="md:w-[168px] flex flex-col gap-[7px]">
+            <label for="hero-degree" class="block text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]">
+              Degree level
+            </label>
+            <select
+              id="hero-degree"
+              name="degree_level"
+              class="w-full rounded-[10px] border border-edge bg-surface px-[12px] py-[11px] text-sm text-ink
+                     focus-visible:outline-none focus-visible:border-primary transition-colors"
+            >
+              <option value="">Any level</option>
+              {degreeLevels.map(d => (
+                <option value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+          <div class="md:w-[168px] flex flex-col gap-[7px]">
+            <label for="hero-country" class="block text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]">
+              Destination
+            </label>
+            <select
+              id="hero-country"
+              name="country"
+              class="w-full rounded-[10px] border border-edge bg-surface px-[12px] py-[11px] text-sm text-ink
+                     focus-visible:outline-none focus-visible:border-primary transition-colors"
+            >
+              <option value="">Anywhere</option>
+              {destinations.map(c => (
+                <option value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <button
+              type="submit"
+              class="w-full md:w-auto h-[44px] px-[26px] rounded-[10px] bg-primary text-white text-[14.5px] font-semibold
+                     hover:bg-primary-hover transition-colors whitespace-nowrap"
+            >
+              Search
+            </button>
+          </div>
         </div>
-        <div class="md:w-44">
-          <label for="hero-degree" class="block text-xs font-medium text-muted mb-1">Degree level</label>
-          <select
-            id="hero-degree"
-            name="degree_level"
-            class="w-full rounded-lg border border-edge bg-surface px-4 py-2.5 text-sm text-ink
-                   focus-visible:outline-none focus-visible:border-primary"
-          >
-            <option value="">Any level</option>
-            {degreeLevels.map(d => (
-              <option value={d.id}>{d.name}</option>
-            ))}
-          </select>
-        </div>
-        <div class="md:w-44">
-          <label for="hero-country" class="block text-xs font-medium text-muted mb-1">Destination</label>
-          <select
-            id="hero-country"
-            name="country"
-            class="w-full rounded-lg border border-edge bg-surface px-4 py-2.5 text-sm text-ink
-                   focus-visible:outline-none focus-visible:border-primary"
-          >
-            <option value="">Any destination</option>
-            {destinations.map(c => (
-              <option value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-        <div class="flex items-end">
-          <button
-            type="submit"
-            class="w-full md:w-auto px-6 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold
-                   hover:bg-primary-hover transition-colors whitespace-nowrap"
-          >
-            Search programs
-          </button>
-        </div>
-      </div>
-    </form>
+      </form>
+    </div>
 
     <div class="flex flex-wrap gap-2">
       {bachelorLevel && (

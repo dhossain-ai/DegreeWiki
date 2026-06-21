@@ -1,0 +1,23 @@
+---
+import Card from '../../ui/Card.astro'
+
+interface Props {
+  href: string
+  name: string
+  programCount?: number | null
+  scholarshipCount?: number | null
+}
+const { href, name, programCount = null, scholarshipCount = null } = Astro.props
+
+const stats: string[] = []
+if (programCount != null) stats.push(`${programCount.toLocaleString()} ${programCount === 1 ? 'program' : 'programs'}`)
+if (scholarshipCount != null) stats.push(`${scholarshipCount.toLocaleString()} ${scholarshipCount === 1 ? 'scholarship' : 'scholarships'}`)
+---
+<Card href={href} padding="sm">
+  <h3 class="text-sm font-semibold text-ink mb-1">{name}</h3>
+  {stats.length > 0 ? (
+    <p class="text-xs text-muted">{stats.join(' · ')}</p>
+  ) : (
+    <p class="text-xs text-muted">Explore programs &amp; universities</p>
+  )}
+</Card>

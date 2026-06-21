@@ -1,0 +1,18 @@
+---
+import Container from './Container.astro'
+
+interface Props {
+  tone?: 'canvas' | 'surface'
+  width?: 'default' | 'wide' | 'narrow'
+  class?: string
+  bordered?: boolean
+}
+const { tone = 'canvas', width = 'default', class: className = '', bordered = false } = Astro.props
+const toneClass = tone === 'surface' ? 'bg-surface' : 'bg-canvas'
+const borderClass = bordered ? 'border-b border-edge' : ''
+---
+<section class={`${toneClass} ${borderClass} ${className}`}>
+  <Container width={width} class="py-10 sm:py-12">
+    <slot />
+  </Container>
+</section>

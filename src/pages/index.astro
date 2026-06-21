@@ -182,7 +182,7 @@ function formatAmount(
         href="/programs"
         linkText="Browse all programs"
       />
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="flex flex-col gap-[14px]">
         {featuredPrograms.map((p: any) => {
           const uniHref = p.universities?.slug ? `/universities/${p.universities.slug}` : null
           const dl = p.degree_levels as { name: string; code: string } | null

@@ -1,0 +1,25 @@
+---
+import Badge from '../../ui/Badge.astro'
+
+interface Props {
+  href: string
+  name: string
+  providerName?: string | null
+  amount?: string | null
+  deadline?: string | null
+}
+const { href, name, providerName = null, amount = null, deadline = null } = Astro.props
+const meta = [providerName, amount].filter(Boolean).join(' · ')
+---
+<a
+  href={href}
+  class="flex items-center justify-between gap-4 rounded-lg border border-edge bg-surface px-4 py-3 transition-colors hover:border-primary/40 hover:shadow-sm"
+>
+  <div class="min-w-0">
+    <h3 class="text-sm font-semibold text-ink leading-snug line-clamp-1">{name}</h3>
+    {meta && <p class="text-xs text-muted mt-0.5 line-clamp-1">{meta}</p>}
+  </div>
+  {deadline && (
+    <Badge variant="deadline" class="shrink-0">Deadline: {deadline}</Badge>
+  )}
+</a>

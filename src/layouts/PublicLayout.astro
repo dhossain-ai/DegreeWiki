@@ -16,7 +16,7 @@ interface Props {
 const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescription, ogType, ogUrl } = Astro.props
 ---
 <BaseLayout title={title} description={description} noindex={noindex} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDescription} ogType={ogType} ogUrl={ogUrl}>
-  <div class="min-h-screen flex flex-col bg-white">
+  <div class="min-h-screen flex flex-col bg-canvas text-ink">
     <PublicNav />
     <main class="flex-1">
       <slot />

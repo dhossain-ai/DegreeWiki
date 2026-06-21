@@ -1,0 +1,30 @@
+---
+import Button from '../ui/Button.astro'
+
+interface Props {
+  href?: string
+  class?: string
+}
+const { href = '/fit-finder', class: className = '' } = Astro.props
+
+const steps = [
+  'Tell us where you want to study',
+  'Add your subject and budget',
+  'Get matched to real programs',
+]
+---
+<div class={`rounded-xl border border-edge bg-ink text-white p-6 ${className}`}>
+  <p class="text-xs font-semibold uppercase tracking-wide text-white/60 mb-1">Guided search</p>
+  <h2 class="text-lg font-bold mb-3">Find your fit</h2>
+  <ol class="space-y-2 mb-5">
+    {steps.map((step, i) => (
+      <li class="flex items-start gap-3 text-sm text-white/85">
+        <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">
+          {i + 1}
+        </span>
+        {step}
+      </li>
+    ))}
+  </ol>
+  <Button href={href} variant="primary">Start Fit Finder</Button>
+</div>

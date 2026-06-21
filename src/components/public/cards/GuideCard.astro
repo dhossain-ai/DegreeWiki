@@ -1,0 +1,23 @@
+---
+import Card from '../../ui/Card.astro'
+import Badge from '../../ui/Badge.astro'
+
+interface Props {
+  href: string
+  title: string
+  category?: string | null
+  date?: string | null
+  summary?: string | null
+}
+const { href, title, category = null, date = null, summary = null } = Astro.props
+---
+<Card href={href} padding="sm">
+  {(category || date) && (
+    <div class="flex items-center gap-2 mb-1.5">
+      {category && <Badge variant="info">{category}</Badge>}
+      {date && <span class="text-xs text-muted">{date}</span>}
+    </div>
+  )}
+  <h3 class="text-sm font-semibold text-ink mb-1 leading-snug line-clamp-2">{title}</h3>
+  {summary && <p class="text-xs text-muted line-clamp-2">{summary}</p>}
+</Card>

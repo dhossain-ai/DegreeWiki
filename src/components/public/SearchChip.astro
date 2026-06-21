@@ -1,0 +1,15 @@
+---
+interface Props {
+  href: string
+  label: string
+  active?: boolean
+  class?: string
+}
+const { href, label, active = false, class: className = '' } = Astro.props
+
+const base = 'inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium transition-colors'
+const state = active
+  ? 'border-primary bg-primary text-white'
+  : 'border-edge bg-surface text-ink hover:border-primary/40'
+---
+<a href={href} class={`${base} ${state} ${className}`}>{label}</a>
