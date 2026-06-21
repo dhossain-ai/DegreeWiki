@@ -1,5 +1,10 @@
 import type { AIProvider } from './interface'
-import type { AIPrompt, AIProviderConfig, AIProviderResponse } from '../types'
+import type {
+  AIPrompt,
+  AIProviderConfig,
+  AIProviderErrorCategory,
+  AIProviderResponse,
+} from '../types'
 
 // Internal types for the Gemini generateContent REST API response.
 // Not exported — callers use AIProviderResponse.
@@ -23,17 +28,46 @@ interface GeminiRestResponse {
   modelVersion?: string
 }
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+
+export class AIProviderError extends Error {
+  constructor(
+    message: string,
+    readonly category: AIProviderErrorCategory,
+    readonly status?: number,
+  ) {
+    super(message)
+    this.name = 'AIProviderError'
+  }
+}
+
+export function isAIProviderError(error: unknown): error is AIProviderError {
+  return error instanceof AIProviderError
+}
+
+export function categoryForStatus(status: number): AIProviderErrorCategory {
+  if (status === 400) return 'bad_request'
+  if (status === 401 || status === 403) return 'auth_error'
+  if (status === 404) return 'model_not_found'
+  if (status === 429) return 'quota_or_rate_limit'
+  return 'provider_error'
+}
+
+function modelPath(model: string): string {
+  const trimmed = model.trim()
+  const path = trimmed.startsWith('models/') ? trimmed : `models/${trimmed}`
+  return path.split('/').map(encodeURIComponent).join('/')
+}
 
 export class GeminiProvider implements AIProvider {
   constructor(private readonly apiKey: string) {}
 
   async complete(prompt: AIPrompt, config: AIProviderConfig): Promise<AIProviderResponse> {
     const model = config.model
-    const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${this.apiKey}`
+    const url = `${GEMINI_API_BASE}/${modelPath(model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`
 
     const body = {
-      system_instruction: {
+      systemInstruction: {
         parts: [{ text: prompt.system }],
       },
       contents: [
@@ -48,28 +82,42 @@ export class GeminiProvider implements AIProvider {
       },
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    } catch {
+      throw new AIProviderError('Gemini request failed before receiving a response', 'network_error')
+    }
 
     if (!response.ok) {
       // Do not include the response body — it may echo back prompt context.
-      throw new Error(`Gemini API returned status ${response.status}`)
+      throw new AIProviderError(
+        `Gemini API returned status ${response.status}`,
+        categoryForStatus(response.status),
+        response.status,
+      )
     }
 
-    const data = (await response.json()) as GeminiRestResponse
+    let data: GeminiRestResponse
+    try {
+      data = (await response.json()) as GeminiRestResponse
+    } catch {
+      throw new AIProviderError('Gemini response was not valid JSON', 'provider_error', response.status)
+    }
 
     const candidates = data.candidates ?? []
     if (candidates.length === 0) {
-      throw new Error('Gemini returned no candidates')
+      throw new AIProviderError('Gemini returned no candidates', 'provider_error', response.status)
     }
 
     const candidate = candidates[0]
     const finishReason = candidate.finishReason ?? ''
     if (finishReason === 'SAFETY' || finishReason === 'RECITATION') {
-      throw new Error(`Gemini candidate blocked: ${finishReason}`)
+      throw new AIProviderError(`Gemini candidate blocked: ${finishReason}`, 'provider_error', response.status)
     }
 
     const parts = candidate.content?.parts ?? []
@@ -79,7 +127,7 @@ export class GeminiProvider implements AIProvider {
       .trim()
 
     if (!text) {
-      throw new Error('Gemini response missing text')
+      throw new AIProviderError('Gemini response missing text', 'provider_error', response.status)
     }
 
     const promptTokens = data.usageMetadata?.promptTokenCount ?? 0

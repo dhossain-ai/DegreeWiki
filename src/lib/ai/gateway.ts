@@ -1,12 +1,19 @@
 import type { AIProvider } from './providers/interface'
 import type { AIRequest, AIResponse, AIRuntimeEnv } from './types'
 import { createGeminiProvider } from './providers/gemini'
+import { createOpenRouterProvider } from './providers/openrouter'
+import { isAIProviderError } from './providers/gemini'
 import { buildFinderPrompt } from './prompts/finder-summary'
 import { buildChatPrompt } from './prompts/chat-answer'
 import { checkInput, checkOutput } from './safety/guardrails'
 import { checkRateLimit } from './usage/limits'
 import { writeUsageLog } from './usage/logging'
 import { createServiceClient } from '../supabase/service'
+
+function logAIDev(message: string, details: Record<string, unknown>): void {
+  if (!import.meta.env.DEV) return
+  console.log(`[AI gateway] ${message}:`, details)
+}
 
 // callAI is the single server-only entry point for all LLM calls.
 //
@@ -42,6 +49,11 @@ export async function callAI(
     : null
 
   const dailyLimit = Math.max(1, parseInt(env.AI_RATE_LIMIT_USER_DAILY ?? '20', 10) || 20)
+  const providerName = env.AI_PROVIDER ?? 'gemini'
+  const model = env.AI_MODEL ?? 'gemini-2.5-flash'
+
+  logAIDev('provider selected', { provider: providerName })
+  logAIDev('model selected', { model })
 
   // Step 2: rate limit check — fail closed.
   // No service client → denied. Anonymous user → denied. Query error → denied.
@@ -50,8 +62,10 @@ export async function callAI(
     request.sessionType,
     { serviceClient, dailyLimit },
   )
+  logAIDev('rate limit result', { allowed, reason: limitReason ?? null })
   if (!allowed) {
-    if (limitReason === 'service_unavailable' && !env.SUPABASE_SERVICE_ROLE_KEY) {
+    logAIDev('provider request attempted', { provider: providerName, attempted: false })
+    if (import.meta.env.DEV && limitReason === 'service_unavailable' && !env.SUPABASE_SERVICE_ROLE_KEY) {
       console.warn('[AI gateway] AI call denied: SUPABASE_SERVICE_ROLE_KEY is not set. Add it to .env.local (local dev) or Cloudflare secrets (production) to enable AI rate limiting and AI calls.')
     }
     const text = limitReason === 'limit_exceeded'
@@ -64,6 +78,11 @@ export async function callAI(
       completionTokens: 0,
       guardrailTripped: false,
       fallbackUsed: true,
+      failure: {
+        source: 'rate_limit',
+        reason: limitReason ?? 'service_unavailable',
+        requestAttempted: false,
+      },
     }
   }
 
@@ -72,6 +91,10 @@ export async function callAI(
   try {
     provider = resolveProvider(env)
   } catch {
+    logAIDev('provider request attempted', { provider: providerName, attempted: false })
+    if (import.meta.env.DEV && providerName !== 'gemini' && providerName !== 'openrouter') {
+      console.warn(`[AI gateway] Unknown AI_PROVIDER="${providerName}". Supported providers: gemini, openrouter. AI is unavailable until this is corrected.`)
+    }
     return {
       text: 'AI is not available at this time. Please try again later.',
       modelUsed: 'none',
@@ -79,6 +102,12 @@ export async function callAI(
       completionTokens: 0,
       guardrailTripped: false,
       fallbackUsed: true,
+      failure: {
+        source: 'provider_config',
+        provider: providerName,
+        model,
+        requestAttempted: false,
+      },
     }
   }
 
@@ -89,15 +118,18 @@ export async function callAI(
       : buildChatPrompt(request.userMessage, request.context, request.chatMode)
 
   // Step 5: call provider.
-  const model = env.AI_MODEL ?? 'gemini-2.5-flash'
   let providerResponse: Awaited<ReturnType<AIProvider['complete']>>
   try {
+    logAIDev('provider request attempted', { provider: providerName, attempted: true })
     providerResponse = await provider.complete(prompt, {
       model,
       temperature: 0.2,
       maxOutputTokens: 2048,
     })
-  } catch {
+  } catch (error) {
+    const category = isAIProviderError(error) ? error.category : 'provider_error'
+    const status = isAIProviderError(error) ? error.status : undefined
+    logAIDev('provider failed', { provider: providerName, status: status ?? null, category })
     return {
       text: 'AI is temporarily unavailable. Please try again later.',
       modelUsed: model,
@@ -105,6 +137,14 @@ export async function callAI(
       completionTokens: 0,
       guardrailTripped: false,
       fallbackUsed: true,
+      failure: {
+        source: 'provider',
+        provider: providerName,
+        model,
+        category,
+        status,
+        requestAttempted: true,
+      },
     }
   }
 
@@ -158,6 +198,13 @@ function resolveProvider(env: AIRuntimeEnv): AIProvider {
       throw new Error('Gemini provider is not configured')
     }
     return createGeminiProvider(env.GEMINI_API_KEY)
+  }
+
+  if (providerName === 'openrouter') {
+    if (!env.OPENROUTER_API_KEY) {
+      throw new Error('OpenRouter provider is not configured')
+    }
+    return createOpenRouterProvider(env.OPENROUTER_API_KEY)
   }
 
   throw new Error('Requested AI provider is not available')

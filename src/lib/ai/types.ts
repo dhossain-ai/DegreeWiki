@@ -44,7 +44,37 @@ export interface AIResponse {
   completionTokens: number
   guardrailTripped: boolean
   fallbackUsed: boolean
+  failure?: AIFailureReason
 }
+
+export type AIProviderErrorCategory =
+  | 'auth_error'
+  | 'model_not_found'
+  | 'quota_or_rate_limit'
+  | 'bad_request'
+  | 'provider_error'
+  | 'network_error'
+
+export type AIFailureReason =
+  | {
+      source: 'rate_limit'
+      reason: 'limit_exceeded' | 'service_unavailable'
+      requestAttempted: false
+    }
+  | {
+      source: 'provider_config'
+      provider: string
+      model: string
+      requestAttempted: false
+    }
+  | {
+      source: 'provider'
+      provider: string
+      model: string
+      category: AIProviderErrorCategory
+      status?: number
+      requestAttempted: true
+    }
 
 // The structured prompt handed to a provider.
 export interface AIPrompt {
@@ -130,6 +160,9 @@ export interface AIRuntimeEnv {
   AI_PROVIDER?: string
   AI_MODEL?: string
   GEMINI_API_KEY?: string
+  // Server-only. Never expose with PUBLIC_ prefix. Used only when
+  // AI_PROVIDER=openrouter for local AI testing via the OpenRouter provider.
+  OPENROUTER_API_KEY?: string
   AI_RATE_LIMIT_ANON_DAILY?: string
   AI_RATE_LIMIT_USER_DAILY?: string
   // Server-only. Never expose with PUBLIC_ prefix. Used only by AI logging

@@ -4,7 +4,7 @@ import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 import { callAI } from '../../lib/ai/gateway'
 import { getAIEnv } from '../../lib/ai/env'
-import type { AIContext } from '../../lib/ai/types'
+import type { AIContext, AIFailureReason } from '../../lib/ai/types'
 import { persistFinderResult } from '../../lib/ai/finder/persist'
 
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -72,6 +72,7 @@ let candidatesChecked = 0
 let missingSignals: string[] = []
 let aiExplanation: string | null = null
 let aiUnavailable = false
+let aiFailure: AIFailureReason | null = null
 let savedResultId: string | null = null
 let persistAttempted = false
 
@@ -358,6 +359,7 @@ if (!user) {
                 completionTokenCount = aiResponse.completionTokens
               } else {
                 aiUnavailable = true
+                aiFailure = aiResponse.failure ?? null
               }
             } catch {
               aiUnavailable = true
@@ -418,6 +420,19 @@ const showDevAIWarning =
   import.meta.env.DEV &&
   pageState === 'ready' &&
   aiUnavailable
+const devAIWarningMessage = (() => {
+  if (!aiFailure) return 'AI summary is unavailable. Check the server console for safe AI diagnostics.'
+  if (aiFailure.source === 'rate_limit') {
+    return `AI summary is unavailable: service-role/rate limiter issue (${aiFailure.reason}).`
+  }
+  if (aiFailure.source === 'provider') {
+    return `AI summary is unavailable: ${aiFailure.provider} provider failed (status: ${aiFailure.status ?? 'none'}, category: ${aiFailure.category}).`
+  }
+  if (aiFailure.source === 'provider_config') {
+    return `AI summary is unavailable: ${aiFailure.provider} provider configuration issue.`
+  }
+  return 'AI summary is unavailable: AI provider configuration issue.'
+})()
 ---
 <PublicLayout
   title={`${pageTitle} — DegreeWiki`}
@@ -566,7 +581,7 @@ const showDevAIWarning =
         )}
         {showDevAIWarning && (
           <div class="max-w-3xl mb-5 px-4 py-3 rounded-md bg-yellow-50 border border-yellow-300 text-sm text-yellow-900">
-            <strong>Developer note:</strong> AI summary is unavailable. <code class="font-mono bg-yellow-100 px-1 rounded">SUPABASE_SERVICE_ROLE_KEY</code> is required for the AI rate limiter — add it to <code class="font-mono bg-yellow-100 px-1 rounded">.env.local</code> alongside <code class="font-mono bg-yellow-100 px-1 rounded">GEMINI_API_KEY</code>.
+            <strong>Developer note:</strong> {devAIWarningMessage}
           </div>
         )}
 

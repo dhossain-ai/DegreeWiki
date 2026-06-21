@@ -20,8 +20,12 @@ They must never use the `PUBLIC_` prefix. Never commit real values to the reposi
 
 | Secret | Purpose |
 |---|---|
-| `GEMINI_API_KEY` | Authenticates calls to the Gemini REST API |
+| `GEMINI_API_KEY` | Authenticates calls to the Gemini REST API (when `AI_PROVIDER=gemini`) |
+| `OPENROUTER_API_KEY` | Authenticates calls to OpenRouter (when `AI_PROVIDER=openrouter`) — local AI testing |
 | `SUPABASE_SERVICE_ROLE_KEY` | Rate-limit checks, AI usage logging, saved-result persistence |
+
+Only the API key for the active `AI_PROVIDER` is required. Both keys are server-only and
+must never use the `PUBLIC_` prefix.
 
 ---
 
@@ -34,7 +38,7 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 | `PUBLIC_SUPABASE_URL` | Yes | — | Supabase project URL |
 | `PUBLIC_SUPABASE_ANON_KEY` | Yes | — | Supabase anon key |
 | `PUBLIC_SITE_URL` | No | `https://degreewiki.com` | Canonical site URL |
-| `AI_PROVIDER` | No | `gemini` | Active provider name |
+| `AI_PROVIDER` | No | `gemini` | Active provider name: `gemini` or `openrouter` |
 | `AI_MODEL` | No | `gemini-2.5-flash` | Model string passed to provider |
 | `AI_RATE_LIMIT_USER_DAILY` | No | `20` | Max AI calls per logged-in user per day |
 | `AI_RATE_LIMIT_ANON_DAILY` | No | `5` | Reserved; anonymous AI not yet enforced |
@@ -43,27 +47,80 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 
 ## 3A. Local Development Notes
 
-- `astro dev`: server-only AI env vars may be placed in `.env.local`; `src/lib/ai/env.ts`
-  falls back to server-only `import.meta.env` only when Cloudflare runtime bindings are absent.
-- `wrangler pages dev`: use `.dev.vars` for `GEMINI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY`.
-- Never use the `PUBLIC_` prefix for Gemini or service-role secrets.
-- Never commit `.env.local`, `.dev.vars`, or `.dev.vars.*`.
+### How env vars reach server code in local dev
 
-**Important — Saved-result and chat persistence in local dev:**
-`SUPABASE_SERVICE_ROLE_KEY` is required for Fit Finder result persistence
-(`persistFinderResult`) and AI chat message persistence (`persistChatTurn`).
-If it is absent from `.env.local` or `.dev.vars`, both functions return silently
-without inserting rows. Rule-based matches and the AI summary will still render
-correctly, but no `ai_finder_results` row will be created and `/fit-finder/results`
-will appear empty. Set `SUPABASE_SERVICE_ROLE_KEY` in your local env file to enable
-full end-to-end persistence locally.
+`src/lib/ai/env.ts` reads env vars from three sources in priority order:
 
-Example `.dev.vars`:
+1. **`locals.runtime.env`** — populated by `getPlatformProxy` (wrangler) from `.dev.vars`
+   and `wrangler.toml [vars]`. This is the most reliable path.
+2. **`import.meta.env`** — injected by Astro's Vite SSR transform from `.env.local`.
+   Works when running `astro dev`; may not apply in all Cloudflare adapter configurations.
+3. **`process.env`** — Node.js process environment. Last-resort fallback for `astro dev`;
+   Vite does not populate this from `.env.local`, so it only helps if a key is set
+   in the system environment before Astro starts.
+
+### Recommended setup for `npm run dev`
+
+Use **both** `.env.local` and `.dev.vars` so all three sources are covered:
+
+- `.env.local` — all vars including `PUBLIC_*` keys (for Vite/Astro dev server)
+- `.dev.vars` — private secrets only, no `PUBLIC_*` keys (for wrangler's `getPlatformProxy`)
+
+See `.dev.vars.example` for the full list of required keys.
 
 ```bash
+# .dev.vars (git-ignored — copy from .dev.vars.example and fill in real values)
 GEMINI_API_KEY=your_key_here
 SUPABASE_SERVICE_ROLE_KEY=your_service_key_here
+AI_PROVIDER=gemini
+AI_MODEL=gemini-2.5-flash
+AI_RATE_LIMIT_ANON_DAILY=3
+AI_RATE_LIMIT_USER_DAILY=10
 ```
+
+### Local AI testing with OpenRouter
+
+When Gemini is rate-limited (HTTP 429) or unavailable, you can route AI calls through
+OpenRouter for local development/testing without changing any Fit Finder, AI Advisor, or
+matching logic. The same safety prompts, static routing, rate limits, and guardrails apply.
+
+```bash
+# .dev.vars (or .env.local) — local OpenRouter testing
+AI_PROVIDER=openrouter
+AI_MODEL=openrouter/free
+OPENROUTER_API_KEY=your_openrouter_key_here
+```
+
+- `OPENROUTER_API_KEY` is server-only — never use the `PUBLIC_` prefix.
+- The OpenRouter provider calls OpenRouter's OpenAI-compatible chat-completions endpoint
+  server-side only. The API key, prompt body, and full response body are never logged.
+- Set `AI_MODEL` to any valid OpenRouter model id. Free OpenRouter models have **strict
+  rate limits** and are intended for development/testing, **not production reliability**.
+- If OpenRouter quota fails (429), the UI shows the same safe fallback note as Gemini, and
+  in DEV the result page surfaces a safe `provider`/`category` diagnostic (no secrets, no
+  prompt or response text).
+- To switch back to Gemini, set `AI_PROVIDER=gemini` and `AI_MODEL=gemini-2.5-flash`.
+
+A minimal `wrangler.toml` must exist in the project root (already tracked in git) so
+`getPlatformProxy` can locate `.dev.vars`.
+
+- Never use the `PUBLIC_` prefix for Gemini or service-role secrets.
+- Never commit `.env.local`, `.dev.vars`, or `.dev.vars.*`.
+- After creating or modifying `.env.local` or `.dev.vars`, restart the dev server.
+
+### DEV diagnostic log
+
+In `astro dev`, each request to `/fit-finder/result` logs a presence check for all AI
+env keys to the server console. Keys show `true` (set) or `false` (missing) per source.
+No values are printed. Use this to confirm which source is providing each key.
+
+### Important — Saved-result and chat persistence in local dev
+
+`SUPABASE_SERVICE_ROLE_KEY` is required for Fit Finder result persistence
+(`persistFinderResult`) and AI chat message persistence (`persistChatTurn`).
+If it is absent, both functions return silently without inserting rows. Rule-based
+matches and the AI summary will still render correctly, but no `ai_finder_results`
+row will be created and `/fit-finder/results` will appear empty.
 
 ---
 
@@ -274,6 +331,8 @@ Check server logs for `ai_finder_program_matches insert failed`.
 | Both secrets absent | Not shown | Renders normally | Not attempted | Gray unavailable note |
 | Rate limit exceeded | Not shown | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note |
 | Gemini API error | Not shown | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note |
+| OpenRouter API error / quota (429) | Not shown | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note (DEV: safe provider/category diagnostic) |
+| Unknown `AI_PROVIDER` | Not shown | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note (DEV: warns supported providers) |
 | Output guardrail tripped | Not shown | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note |
 | Persistence fails (match insert) | Shown if generated | Renders normally | result_status=failed | Matches shown; no save banner |
 | Supabase program query error | N/A | Not rendered | Not attempted | Error state with retry guidance |
