@@ -1,5 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import Container from '../../components/ui/Container.astro'
+import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
@@ -26,15 +28,6 @@ if (!article) {
 
 const a = article as any
 
-const VERIFICATION_BADGES: Record<string, { label: string; cls: string }> = {
-  verified:           { label: 'Verified',           cls: 'bg-green-50 text-green-700 border border-green-200' },
-  partially_verified: { label: 'Partially Verified', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
-  source_conflict:    { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-  outdated:           { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-  needs_review:       { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-}
-const verBadge = VERIFICATION_BADGES[a.verification_status] ?? null
-
 function formatDate(d: string | null): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
@@ -56,59 +49,77 @@ const categoryId   = a.article_categories?.id ?? null
 const categoryName = a.article_categories?.name ?? null
 ---
 <PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
-  <div class="max-w-2xl mx-auto px-4 py-8">
-    <a href="/guides" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Guides</a>
 
-    <div class="flex items-center gap-2 text-xs text-gray-400 mb-3">
-      {categoryName && categoryId && (
-        <a href={`/guides?category=${categoryId}`}
-           class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium hover:bg-gray-200">
-          {categoryName}
-        </a>
-      )}
-      {categoryName && !categoryId && (
-        <span class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium">
-          {categoryName}
-        </span>
-      )}
-      {pubDate && <span>{pubDate}</span>}
-    </div>
+  <!-- Page header band -->
+  <div class="bg-surface border-b border-edge">
+    <Container width="narrow" class="py-7 sm:py-8">
+      <a href="/guides"
+         class="inline-flex items-center gap-1 text-sm text-primary hover:text-primary-hover mb-4">
+        ← All Guides
+      </a>
 
-    <h1 class="text-3xl font-bold text-gray-900 mb-3">{a.title}</h1>
-
-    {verBadge && (
-      <div class="mb-4">
-        <span class={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded border ${verBadge.cls}`}>
-          {verBadge.label}
-        </span>
+      <!-- Category + date meta -->
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        {categoryName && categoryId && (
+          <a href={`/guides?category=${categoryId}`}>
+            <Badge variant="info">{categoryName}</Badge>
+          </a>
+        )}
+        {categoryName && !categoryId && (
+          <Badge variant="info">{categoryName}</Badge>
+        )}
+        {pubDate && (
+          <span class="text-xs text-muted">{pubDate}</span>
+        )}
       </div>
-    )}
 
-    {a.summary && (
-      <p class="text-gray-500 text-base mb-8 border-l-2 border-gray-200 pl-4">{a.summary}</p>
-    )}
-
-    {contentParas.length > 0 ? (
-      <div class="space-y-4 text-gray-700 text-sm leading-relaxed">
-        {contentParas.map((para: string) => (
-          <p>{para}</p>
-        ))}
-      </div>
-    ) : (
-      !a.summary && <p class="text-gray-400 text-sm">No content available.</p>
-    )}
-
-    <SourceBox
-      verificationStatus={a.verification_status}
-      lastVerifiedAt={null}
-      officialUrl={null}
-      sourceConfidenceScore={a.source_confidence_score ?? null}
-    />
-
-    {updatedAt && (
-      <p class="text-xs text-gray-400 mt-10 mb-6">Last updated: {updatedAt}</p>
-    )}
-
-    <a href="/guides" class="text-sm text-blue-600 hover:underline">← All Guides</a>
+      <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
+        {a.title}
+      </h1>
+    </Container>
   </div>
+
+  <!-- Main content -->
+  <div class="bg-canvas">
+    <Container width="narrow" class="py-7 sm:py-8">
+
+      <!-- Summary / lead -->
+      {a.summary && (
+        <p class="text-base text-ink-secondary leading-relaxed border-l-[3px] border-primary-border pl-4 mb-8">
+          {a.summary}
+        </p>
+      )}
+
+      <!-- Article content -->
+      {contentParas.length > 0 ? (
+        <div class="space-y-4 text-sm text-ink-secondary leading-relaxed mb-8">
+          {contentParas.map((para: string) => (
+            <p>{para}</p>
+          ))}
+        </div>
+      ) : (
+        !a.summary && (
+          <p class="text-sm text-muted mb-8">No content available.</p>
+        )
+      )}
+
+      <!-- Source & verification -->
+      <SourceBox
+        verificationStatus={a.verification_status}
+        lastVerifiedAt={null}
+        officialUrl={null}
+        sourceConfidenceScore={a.source_confidence_score ?? null}
+      />
+
+      {updatedAt && (
+        <p class="text-xs text-muted mb-6">Last updated: {updatedAt}</p>
+      )}
+
+      <a href="/guides" class="text-sm text-primary hover:text-primary-hover">
+        ← All Guides
+      </a>
+
+    </Container>
+  </div>
+
 </PublicLayout>

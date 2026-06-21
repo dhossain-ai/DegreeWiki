@@ -1,5 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import Container from '../../components/ui/Container.astro'
+import GuideCard from '../../components/public/cards/GuideCard.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -51,94 +53,141 @@ function formatDate(d: string | null): string | null {
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-const selectClass = 'w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
-const inputClass  = 'w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
-const labelClass  = 'block text-xs font-medium text-gray-600 mb-1'
+function buildUrlWithout(param: string): string {
+  const params = new URLSearchParams(Astro.url.searchParams)
+  params.delete(param)
+  const qs = params.toString()
+  return '/guides' + (qs ? '?' + qs : '')
+}
+
+type FilterChip = { key: string; label: string; removeHref: string }
+const activeChips: FilterChip[] = []
+if (q) activeChips.push({ key: 'q', label: `"${q}"`, removeHref: buildUrlWithout('q') })
+if (categoryId) {
+  const cat = (categories as any[]).find(c => c.id === categoryId)
+  activeChips.push({ key: 'category', label: cat?.name ?? 'Category', removeHref: buildUrlWithout('category') })
+}
+
+const flabel  = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
+const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-primary'
 ---
-<PublicLayout title="Guides — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/guides'}>
-  <div class="max-w-3xl mx-auto px-4 py-8">
-    <h1 class="text-2xl font-bold text-gray-900 mb-6">Guides</h1>
 
-    <form method="get" action="/guides" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+<PublicLayout title="Study Abroad Guides — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/guides'}>
 
-        <div class="sm:col-span-2">
-          <label class={labelClass} for="q">Search titles and summaries</label>
-          <input id="q" name="q" type="search" value={rawQ.trim().replace(/[,()]/g, '').slice(0, 100)}
-                 placeholder="e.g. visa, scholarship application…"
-                 class={inputClass} />
-        </div>
-
-        <div>
-          <label class={labelClass} for="category">Category</label>
-          <select id="category" name="category" class={selectClass}>
-            <option value="">All categories</option>
-            {categories.map((c: any) => (
-              <option value={c.id} selected={categoryId === c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-
-      </div>
-
-      <div class="flex items-center gap-3 mt-4">
-        <button type="submit"
-                class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">
-          Search
-        </button>
-        {hasFilters && (
-          <a href="/guides"
-             class="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-            Clear filters
-          </a>
-        )}
-      </div>
-    </form>
-
-    {overLimit ? (
-      <p class="text-sm text-gray-500 mb-4">
-        Showing 200 of {(count ?? 200).toLocaleString()} guides. Narrow your search to see more.
+  <!-- Page header band -->
+  <div class="bg-surface border-b border-edge">
+    <Container width="default" class="py-7 sm:py-8">
+      <h1 class="text-[28px] sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
+        Study Abroad Guides
+      </h1>
+      <p class="mt-1.5 text-base text-muted">
+        Expert guides on studying abroad, visa applications, and choosing the right program.
       </p>
-    ) : rows.length > 0 ? (
-      <p class="text-sm text-gray-500 mb-4">
-        {rows.length} {rows.length === 1 ? 'guide' : 'guides'} found.
-      </p>
-    ) : null}
-
-    {rows.length === 0 ? (
-      <div class="text-center py-12 text-gray-500">
-        {hasFilters ? (
-          <div>
-            <p class="text-base mb-3">No guides match your filters.</p>
-            <a href="/guides" class="text-sm text-blue-600 hover:underline">Clear filters</a>
-          </div>
-        ) : (
-          <p class="text-base">No guides have been published yet.</p>
-        )}
-      </div>
-    ) : (
-      <div class="space-y-4">
-        {rows.map((a: any) => (
-          <div class="rounded-lg border border-gray-200 p-5 hover:bg-gray-50 transition-colors">
-            <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
-              {a.article_categories?.name && (
-                <span class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium">
-                  {a.article_categories.name}
-                </span>
-              )}
-              {formatDate(a.published_at) && (
-                <span>{formatDate(a.published_at)}</span>
-              )}
-            </div>
-            <h2 class="text-base font-semibold text-gray-900 mb-1">
-              <a href={`/guides/${a.slug}`} class="text-blue-600 hover:underline">{a.title}</a>
-            </h2>
-            {a.summary && (
-              <p class="text-sm text-gray-500 line-clamp-2">{a.summary}</p>
-            )}
-          </div>
-        ))}
-      </div>
-    )}
+    </Container>
   </div>
+
+  <!-- Main content -->
+  <div class="bg-canvas min-h-[60vh]">
+    <Container width="default" class="py-6 sm:py-8">
+
+      <form method="get" action="/guides">
+
+        <!-- Search + filter row -->
+        <div class="flex flex-col sm:flex-row gap-3 mb-4">
+          <div class="relative flex-1">
+            <label for="q" class="sr-only">Search guides</label>
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
+                 viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            <input
+              id="q" name="q" type="search"
+              value={rawQ.trim().replace(/[,()]/g, '').slice(0, 100)}
+              placeholder="Search guides, e.g. visa, scholarship application…"
+              class="w-full h-[44px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface
+                     text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary"
+            />
+          </div>
+
+          <div class="sm:w-52 flex-none">
+            <label for="category" class="sr-only">Category</label>
+            <select id="category" name="category" class={`${fselect} h-[44px]`}>
+              <option value="">All categories</option>
+              {categories.map((c: any) => (
+                <option value={c.id} selected={categoryId === c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button type="submit"
+                  class="h-[44px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px]
+                         hover:bg-primary-hover transition-colors flex-none">
+            Search
+          </button>
+          {hasFilters && (
+            <a href="/guides"
+               class="h-[44px] px-4 inline-flex items-center text-[13.5px] font-medium text-ink-secondary
+                      border border-edge rounded-[10px] hover:bg-surface transition-colors flex-none">
+              Clear all
+            </a>
+          )}
+        </div>
+
+      </form>
+
+      <!-- Active filter chips -->
+      {activeChips.length > 0 && (
+        <div class="flex flex-wrap gap-2 mb-5" aria-label="Active filters">
+          {activeChips.map(chip => (
+            <a href={chip.removeHref}
+               class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border
+                      text-primary text-sm font-medium rounded-full hover:bg-primary-border transition-colors">
+              {chip.label}
+              <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      <!-- Results count -->
+      {overLimit ? (
+        <p class="text-sm text-muted mb-4">
+          Showing 200 of {(count ?? 200).toLocaleString()} guides. Narrow your search to see more.
+        </p>
+      ) : rows.length > 0 ? (
+        <p class="text-sm text-muted mb-4">
+          {rows.length} {rows.length === 1 ? 'guide' : 'guides'} found.
+        </p>
+      ) : null}
+
+      <!-- Results -->
+      {rows.length === 0 ? (
+        <div class="text-center py-16 rounded-xl border border-edge bg-surface">
+          <p class="text-base font-medium text-ink mb-2">
+            {hasFilters ? 'No guides match your filters.' : 'No guides have been published yet.'}
+          </p>
+          {hasFilters && (
+            <a href="/guides" class="text-sm text-primary hover:text-primary-hover">
+              Clear filters and browse all
+            </a>
+          )}
+        </div>
+      ) : (
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {rows.map((a: any) => (
+            <GuideCard
+              href={`/guides/${a.slug}`}
+              title={a.title}
+              category={a.article_categories?.name ?? null}
+              date={formatDate(a.published_at)}
+              summary={a.summary ?? null}
+            />
+          ))}
+        </div>
+      )}
+
+    </Container>
+  </div>
+
 </PublicLayout>

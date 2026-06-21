@@ -1,8 +1,49 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21 (Phase 55E)
+Last updated: 2026-06-21 (Phase 55F)
 
 ## Current Phase
+
+Phase 55F — Public Pages Redesign Completion Bundle — complete.
+Redesigned all remaining public directory and detail pages using the Phase 55B public
+design system. No schema changes, no auth/admin changes, no new npm dependencies.
+
+Routes redesigned (Part A — directory pages):
+- `src/pages/universities/index.astro`: surface header band, keyword search bar, country
+  + city filter panel (real DB selects), active filter chips with × dismissal, monogram
+  block university rows, empty states.
+- `src/pages/scholarships/index.astro`: surface header band, keyword search bar,
+  collapsible filter panel (6 filter types — all backed by real DB), active filter chips,
+  Badge component results rows (purple eliminated, replaced with design tokens), empty states.
+- `src/pages/guides/index.astro`: surface header band, inline search + category select,
+  active chips, GuideCard grid (2 cols sm+), empty states.
+
+Routes redesigned (Part B — detail pages):
+- `src/pages/programs/[slug].astro`: full hero header (breadcrumb → university → h1 +
+  degree Badge + subject Badge + verification Badge); key facts panel with tuition row;
+  all content sections; intake cards with Badge status; Apply/Official CTAs; SourceBox.
+- `src/pages/universities/[slug].astro`: header with monogram block + name + location +
+  verification Badge; key facts panel; rankings + overview sections; browse programs CTA
+  panel; official website CTA; SourceBox.
+- `src/pages/scholarships/[slug].astro`: header with provider name + h1 + type/amount
+  Badges; key facts panel with amount (verified green) + deadline (amber); all content
+  sections; Apply/Official CTAs; SourceBox.
+- `src/pages/guides/[slug].astro`: header with category Badge + date + h1; lead summary
+  with left border accent; content paragraphs; SourceBox.
+
+Routes skipped (do not exist — no new routes created):
+- /articles/**, /subjects/**, /countries/** — not present in src/pages/
+
+Component updated:
+- `src/components/public/SourceBox.astro`: converted gray-* classes to design tokens
+  (border-edge, bg-canvas, text-muted, text-ink-secondary, text-primary).
+
+No migrations. No schema changes. No RLS changes. No AI/auth/admin changes.
+No new npm dependencies. /programs/index.astro not changed (per phase scope).
+No set:html, no innerHTML, no service_role in any modified file.
+Build: PASS (Server built in 7.23s, zero errors).
+Security grep: 0 matches in modified files (1 pre-existing match in fit-finder/result.astro — not touched).
+XSS grep: 0 matches in modified files (1 pre-existing comment in fit-finder/result.astro — not touched).
 
 Phase 55E — Program Discovery Redesign Bundle — complete.
 Redesigned `src/pages/programs/index.astro` as the core public discovery page using

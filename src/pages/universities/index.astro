@@ -1,5 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import Container from '../../components/ui/Container.astro'
+import Badge from '../../components/ui/Badge.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -49,113 +51,190 @@ const allRows   = data ?? []
 const overLimit = (count ?? allRows.length) > 200
 const rows      = allRows.slice(0, 200)
 
-const selectClass = 'w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
-const inputClass  = 'w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500'
-const labelClass  = 'block text-xs font-medium text-gray-600 mb-1'
+function buildUrlWithout(param: string): string {
+  const params = new URLSearchParams(Astro.url.searchParams)
+  params.delete(param)
+  const qs = params.toString()
+  return '/universities' + (qs ? '?' + qs : '')
+}
+
+function uniInitials(name: string): string {
+  const caps = name.split(/\s+/).map((w: string) => w[0]?.toUpperCase() ?? '').filter(Boolean)
+  return caps.slice(0, 2).join('') || name.slice(0, 2).toUpperCase()
+}
+
+type FilterChip = { key: string; label: string; removeHref: string }
+const activeChips: FilterChip[] = []
+if (q) activeChips.push({ key: 'q', label: `"${q}"`, removeHref: buildUrlWithout('q') })
+if (countryId) {
+  const c = (countries as any[]).find(c => c.id === countryId)
+  activeChips.push({ key: 'country', label: c?.name ?? 'Country', removeHref: buildUrlWithout('country') })
+}
+if (cityId) {
+  const c = (cities as any[]).find(c => c.id === cityId)
+  activeChips.push({ key: 'city', label: c?.name ?? 'City', removeHref: buildUrlWithout('city') })
+}
+
+const flabel  = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
+const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-primary'
 ---
+
 <PublicLayout title="Universities — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/universities'}>
-  <div class="max-w-5xl mx-auto px-4 py-8">
-    <h1 class="text-2xl font-bold text-gray-900 mb-6">Universities</h1>
 
-    <form method="get" action="/universities" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-
-        <div class="sm:col-span-2 lg:col-span-3">
-          <label class={labelClass} for="q">Search universities</label>
-          <input id="q" name="q" type="search" value={q ?? ''}
-                 placeholder="e.g. MIT, Oxford, National…"
-                 class={inputClass} />
-        </div>
-
-        <div>
-          <label class={labelClass} for="country">Country</label>
-          <select id="country" name="country" class={selectClass}>
-            <option value="">All countries</option>
-            {countries.map((c: any) => (
-              <option value={c.id} selected={countryId === c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label class={labelClass} for="city">City</label>
-          <select id="city" name="city" class={selectClass}>
-            <option value="">All cities</option>
-            {cities.map((c: any) => (
-              <option value={c.id} selected={cityId === c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-
-      </div>
-
-      <div class="flex items-center gap-3 mt-4">
-        <button type="submit"
-                class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">
-          Search
-        </button>
-        {hasFilters && (
-          <a href="/universities"
-             class="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-            Clear filters
-          </a>
-        )}
-      </div>
-    </form>
-
-    {overLimit ? (
-      <p class="text-sm text-gray-500 mb-4">
-        Showing 200 of {(count ?? 200).toLocaleString()} universities. Narrow your search to see more.
-      </p>
-    ) : rows.length > 0 ? (
-      <p class="text-sm text-gray-500 mb-4">
-        {rows.length} {rows.length === 1 ? 'university' : 'universities'} found.
-      </p>
-    ) : null}
-
-    {rows.length === 0 ? (
-      <div class="text-center py-12 text-gray-500">
-        {hasFilters ? (
-          <div>
-            <p class="text-base mb-3">No universities match your filters.</p>
-            <a href="/universities" class="text-sm text-blue-600 hover:underline">Clear filters</a>
-          </div>
-        ) : (
-          <p class="text-base">No universities have been published yet.</p>
-        )}
-      </div>
-    ) : (
-      <ul class="space-y-3">
-        {rows.map((u: any) => {
-          const location = [u.countries?.name, u.cities?.name].filter(Boolean).join(', ')
-          return (
-            <li class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
-
-              <div class="flex items-start justify-between gap-4 mb-1.5">
-                <a href={`/universities/${u.slug}`}
-                   class="text-base font-semibold text-blue-600 hover:underline leading-snug">
-                  {u.name}
-                </a>
-                {u.official_url && (
-                  <a href={u.official_url} target="_blank" rel="noopener noreferrer"
-                     class="text-xs text-gray-400 hover:text-gray-600 whitespace-nowrap shrink-0">
-                    Official site ↗
-                  </a>
-                )}
-              </div>
-
-              {location && (
-                <p class="text-sm text-gray-500 mb-1.5">{location}</p>
-              )}
-
-              {u.ranking_summary && (
-                <p class="text-xs text-gray-400 line-clamp-1">{u.ranking_summary}</p>
-              )}
-
-            </li>
-          )
-        })}
-      </ul>
-    )}
+  <!-- Page header band -->
+  <div class="bg-surface border-b border-edge">
+    <Container width="default" class="py-7 sm:py-8">
+      <h1 class="text-[28px] sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
+        Universities
+      </h1>
+      <p class="mt-1.5 text-base text-muted">Search and compare universities worldwide.</p>
+    </Container>
   </div>
+
+  <!-- Main content -->
+  <div class="bg-canvas min-h-[60vh]">
+    <Container width="default" class="py-6 sm:py-8">
+
+      <form method="get" action="/universities">
+
+        <!-- Keyword search bar -->
+        <div class="flex gap-2.5 mb-4">
+          <div class="relative flex-1">
+            <label for="q" class="sr-only">Search universities</label>
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
+                 viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            <input
+              id="q" name="q" type="search"
+              value={q ?? ''}
+              placeholder="Search by university name…"
+              class="w-full h-[44px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface
+                     text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary"
+            />
+          </div>
+          <button type="submit"
+                  class="h-[44px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px]
+                         hover:bg-primary-hover transition-colors flex-none">
+            Search
+          </button>
+          {hasFilters && (
+            <a href="/universities"
+               class="h-[44px] px-4 inline-flex items-center text-[13.5px] font-medium text-ink-secondary
+                      border border-edge rounded-[10px] hover:bg-surface transition-colors flex-none">
+              Clear all
+            </a>
+          )}
+        </div>
+
+        <!-- Filter panel -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 mb-4 bg-surface border border-edge rounded-xl">
+          <div>
+            <label for="country" class={flabel}>Country</label>
+            <select id="country" name="country" class={fselect}>
+              <option value="">All countries</option>
+              {countries.map((c: any) => (
+                <option value={c.id} selected={countryId === c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label for="city" class={flabel}>City</label>
+            <select id="city" name="city" class={fselect}>
+              <option value="">All cities</option>
+              {cities.map((c: any) => (
+                <option value={c.id} selected={cityId === c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div class="sm:col-span-2 flex justify-end">
+            <button type="submit"
+                    class="h-[36px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px]
+                           hover:bg-primary-hover transition-colors">
+              Apply filters
+            </button>
+          </div>
+        </div>
+
+      </form>
+
+      <!-- Active filter chips -->
+      {activeChips.length > 0 && (
+        <div class="flex flex-wrap gap-2 mb-5" aria-label="Active filters">
+          {activeChips.map(chip => (
+            <a href={chip.removeHref}
+               class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border
+                      text-primary text-sm font-medium rounded-full hover:bg-primary-border transition-colors">
+              {chip.label}
+              <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      <!-- Results count -->
+      {overLimit ? (
+        <p class="text-sm text-muted mb-4">
+          Showing 200 of {(count ?? 200).toLocaleString()} universities. Narrow your search to see more.
+        </p>
+      ) : rows.length > 0 ? (
+        <p class="text-sm text-muted mb-4">
+          {rows.length} {rows.length === 1 ? 'university' : 'universities'} found.
+        </p>
+      ) : null}
+
+      <!-- Results list -->
+      {rows.length === 0 ? (
+        <div class="text-center py-16 rounded-xl border border-edge bg-surface">
+          <p class="text-base font-medium text-ink mb-2">
+            {hasFilters ? 'No universities match your filters.' : 'No universities have been published yet.'}
+          </p>
+          {hasFilters && (
+            <a href="/universities" class="text-sm text-primary hover:text-primary-hover">
+              Clear filters and browse all
+            </a>
+          )}
+        </div>
+      ) : (
+        <ul class="space-y-2.5">
+          {rows.map((u: any) => {
+            const location = [u.countries?.name, u.cities?.name].filter(Boolean).join(', ')
+            const initials = uniInitials(u.name)
+            return (
+              <li class="flex gap-4 rounded-xl border border-edge bg-surface px-4 py-4
+                         hover:border-[#cbd5e1] hover:shadow-sm transition-all">
+                <div class="flex-none w-10 h-10 rounded-lg bg-primary-surface border border-primary-border
+                            flex items-center justify-center font-mono text-xs font-bold text-primary">
+                  {initials}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-start justify-between gap-4">
+                    <a href={`/universities/${u.slug}`}
+                       class="text-[15px] font-semibold text-ink hover:text-primary leading-snug">
+                      {u.name}
+                    </a>
+                    {u.official_url && (
+                      <a href={u.official_url} target="_blank" rel="noopener noreferrer"
+                         class="text-xs text-muted hover:text-ink-secondary whitespace-nowrap shrink-0 mt-0.5">
+                        Official site ↗
+                      </a>
+                    )}
+                  </div>
+                  {location && (
+                    <p class="text-sm text-muted mt-0.5">{location}</p>
+                  )}
+                  {u.ranking_summary && (
+                    <p class="text-xs text-muted mt-1.5 line-clamp-1">{u.ranking_summary}</p>
+                  )}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+    </Container>
+  </div>
+
 </PublicLayout>

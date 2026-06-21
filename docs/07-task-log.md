@@ -4,6 +4,138 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 55F: Public Pages Redesign Completion Bundle
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Complete the remaining public visual redesign — all directory listing pages and all
+existing detail pages — using the Phase 55B public design system. No new routes, no
+schema changes, no auth/admin/AI changes.
+
+Pre-implementation reading:
+- docs/design/public-ui-direction.md
+- docs/design/public-design-system.md
+- docs/06-status.md, docs/07-task-log.md
+- All target pages (universities, scholarships, guides/articles, programs) + programs/index.astro
+- src/components/ui/ (Container, Badge, Button, Card, SectionHeader)
+- src/components/public/ (SourceBox, GuideCard, ScholarshipRow, SearchChip)
+- src/layouts/PublicLayout.astro
+
+Routes inspected (all existing routes checked before editing):
+  /universities         EXISTS
+  /universities/[slug]  EXISTS
+  /scholarships         EXISTS
+  /scholarships/[slug]  EXISTS
+  /guides               EXISTS
+  /guides/[slug]        EXISTS
+  /programs/[slug]      EXISTS
+  /articles/**          DOES NOT EXIST — skipped
+  /subjects/**          DOES NOT EXIST — skipped
+  /countries/**         DOES NOT EXIST — skipped
+
+Routes redesigned (Part A — directory pages):
+  /universities: page header band, keyword search bar, country/city filter panel
+    (real selects, backed by DB queries), active filter chips (q/country/city),
+    results count, university list rows with monogram block, empty state.
+  /scholarships: page header band, keyword search bar, collapsible filter panel
+    (6 filters: scholarship_type/provider_type/funding_type/application_type/
+    currency/deadline — all backed by real DB conditions), active filter chips,
+    results count, result rows using Badge component (neutral/info/deadline
+    variants — purple replaced with design tokens), empty state.
+  /guides: page header band, inline search + category filter row, active chips,
+    results count, results grid using GuideCard component (2 cols sm+), empty state.
+
+Routes redesigned (Part B — detail pages):
+  /programs/[slug]: surface header band, breadcrumb → university name → h1 +
+    degree_level Badge + subject Badge + verification Badge; key facts panel
+    (bg-surface border-edge 2–3 col grid: degree level, award, subject, location,
+    duration, language, study mode, delivery, gpa, tuition with separator); admission
+    requirements; English requirements; tuition notes; application fee; intakes &
+    deadlines (surface cards with status Badge); curriculum; career outcomes;
+    Apply Now / Official Page CTAs; SourceBox; last updated. All intake status badges
+    converted from old CSS classes to Badge component (verified/neutral/info variants).
+  /universities/[slug]: surface header band, breadcrumb, monogram block + name + location
+    + verification Badge in hero; key facts panel (country, city, founded, students);
+    rankings section; overview section; browse programs CTA panel; official website
+    button; SourceBox; last updated.
+  /scholarships/[slug]: surface header band, breadcrumb, provider name above h1,
+    h1 + type Badge + amount Badge; key facts panel (type, funding, provider, provider
+    type, how to apply, amount, deadline with amber color); overview; eligibility;
+    coverage; deadline notes; Apply Now / Official / Provider CTAs; SourceBox.
+  /guides/[slug]: surface header band, breadcrumb, category Badge + date above h1;
+    summary with left border accent; content paragraphs; SourceBox; last updated.
+
+Components reused (no new components created):
+  PublicLayout, Container (ui/), Badge (ui/), GuideCard (public/cards/),
+  SourceBox (public/)
+
+Components updated:
+  src/components/public/SourceBox.astro — converted gray-* classes to design tokens
+    (border-edge, bg-canvas, text-muted, text-ink-secondary, text-primary, etc.)
+    and upgraded heading style to match public design system typography.
+
+Design changes applied across all pages:
+  - bg-gray-50 → bg-canvas / bg-surface
+  - border-gray-200 → border-edge
+  - text-gray-900 → text-ink
+  - text-gray-700 / text-gray-800 → text-ink-secondary
+  - text-gray-500 / text-gray-400 → text-muted
+  - text-blue-600 → text-primary hover:text-primary-hover
+  - bg-blue-600 → bg-primary hover:bg-primary-hover
+  - All purple badge usage eliminated (provider_type in scholarships list);
+    replaced with Badge variant="neutral" (bg-ink/5 text-muted)
+  - buildUrlWithout(param) helper added to all directory pages for chip removal
+  - uniInitials() helper added for university monogram blocks
+  - All filter controls carry real DB-backed options; no fake filters added
+
+Filters supported (directory pages):
+  /universities: q (keyword), country (UUID select), city (UUID select)
+  /scholarships: q (keyword), scholarship_type, provider_type, funding_type,
+    application_type, currency (text), deadline (upcoming only toggle)
+  /guides: q (keyword), category (UUID select)
+
+Filters deferred (already deferred in prior phases — no change):
+  save state, compare tray, pagination, sort control, verified-only toggle,
+  scholarship-only toggle
+
+Files changed (8 src/ files):
+  src/pages/universities/index.astro — full rewrite
+  src/pages/universities/[slug].astro — full rewrite
+  src/pages/scholarships/index.astro — full rewrite
+  src/pages/scholarships/[slug].astro — full rewrite
+  src/pages/guides/index.astro — full rewrite
+  src/pages/guides/[slug].astro — full rewrite
+  src/pages/programs/[slug].astro — full rewrite
+  src/components/public/SourceBox.astro — design token conversion
+
+No migrations. No schema changes. No RLS changes. No AI/auth/admin changes.
+No new npm dependencies. /programs/index.astro not changed (per phase scope).
+
+Validation results:
+  npm run build: PASS (Server built in 7.23s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient
+    in src/pages, src/components/public/: 1 pre-existing match only —
+    src/pages/fit-finder/result.astro (user-visible dev note string, not touched).
+  set:html|innerHTML
+    in src/pages, src/components/public/: 1 pre-existing match only —
+    src/pages/fit-finder/result.astro (code comment saying "never innerHTML", not touched).
+  Zero matches in any file modified by this phase.
+
+Remaining risks:
+  - Detail pages tested by code inspection only; no live browser run performed.
+  - SourceBox update affects all existing detail pages (programs, universities,
+    scholarships, guides); token substitution is safe but visual diff is not browser-verified.
+  - cities select in universities/index lists all cities globally (existing behavior);
+    large city tables may create long selects — pre-existing, not introduced here.
+  - Scholarship provider_url CTA: shows only when no official_url present
+    (to avoid duplicate buttons) — intentional defensive default.
+
+Recommended next phase:
+  Phase 56 — Public Interaction Layer (Save/Compare user interactions,
+  session-aware saved state on cards, compare tray).
+
 ## 2026-06-21 - Phase 55E: Program Discovery Redesign Bundle
 
 Tool:

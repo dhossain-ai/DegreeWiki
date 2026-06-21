@@ -1,5 +1,7 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
+import Container from '../../components/ui/Container.astro'
+import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
@@ -45,20 +47,20 @@ const intakes = intakesData ?? []
 
 const p = program as any
 
-const VERIFICATION_BADGES: Record<string, { label: string; cls: string }> = {
-  verified:           { label: 'Verified',           cls: 'bg-green-50 text-green-700 border border-green-200' },
-  partially_verified: { label: 'Partially Verified', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
-  source_conflict:    { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-  outdated:           { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-  needs_review:       { label: 'Under Review',       cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+const VERIFICATION_MAP: Record<string, { label: string; variant: 'verified' | 'neutral' }> = {
+  verified:           { label: 'Verified',           variant: 'verified' },
+  partially_verified: { label: 'Partially Verified', variant: 'neutral'  },
+  source_conflict:    { label: 'Under Review',       variant: 'neutral'  },
+  outdated:           { label: 'Under Review',       variant: 'neutral'  },
+  needs_review:       { label: 'Under Review',       variant: 'neutral'  },
 }
-const verBadge = VERIFICATION_BADGES[p.verification_status] ?? null
+const verInfo = VERIFICATION_MAP[p.verification_status] ?? null
 
-const INTAKE_STATUS_BADGES: Record<string, { label: string; cls: string }> = {
-  open:          { label: 'Open',          cls: 'bg-green-50 text-green-700 border border-green-200' },
-  closing_soon:  { label: 'Closing Soon',  cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-  closed:        { label: 'Closed',        cls: 'bg-gray-100 text-gray-500 border border-gray-200' },
-  rolling:       { label: 'Rolling',       cls: 'bg-blue-50 text-blue-700 border border-blue-200' },
+const INTAKE_STATUS_LABELS: Record<string, string> = {
+  open:         'Open',
+  closing_soon: 'Closing Soon',
+  closed:       'Closed',
+  rolling:      'Rolling',
 }
 
 function formatDate(d: string | null): string | null {
@@ -68,7 +70,10 @@ function formatDate(d: string | null): string | null {
 
 function formatTuition(): string | null {
   if (p.tuition_min_amount == null && p.tuition_max_amount == null) return null
-  const fmt = (n: number) => Number(n).toLocaleString()
+  const cur = (p.tuition_currency ?? '').toUpperCase()
+  const sym = cur === 'EUR' ? '€' : cur === 'USD' ? '$' : cur === 'GBP' ? '£' : ''
+  const prefix = sym || (cur ? `${cur} ` : '')
+  const fmt = (n: number) => `${prefix}${Number(n).toLocaleString()}`
   let range: string
   if (p.tuition_min_amount != null && p.tuition_max_amount != null) {
     range = `${fmt(p.tuition_min_amount)} – ${fmt(p.tuition_max_amount)}`
@@ -77,8 +82,8 @@ function formatTuition(): string | null {
   } else {
     range = `up to ${fmt(p.tuition_max_amount)}`
   }
-  const period = p.tuition_period ? p.tuition_period.replace(/_/g, ' ') : ''
-  return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
+  const period = p.tuition_period ? p.tuition_period.replace(/_/g, ' ') : 'per year'
+  return `${range} / ${period}`
 }
 
 type EnglishReqEntry = { test: string; details: string }
@@ -98,230 +103,270 @@ function formatEnglishReqs(reqs: unknown): EnglishReqEntry[] | null {
   })
 }
 
-const tuition     = formatTuition()
-const englishReqs = formatEnglishReqs(p.english_requirements)
+const tuition        = formatTuition()
+const englishReqs    = formatEnglishReqs(p.english_requirements)
 const hasEnglishReqs = p.english_requirements != null &&
   typeof p.english_requirements === 'object' &&
   !Array.isArray(p.english_requirements)
 
+const location       = [p.countries?.name, p.cities?.name].filter(Boolean).join(', ')
 const lastVerifiedAt = formatDate(p.last_verified_at)
-const pageTitle = p.seo_title || p.title
-const pageDesc  = p.seo_description || undefined
-const canonical = p.canonical_url || `${SITE_URL}/programs/${slug}`
-const ogTitle   = p.og_title || pageTitle
-const ogDesc    = p.og_description || pageDesc
-const updatedAt = formatDate(p.updated_at)
+const pageTitle      = p.seo_title || p.title
+const pageDesc       = p.seo_description || undefined
+const canonical      = p.canonical_url || `${SITE_URL}/programs/${slug}`
+const ogTitle        = p.og_title || pageTitle
+const ogDesc         = p.og_description || pageDesc
+const updatedAt      = formatDate(p.updated_at)
 ---
 <PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
-  <div class="max-w-3xl mx-auto px-4 py-8">
-    <a href="/programs" class="text-sm text-blue-600 hover:underline mb-5 inline-block">← All Programs</a>
 
-    {p.universities && (
-      <p class="text-sm text-gray-500 mb-1">
-        <a href={`/universities/${p.universities.slug}`} class="hover:underline">{p.universities.name}</a>
-      </p>
-    )}
+  <!-- Page header band -->
+  <div class="bg-surface border-b border-edge">
+    <Container width="narrow" class="py-7 sm:py-8">
+      <a href="/programs"
+         class="inline-flex items-center gap-1 text-sm text-primary hover:text-primary-hover mb-4">
+        ← All Programs
+      </a>
 
-    <h1 class="text-3xl font-bold text-gray-900 mb-3">{p.title}</h1>
+      {p.universities && (
+        <p class="text-sm text-muted mb-2">
+          <a href={`/universities/${p.universities.slug}`}
+             class="text-ink-secondary hover:text-ink hover:underline">
+            {p.universities.name}
+          </a>
+        </p>
+      )}
 
-    {verBadge && (
-      <div class="mb-5">
-        <span class={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded border ${verBadge.cls}`}>
-          {verBadge.label}
-        </span>
-      </div>
-    )}
+      <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight mb-3">
+        {p.title}
+      </h1>
 
-    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm mb-8 bg-gray-50 rounded-lg p-5 border border-gray-200">
-      {p.degree_levels?.name && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Degree Level</dt>
-          <dd class="text-gray-900">{p.degree_levels.name}</dd>
-        </div>
-      )}
-      {p.degree_award && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Degree Award</dt>
-          <dd class="text-gray-900">{p.degree_award}</dd>
-        </div>
-      )}
-      {p.subjects?.name && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Subject</dt>
-          <dd class="text-gray-900">{p.subjects.name}</dd>
-        </div>
-      )}
-      {p.countries?.name && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Country</dt>
-          <dd class="text-gray-900">{p.countries.name}</dd>
-        </div>
-      )}
-      {p.cities?.name && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">City</dt>
-          <dd class="text-gray-900">{p.cities.name}</dd>
-        </div>
-      )}
-      {p.study_mode && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Study Mode</dt>
-          <dd class="text-gray-900 capitalize">{p.study_mode.replace(/_/g, ' ')}</dd>
-        </div>
-      )}
-      {p.delivery_mode && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Delivery</dt>
-          <dd class="text-gray-900 capitalize">{p.delivery_mode.replace(/_/g, ' ')}</dd>
-        </div>
-      )}
-      {p.language_of_instruction && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Language</dt>
-          <dd class="text-gray-900">{p.language_of_instruction}</dd>
-        </div>
-      )}
-      {p.duration_months != null && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Duration</dt>
-          <dd class="text-gray-900">{p.duration_months} months</dd>
-        </div>
-      )}
-      {tuition && (
-        <div class="sm:col-span-2">
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Tuition</dt>
-          <dd class="text-gray-900">{tuition}</dd>
-        </div>
-      )}
-      {p.gpa_requirements && (
-        <div>
-          <dt class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">GPA Requirement</dt>
-          <dd class="text-gray-900">{p.gpa_requirements}</dd>
-        </div>
-      )}
-    </dl>
-
-    {p.admission_requirements && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">Admission Requirements</h2>
-        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.admission_requirements}</p>
-      </div>
-    )}
-
-    {hasEnglishReqs && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">English Requirements</h2>
-        {englishReqs ? (
-          <ul class="space-y-1 text-sm text-gray-700">
-            {englishReqs.map((entry: EnglishReqEntry) => (
-              <li>
-                <span class="font-medium">{entry.test}</span>
-                {entry.details && ` — ${entry.details}`}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p class="text-gray-700 text-sm">English proficiency requirements apply. See the official program page for details.</p>
+      <div class="flex flex-wrap items-center gap-2">
+        {p.degree_levels?.name && (
+          <Badge variant="level">{p.degree_levels.name}</Badge>
+        )}
+        {p.subjects?.name && (
+          <Badge variant="neutral">{p.subjects.name}</Badge>
+        )}
+        {verInfo && (
+          <Badge variant={verInfo.variant}>{verInfo.label}</Badge>
         )}
       </div>
-    )}
+    </Container>
+  </div>
 
-    {p.tuition_notes && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">Tuition Notes</h2>
-        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.tuition_notes}</p>
+  <!-- Main content -->
+  <div class="bg-canvas">
+    <Container width="narrow" class="py-7 sm:py-8">
+
+      <!-- Key facts panel -->
+      <div class="bg-surface border border-edge rounded-xl p-5 mb-7">
+        <h2 class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-4">
+          Program details
+        </h2>
+        <dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+          {p.degree_levels?.name && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Degree level</dt>
+              <dd class="text-sm font-medium text-ink">{p.degree_levels.name}</dd>
+            </div>
+          )}
+          {p.degree_award && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Degree award</dt>
+              <dd class="text-sm font-medium text-ink">{p.degree_award}</dd>
+            </div>
+          )}
+          {p.subjects?.name && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Subject</dt>
+              <dd class="text-sm font-medium text-ink">{p.subjects.name}</dd>
+            </div>
+          )}
+          {location && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Location</dt>
+              <dd class="text-sm font-medium text-ink">{location}</dd>
+            </div>
+          )}
+          {p.duration_months != null && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Duration</dt>
+              <dd class="text-sm font-medium text-ink">{p.duration_months} months</dd>
+            </div>
+          )}
+          {p.language_of_instruction && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Language</dt>
+              <dd class="text-sm font-medium text-ink">{p.language_of_instruction}</dd>
+            </div>
+          )}
+          {p.study_mode && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Study mode</dt>
+              <dd class="text-sm font-medium text-ink capitalize">{p.study_mode.replace(/_/g, ' ')}</dd>
+            </div>
+          )}
+          {p.delivery_mode && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Delivery</dt>
+              <dd class="text-sm font-medium text-ink capitalize">{p.delivery_mode.replace(/_/g, ' ')}</dd>
+            </div>
+          )}
+          {p.gpa_requirements && (
+            <div>
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">GPA requirement</dt>
+              <dd class="text-sm font-medium text-ink">{p.gpa_requirements}</dd>
+            </div>
+          )}
+          {tuition && (
+            <div class="col-span-2 sm:col-span-3 pt-2 border-t border-edge-subtle">
+              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Tuition</dt>
+              <dd class="text-base font-semibold text-ink">{tuition}</dd>
+            </div>
+          )}
+        </dl>
       </div>
-    )}
 
-    {p.application_fee_amount != null && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">Application Fee</h2>
-        <p class="text-gray-700 text-sm">
-          {[p.application_fee_currency, Number(p.application_fee_amount).toLocaleString()].filter(Boolean).join(' ')}
-          {p.application_fee_notes && ` — ${p.application_fee_notes}`}
-        </p>
-      </div>
-    )}
+      <!-- Admission requirements -->
+      {p.admission_requirements && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">Admission Requirements</h2>
+          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{p.admission_requirements}</p>
+        </div>
+      )}
 
-    {intakes.length > 0 && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-3">Intakes & Deadlines</h2>
-        <div class="space-y-3">
-          {intakes.map((intake: any) => (
-            <div class="bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 text-sm">
-              <div class="flex flex-wrap items-center gap-2 mb-1">
-                {intake.intake_name && (
-                  <span class="font-medium text-gray-900">{intake.intake_name}</span>
+      <!-- English requirements -->
+      {hasEnglishReqs && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">English Requirements</h2>
+          {englishReqs ? (
+            <ul class="space-y-1.5">
+              {englishReqs.map((entry: EnglishReqEntry) => (
+                <li class="text-sm text-ink-secondary">
+                  <span class="font-semibold text-ink">{entry.test}</span>
+                  {entry.details && ` — ${entry.details}`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="text-sm text-ink-secondary">English proficiency requirements apply. See the official program page for details.</p>
+          )}
+        </div>
+      )}
+
+      <!-- Tuition notes -->
+      {p.tuition_notes && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">Tuition Notes</h2>
+          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{p.tuition_notes}</p>
+        </div>
+      )}
+
+      <!-- Application fee -->
+      {p.application_fee_amount != null && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">Application Fee</h2>
+          <p class="text-sm text-ink-secondary">
+            {[p.application_fee_currency, Number(p.application_fee_amount).toLocaleString()].filter(Boolean).join(' ')}
+            {p.application_fee_notes && ` — ${p.application_fee_notes}`}
+          </p>
+        </div>
+      )}
+
+      <!-- Intakes & Deadlines -->
+      {intakes.length > 0 && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-3">Intakes &amp; Deadlines</h2>
+          <div class="space-y-2.5">
+            {intakes.map((intake: any) => (
+              <div class="bg-surface border border-edge rounded-xl px-4 py-3">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  {intake.intake_name && (
+                    <span class="text-sm font-semibold text-ink">{intake.intake_name}</span>
+                  )}
+                  {intake.is_rolling && (
+                    <Badge variant="info">Rolling</Badge>
+                  )}
+                  {!intake.is_rolling && intake.deadline_status && INTAKE_STATUS_LABELS[intake.deadline_status] && (
+                    <Badge variant={intake.deadline_status === 'open' ? 'verified' : 'neutral'}>
+                      {INTAKE_STATUS_LABELS[intake.deadline_status]}
+                    </Badge>
+                  )}
+                </div>
+                {intake.application_open_date && (
+                  <p class="text-sm text-muted">Opens: {formatDate(intake.application_open_date)}</p>
                 )}
-                {intake.is_rolling && (
-                  <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">Rolling</span>
+                {intake.application_deadline_date && (
+                  <p class="text-sm text-ink-secondary">
+                    <span class="font-medium text-ink">Deadline:</span> {formatDate(intake.application_deadline_date)}
+                  </p>
                 )}
-                {!intake.is_rolling && intake.deadline_status && INTAKE_STATUS_BADGES[intake.deadline_status] && (
-                  <span class={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded border ${INTAKE_STATUS_BADGES[intake.deadline_status].cls}`}>
-                    {INTAKE_STATUS_BADGES[intake.deadline_status].label}
-                  </span>
+                {intake.deadline_text && (
+                  <p class="text-sm text-muted">{intake.deadline_text}</p>
+                )}
+                {intake.notes && (
+                  <p class="text-xs text-muted mt-1">{intake.notes}</p>
                 )}
               </div>
-              {intake.application_open_date && (
-                <p class="text-gray-600">Opens: {formatDate(intake.application_open_date)}</p>
-              )}
-              {intake.application_deadline_date && (
-                <p class="text-gray-600">Deadline: {formatDate(intake.application_deadline_date)}</p>
-              )}
-              {intake.deadline_text && (
-                <p class="text-gray-600">{intake.deadline_text}</p>
-              )}
-              {intake.notes && (
-                <p class="text-gray-500 mt-1">{intake.notes}</p>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
-    )}
+      )}
 
-    {p.curriculum_summary && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">Curriculum</h2>
-        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.curriculum_summary}</p>
-      </div>
-    )}
+      <!-- Curriculum -->
+      {p.curriculum_summary && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">Curriculum</h2>
+          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{p.curriculum_summary}</p>
+        </div>
+      )}
 
-    {p.career_outcomes && (
-      <div class="mb-5">
-        <h2 class="text-base font-semibold text-gray-800 mb-2">Career Outcomes</h2>
-        <p class="text-gray-700 text-sm whitespace-pre-wrap">{p.career_outcomes}</p>
-      </div>
-    )}
+      <!-- Career outcomes -->
+      {p.career_outcomes && (
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">Career Outcomes</h2>
+          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{p.career_outcomes}</p>
+        </div>
+      )}
 
-    {(p.application_url || p.official_url) && (
-      <div class="mt-8 mb-6 flex flex-col sm:flex-row gap-3">
-        {p.application_url && (
-          <a href={p.application_url} target="_blank" rel="noopener noreferrer"
-             class="inline-block px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 text-center">
-            Apply Now ↗
-          </a>
-        )}
-        {p.official_url && (
-          <a href={p.official_url} target="_blank" rel="noopener noreferrer"
-             class="inline-block px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 text-center">
-            Official Program Page ↗
-          </a>
-        )}
-      </div>
-    )}
+      <!-- CTA buttons -->
+      {(p.application_url || p.official_url) && (
+        <div class="mb-7 flex flex-col sm:flex-row gap-3">
+          {p.application_url && (
+            <a href={p.application_url} target="_blank" rel="noopener noreferrer"
+               class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-white
+                      text-sm font-semibold rounded-[9px] hover:bg-primary-hover transition-colors">
+              Apply Now ↗
+            </a>
+          )}
+          {p.official_url && (
+            <a href={p.official_url} target="_blank" rel="noopener noreferrer"
+               class="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-edge bg-surface
+                      text-ink-secondary text-sm font-medium rounded-[9px] hover:border-primary/40 hover:text-ink transition-colors">
+              Official Program Page ↗
+            </a>
+          )}
+        </div>
+      )}
 
-    <SourceBox
-      verificationStatus={p.verification_status}
-      lastVerifiedAt={lastVerifiedAt}
-      officialUrl={p.official_url ?? null}
-      sourceConfidenceScore={p.source_confidence_score ?? null}
-    />
+      <!-- Source & verification -->
+      <SourceBox
+        verificationStatus={p.verification_status}
+        lastVerifiedAt={lastVerifiedAt}
+        officialUrl={p.official_url ?? null}
+        sourceConfidenceScore={p.source_confidence_score ?? null}
+      />
 
-    {updatedAt && (
-      <p class="text-xs text-gray-400 mb-6">Last updated: {updatedAt}</p>
-    )}
+      {updatedAt && (
+        <p class="text-xs text-muted mb-6">Last updated: {updatedAt}</p>
+      )}
 
-    <a href="/programs" class="text-sm text-blue-600 hover:underline">← All Programs</a>
+      <a href="/programs" class="text-sm text-primary hover:text-primary-hover">
+        ← All Programs
+      </a>
+
+    </Container>
   </div>
+
 </PublicLayout>
