@@ -1,224 +1,323 @@
 ---
 import PublicLayout from '../layouts/PublicLayout.astro'
+import HomeHero from '../components/public/home/HomeHero.astro'
+import Section from '../components/ui/Section.astro'
+import SectionHeader from '../components/ui/SectionHeader.astro'
+import SearchChip from '../components/public/SearchChip.astro'
+import FitFinderMiniPanel from '../components/public/FitFinderMiniPanel.astro'
+import ProgramCard from '../components/public/cards/ProgramCard.astro'
+import DestinationCard from '../components/public/cards/DestinationCard.astro'
+import ScholarshipRow from '../components/public/cards/ScholarshipRow.astro'
+import GuideCard from '../components/public/cards/GuideCard.astro'
 import { createClient } from '../lib/supabase/server'
 import { SITE_URL } from '../lib/site'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
+/* ── Static subject fallback (used only when subjects table returns 0 rows) ── */
+const FALLBACK_SUBJECTS: { id: string; name: string }[] = [
+  { id: '', name: 'Computer Science' },
+  { id: '', name: 'Business & Management' },
+  { id: '', name: 'Engineering' },
+  { id: '', name: 'Law' },
+  { id: '', name: 'Medicine & Health' },
+  { id: '', name: 'Arts & Humanities' },
+]
+
+/* ── All homepage queries in one round-trip ── */
 const [
-  { data: latestProgramsData },
-  { data: latestScholarshipsData },
-  { data: latestGuidesData },
+  { data: degreeLevelsData, error: degreeLevelsErr },
+  { data: destinationsData, error: destinationsErr },
+  { data: featuredProgramsData, error: featuredProgramsErr },
+  { data: subjectsData, error: subjectsErr },
+  { data: scholarshipsData, error: scholarshipsErr },
+  { data: guidesData, error: guidesErr },
 ] = await Promise.all([
   supabase
+    .from('degree_levels')
+    .select('id, name, code')
+    .eq('is_active', true)
+    .order('display_order'),
+  supabase
+    .from('countries')
+    .select('id, name')
+    .eq('is_destination_enabled', true)
+    .order('name')
+    .limit(30),
+  supabase
     .from('programs')
-    .select('id, title, slug, universities(name), degree_levels(name)')
+    .select(`
+      id, title, slug,
+      duration_months, language_of_instruction,
+      tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+      verification_status,
+      universities(name, slug),
+      degree_levels(name, code),
+      subjects!programs_primary_subject_id_fkey(name),
+      countries(name, iso2),
+      cities(name)
+    `)
     .eq('content_status', 'published')
     .order('created_at', { ascending: false })
-    .limit(3),
+    .limit(4),
+  supabase
+    .from('subjects')
+    .select('id, name')
+    .order('name')
+    .limit(12),
   supabase
     .from('scholarships')
-    .select('id, name, slug, provider_name, deadline, deadline_text')
+    .select('id, name, slug, provider_name, amount_min, amount_max, currency, deadline, deadline_text')
     .eq('content_status', 'published')
-    .order('created_at', { ascending: false })
-    .limit(3),
+    .order('deadline', { ascending: true, nullsFirst: false })
+    .limit(4),
   supabase
     .from('articles')
-    .select('id, title, slug, summary, published_at, article_categories(name)')
+    .select('id, title, slug, summary, published_at, article_categories(id, name)')
     .eq('content_status', 'published')
     .order('published_at', { ascending: false, nullsFirst: false })
     .limit(3),
 ])
 
-const latestPrograms     = latestProgramsData     ?? []
-const latestScholarships = latestScholarshipsData ?? []
-const latestGuides       = latestGuidesData       ?? []
+/* Log query errors server-side only — do not surface to user */
+if (degreeLevelsErr)     console.error('homepage degree_levels error:',      degreeLevelsErr.message)
+if (destinationsErr)     console.error('homepage destinations error:',        destinationsErr.message)
+if (featuredProgramsErr) console.error('homepage featured programs error:',   featuredProgramsErr.message)
+if (subjectsErr)         console.error('homepage subjects error:',            subjectsErr.message)
+if (scholarshipsErr)     console.error('homepage scholarships error:',        scholarshipsErr.message)
+if (guidesErr)           console.error('homepage guides error:',              guidesErr.message)
 
-function formatDate(d: string | null): string | null {
+/* ── Defensive defaults ── */
+const degreeLevels     = degreeLevelsData    ?? []
+const destinations     = destinationsData    ?? []
+const featuredPrograms = featuredProgramsData ?? []
+const subjects         = subjectsData && subjectsData.length > 0 ? subjectsData : FALLBACK_SUBJECTS
+const scholarships     = scholarshipsData    ?? []
+const guides           = guidesData          ?? []
+
+/* Dynamic destination chip: first published destination country */
+const dynamicDest = destinations.length > 0 ? destinations[0] : null
+
+/* ── Helper functions ── */
+
+function formatDuration(months: number | null | undefined): string | null {
+  if (!months) return null
+  if (months === 12) return '1 year'
+  if (months % 12 === 0) return `${months / 12} years`
+  return `${months} months`
+}
+
+function abbreviateDegree(name: string | null | undefined, code: string | null | undefined): string | null {
+  if (!code && !name) return null
+  const c = (code ?? '').toLowerCase()
+  const n = (name ?? '').toLowerCase()
+  if (c === 'master'    || n.startsWith('master'))  return 'MSc'
+  if (c === 'bachelor'  || n.startsWith('bachelor')) return 'BSc'
+  if (c === 'phd'       || n === 'phd' || n.startsWith('doctor')) return 'PhD'
+  if (c === 'foundation') return 'Foundation'
+  return name ?? null
+}
+
+function formatTuition(
+  min: number | null | undefined,
+  max: number | null | undefined,
+  currency: string | null | undefined,
+): string | null {
+  if (min == null && max == null) return null
+  const sym = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : currency === 'GBP' ? '£'
+            : (currency ? currency + ' ' : '')
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  if (min != null && max != null && min !== max) return `${sym}${fmt(min)}–${sym}${fmt(max)}`
+  return `${sym}${fmt((min ?? max)!)}`
+}
+
+function formatDeadline(d: string | null | undefined, dt: string | null | undefined): string | null {
+  if (d) return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return dt ?? null
+}
+
+function formatDate(d: string | null | undefined): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-function formatDeadline(d: string | null, dt: string | null): string | null {
-  if (d) return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-  return dt ?? null
+function formatAmount(
+  min: number | null | undefined,
+  max: number | null | undefined,
+  cur: string | null | undefined,
+): string | null {
+  if (min == null && max == null) return null
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  const range = min != null && max != null
+    ? `${fmt(min)}–${fmt(max)}`
+    : min != null ? fmt(min) : `Up to ${fmt(max!)}`
+  return [cur, range].filter(Boolean).join(' ')
 }
 ---
+
 <PublicLayout
-  title="DegreeWiki — Find Degrees, Scholarships & University Guides"
-  description="Discover university programs, scholarships, and study-abroad guides for international students."
+  title="DegreeWiki — Find Study-Abroad Programs & Scholarships"
+  description="Search verified bachelor's and master's programs, scholarships, and study-abroad guides for international students. Every listing is source-checked."
   canonical={SITE_URL + '/'}
 >
 
-  <!-- Hero -->
-  <section class="bg-white border-b border-gray-100">
-    <div class="max-w-3xl mx-auto px-4 py-16 text-center">
-      <h1 class="text-4xl font-bold text-gray-900 mb-4">DegreeWiki</h1>
-      <p class="text-lg text-gray-600 mb-8">
-        Find university programs, scholarships, and study-abroad guides for international students.
-      </p>
-      <div class="flex flex-wrap justify-center gap-3">
-        <a href="/programs"
-           class="px-6 py-2.5 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition-colors">
-          Browse Programs
-        </a>
-        <a href="/scholarships"
-           class="px-6 py-2.5 bg-white text-blue-600 font-medium rounded border border-blue-600 hover:bg-blue-50 transition-colors">
-          Find Scholarships
-        </a>
-      </div>
-    </div>
-  </section>
+  <!-- ── 1. Hero + search ── -->
+  <HomeHero
+    degreeLevels={degreeLevels}
+    destinations={destinations}
+    dynamicDestination={dynamicDest}
+  />
 
-  <!-- Discovery cards -->
-  <section class="max-w-5xl mx-auto px-4 py-12">
-    <h2 class="text-lg font-semibold text-gray-700 mb-6">Explore</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+  <!-- ── 2. Fit Finder panel (inline, after hero) ── -->
+  <Section tone="canvas" width="wide">
+    <FitFinderMiniPanel />
+  </Section>
 
-      <a href="/programs"
-         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
-        <h3 class="text-base font-semibold text-gray-900 mb-1">Programs</h3>
-        <p class="text-sm text-gray-500">Search degree programs by country, subject, or level.</p>
-      </a>
-
-      <a href="/scholarships"
-         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
-        <h3 class="text-base font-semibold text-gray-900 mb-1">Scholarships</h3>
-        <p class="text-sm text-gray-500">Find funding opportunities by type, deadline, and provider.</p>
-      </a>
-
-      <a href="/universities"
-         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
-        <h3 class="text-base font-semibold text-gray-900 mb-1">Universities</h3>
-        <p class="text-sm text-gray-500">Browse universities by country and city.</p>
-      </a>
-
-      <a href="/guides"
-         class="block rounded-lg border border-gray-200 p-5 hover:bg-gray-50 hover:border-blue-300 transition-colors">
-        <h3 class="text-base font-semibold text-gray-900 mb-1">Guides</h3>
-        <p class="text-sm text-gray-500">Read study-abroad guides and application advice.</p>
-      </a>
-
-    </div>
-  </section>
-
-  <!-- Start here -->
-  <section class="max-w-5xl mx-auto px-4 pb-12">
-    <div class="bg-gray-50 rounded-lg border border-gray-200 p-6">
-      <h2 class="text-lg font-semibold text-gray-700 mb-4">Start here</h2>
-      <ul class="space-y-3">
-        <li>
-          <a href="/programs" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
-            <span class="text-gray-400">&rarr;</span>
-            I want to study abroad
-          </a>
-        </li>
-        <li>
-          <a href="/scholarships" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
-            <span class="text-gray-400">&rarr;</span>
-            I&rsquo;m looking for scholarships
-          </a>
-        </li>
-        <li>
-          <a href="/universities" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
-            <span class="text-gray-400">&rarr;</span>
-            I want to compare universities
-          </a>
-        </li>
-        <li>
-          <a href="/guides" class="flex items-center gap-2 text-sm text-gray-700 hover:text-blue-600">
-            <span class="text-gray-400">&rarr;</span>
-            I need application advice
-          </a>
-        </li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- Latest programs -->
-  {latestPrograms.length > 0 && (
-    <section class="max-w-5xl mx-auto px-4 pb-12">
-      <div class="flex items-baseline justify-between mb-5">
-        <h2 class="text-lg font-semibold text-gray-700">Latest programs</h2>
-        <a href="/programs" class="text-sm text-blue-600 hover:underline">Browse all programs &rarr;</a>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {latestPrograms.map((p: any) => (
-          <a href={`/programs/${p.slug}`}
-             class="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 transition-colors">
-            <h3 class="text-sm font-semibold text-blue-600 mb-1 line-clamp-2">{p.title}</h3>
-            {p.universities?.name && (
-              <p class="text-xs text-gray-600 mb-1.5">{p.universities.name}</p>
-            )}
-            {p.degree_levels?.name && (
-              <span class="inline-flex text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
-                {p.degree_levels.name}
-              </span>
-            )}
-          </a>
-        ))}
-      </div>
-    </section>
-  )}
-
-  <!-- Latest scholarships -->
-  {latestScholarships.length > 0 && (
-    <section class="max-w-5xl mx-auto px-4 pb-12">
-      <div class="flex items-baseline justify-between mb-5">
-        <h2 class="text-lg font-semibold text-gray-700">Latest scholarships</h2>
-        <a href="/scholarships" class="text-sm text-blue-600 hover:underline">View all scholarships &rarr;</a>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {latestScholarships.map((s: any) => {
-          const deadline = formatDeadline(s.deadline, s.deadline_text)
+  <!-- ── 3. Featured programs (hidden if no published programs) ── -->
+  {featuredPrograms.length > 0 && (
+    <Section tone="surface" width="wide">
+      <SectionHeader
+        eyebrow="Top picks"
+        title="Featured programs"
+        href="/programs"
+        linkText="Browse all programs"
+      />
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {featuredPrograms.map((p: any) => {
+          const uniHref = p.universities?.slug ? `/universities/${p.universities.slug}` : null
+          const dl = p.degree_levels as { name: string; code: string } | null
+          const subj = p.subjects as { name: string } | null
+          const countryData = p.countries as { name: string; iso2: string } | null
+          const cityData = p.cities as { name: string } | null
+          const location = [cityData?.name, countryData?.name].filter(Boolean).join(', ') || null
           return (
-            <a href={`/scholarships/${s.slug}`}
-               class="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 transition-colors">
-              <h3 class="text-sm font-semibold text-blue-600 mb-1 line-clamp-2">{s.name}</h3>
-              {s.provider_name && (
-                <p class="text-xs text-gray-600 mb-1.5">{s.provider_name}</p>
-              )}
-              {deadline && (
-                <span class="inline-flex text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
-                  Deadline: {deadline}
-                </span>
-              )}
-            </a>
+            <ProgramCard
+              href={`/programs/${p.slug}`}
+              title={p.title}
+              universityName={p.universities?.name ?? null}
+              universityHref={uniHref}
+              degreeLevel={abbreviateDegree(dl?.name, dl?.code)}
+              field={subj?.name ?? null}
+              countryCode={countryData?.iso2 ?? null}
+              location={location}
+              language={p.language_of_instruction ?? null}
+              duration={formatDuration(p.duration_months)}
+              tuitionDisplay={formatTuition(p.tuition_min_amount, p.tuition_max_amount, p.tuition_currency)}
+              tuitionPer={p.tuition_period ?? 'per year'}
+              verified={
+                p.verification_status === 'verified' ||
+                p.verification_status === 'partially_verified'
+              }
+              saved={false}
+              comparing={false}
+            />
           )
         })}
       </div>
-    </section>
+    </Section>
   )}
 
-  <!-- Latest guides -->
-  {latestGuides.length > 0 && (
-    <section class="max-w-5xl mx-auto px-4 pb-12">
-      <div class="flex items-baseline justify-between mb-5">
-        <h2 class="text-lg font-semibold text-gray-700">Latest guides</h2>
-        <a href="/guides" class="text-sm text-blue-600 hover:underline">View all guides &rarr;</a>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {latestGuides.map((g: any) => (
-          <a href={`/guides/${g.slug}`}
-             class="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 transition-colors">
-            <div class="flex items-center gap-2 text-xs text-gray-400 mb-1.5">
-              {g.article_categories?.name && (
-                <span class="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-600 font-medium">
-                  {g.article_categories.name}
-                </span>
-              )}
-              {formatDate(g.published_at) && (
-                <span>{formatDate(g.published_at)}</span>
-              )}
-            </div>
-            <h3 class="text-sm font-semibold text-blue-600 mb-1 line-clamp-2">{g.title}</h3>
-            {g.summary && (
-              <p class="text-xs text-gray-500 line-clamp-2">{g.summary}</p>
-            )}
-          </a>
+  <!-- ── 4. Browse by study goal ── -->
+  <Section tone="canvas" width="wide">
+    <SectionHeader
+      eyebrow="Explore"
+      title="Browse by study goal"
+      href="/programs"
+    />
+    <div class="flex flex-wrap gap-2">
+      {subjects.map((s: any) => (
+        <SearchChip
+          href={s.id ? `/programs?subject=${s.id}` : `/programs?q=${encodeURIComponent(s.name)}`}
+          label={s.name}
+        />
+      ))}
+    </div>
+  </Section>
+
+  <!-- ── 5. Popular destinations (hidden if none available) ── -->
+  {destinations.length > 0 && (
+    <Section tone="surface" width="wide">
+      <SectionHeader
+        eyebrow="Where to study"
+        title="Popular destinations"
+        href="/universities"
+        linkText="All destinations"
+      />
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {destinations.slice(0, 6).map((c: any) => (
+          <DestinationCard
+            href={`/programs?country=${c.id}`}
+            name={c.name}
+          />
         ))}
       </div>
-    </section>
+    </Section>
+  )}
+
+  <!-- ── 6. Scholarships & funding (hidden if none published) ── -->
+  {scholarships.length > 0 && (
+    <Section tone="canvas" width="wide">
+      <SectionHeader
+        eyebrow="Funding"
+        title="Scholarships & funding"
+        href="/scholarships"
+        linkText="View all scholarships"
+      />
+      <div class="flex flex-col gap-2">
+        {scholarships.map((s: any) => (
+          <ScholarshipRow
+            href={`/scholarships/${s.slug}`}
+            name={s.name}
+            providerName={s.provider_name ?? null}
+            amount={formatAmount(s.amount_min, s.amount_max, s.currency)}
+            deadline={formatDeadline(s.deadline, s.deadline_text)}
+          />
+        ))}
+      </div>
+    </Section>
+  )}
+
+  <!-- ── 7. Fit Finder CTA (stronger, bottom placement) ── -->
+  <Section tone="surface" width="wide">
+    <div class="rounded-xl bg-ink text-white p-8 sm:p-10 text-center">
+      <p class="text-xs font-semibold uppercase tracking-wide text-white/60 mb-2">
+        Personalised matching
+      </p>
+      <h2 class="text-2xl font-bold text-white mb-3">Not sure where to start?</h2>
+      <p class="text-[15px] text-white/80 mb-6 max-w-md mx-auto leading-relaxed">
+        Answer a few questions and get matched to programs that fit your profile, budget, and goals.
+      </p>
+      <a
+        href="/fit-finder"
+        class="inline-flex items-center justify-center px-6 py-2.5 rounded-[9px] bg-white
+               text-ink text-sm font-semibold hover:bg-[#f1f5f9] transition-colors"
+      >
+        Find my matches
+      </a>
+    </div>
+  </Section>
+
+  <!-- ── 8. Study abroad guides (hidden if none published) ── -->
+  {guides.length > 0 && (
+    <Section tone="canvas" width="wide">
+      <SectionHeader
+        eyebrow="Learn"
+        title="Study abroad guides"
+        href="/guides"
+        linkText="View all guides"
+      />
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {guides.map((g: any) => (
+          <GuideCard
+            href={`/guides/${g.slug}`}
+            title={g.title}
+            category={g.article_categories?.name ?? null}
+            date={formatDate(g.published_at)}
+            summary={g.summary ?? null}
+          />
+        ))}
+      </div>
+    </Section>
   )}
 
 </PublicLayout>

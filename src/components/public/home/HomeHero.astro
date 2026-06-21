@@ -1,0 +1,106 @@
+---
+import Container from '../../ui/Container.astro'
+import SearchChip from '../SearchChip.astro'
+
+interface Props {
+  degreeLevels: { id: string; name: string; code: string | null }[]
+  destinations:  { id: string; name: string }[]
+  dynamicDestination?: { id: string; name: string } | null
+}
+
+const {
+  degreeLevels,
+  destinations,
+  dynamicDestination = null,
+} = Astro.props
+
+const bachelorLevel = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'bachelor')
+const masterLevel   = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'master')
+---
+
+<section class="bg-surface border-b border-edge">
+  <Container width="wide" class="py-14 sm:py-20">
+
+    <div class="max-w-2xl mb-10">
+      <h1 class="text-[2.25rem] sm:text-[2.625rem] font-bold text-ink leading-[1.15] tracking-[-0.02em] mb-4">
+        Find study-abroad programs<br class="hidden sm:inline" />
+        with source-backed confidence
+      </h1>
+      <p class="text-lg text-ink-tertiary leading-relaxed">
+        Search verified bachelor's and master's programs at universities worldwide.
+        Every listing is source-checked and updated regularly.
+      </p>
+    </div>
+
+    <form method="GET" action="/programs" class="mb-6">
+      <div class="flex flex-col md:flex-row gap-3">
+        <div class="flex-1">
+          <label for="hero-q" class="block text-xs font-medium text-muted mb-1">Keywords</label>
+          <input
+            id="hero-q"
+            name="q"
+            type="search"
+            placeholder="e.g. Computer Science, Medicine…"
+            autocomplete="off"
+            class="w-full rounded-lg border border-edge bg-surface px-4 py-2.5 text-sm text-ink
+                   placeholder:text-muted focus-visible:outline-none focus-visible:border-primary"
+          />
+        </div>
+        <div class="md:w-44">
+          <label for="hero-degree" class="block text-xs font-medium text-muted mb-1">Degree level</label>
+          <select
+            id="hero-degree"
+            name="degree_level"
+            class="w-full rounded-lg border border-edge bg-surface px-4 py-2.5 text-sm text-ink
+                   focus-visible:outline-none focus-visible:border-primary"
+          >
+            <option value="">Any level</option>
+            {degreeLevels.map(d => (
+              <option value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        </div>
+        <div class="md:w-44">
+          <label for="hero-country" class="block text-xs font-medium text-muted mb-1">Destination</label>
+          <select
+            id="hero-country"
+            name="country"
+            class="w-full rounded-lg border border-edge bg-surface px-4 py-2.5 text-sm text-ink
+                   focus-visible:outline-none focus-visible:border-primary"
+          >
+            <option value="">Any destination</option>
+            {destinations.map(c => (
+              <option value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div class="flex items-end">
+          <button
+            type="submit"
+            class="w-full md:w-auto px-6 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold
+                   hover:bg-primary-hover transition-colors whitespace-nowrap"
+          >
+            Search programs
+          </button>
+        </div>
+      </div>
+    </form>
+
+    <div class="flex flex-wrap gap-2">
+      {bachelorLevel && (
+        <SearchChip href={`/programs?degree_level=${bachelorLevel.id}`} label="Bachelor's" />
+      )}
+      {masterLevel && (
+        <SearchChip href={`/programs?degree_level=${masterLevel.id}`} label="Master's" />
+      )}
+      <SearchChip href="/scholarships" label="Find scholarships" />
+      {dynamicDestination && (
+        <SearchChip
+          href={`/programs?country=${dynamicDestination.id}`}
+          label={`Study in ${dynamicDestination.name}`}
+        />
+      )}
+    </div>
+
+  </Container>
+</section>

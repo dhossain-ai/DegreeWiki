@@ -1,8 +1,55 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21 (Phase 55B)
+Last updated: 2026-06-21 (Phase 55C)
 
 ## Current Phase
+
+Phase 55C — Homepage Redesign Implementation — complete.
+Rewrote `src/pages/index.astro` from a basic placeholder into a full education-search
+portal homepage using the Phase 55B design system components and real database queries.
+Created one new component: `src/components/public/home/HomeHero.astro` (hero block +
+search form). No other src/ files changed. No schema, auth, AI, or admin changes.
+
+Key deliverables:
+- `src/components/public/home/HomeHero.astro`: New component containing the `<h1>`,
+  subtitle, 3-field search form (keyword / degree level / destination, GET → /programs),
+  and 3–4 quick-link SearchChips (Bachelor's, Master's, Find scholarships, dynamic
+  first-destination chip). Degree level and destination selects are fed from real DB
+  queries. All form inputs have explicit `<label for>` associations.
+- `src/pages/index.astro`: Full rewrite. 8 sections in approved order:
+    1. HomeHero (H1 + search)
+    2. FitFinderMiniPanel (navy panel, canvas bg)
+    3. Featured programs — 4 ProgramCards in 1/2-col grid (hidden if no published programs)
+    4. Browse by study goal — SearchChip grid from subjects table (static fallback if empty)
+    5. Popular destinations — DestinationCard grid, max 6 (hidden if no destinations)
+    6. Scholarships & funding — ScholarshipRow list, max 4 (hidden if none published)
+    7. Fit Finder CTA (inline navy block, distinct from section 2 — centered, no steps list)
+    8. Study abroad guides — GuideCard grid, max 3 (hidden if none published)
+- 6 parallel Supabase queries in a single Promise.all; each error is logged server-side
+  only (console.error); every section defaults defensively with `data ?? []`.
+- Data strategy:
+    - degree_levels: id, name, code; filtered is_active=true, ordered by display_order
+    - destinations: countries id, name; filtered is_destination_enabled=true, limit 30
+    - featured programs: programs with university/degree/subject/country/city joins, limit 4
+    - subjects: id, name; static FALLBACK_SUBJECTS used when DB returns 0 rows
+    - scholarships: id, name, slug, provider_name, amount_min, amount_max, currency,
+      deadline, deadline_text; published, ordered by deadline asc, limit 4
+    - guides: articles with article_categories(id, name); published, limit 3
+- Country URL pattern: no `/countries/[slug].astro` route exists; destination cards and
+  chips link to `/programs?country=<id>` instead.
+- countries.iso2 included in programs join for ProgramCard countryCode badge.
+- Helper functions defined in page frontmatter: formatDuration, abbreviateDegree,
+  formatTuition, formatDeadline, formatDate, formatAmount.
+- Save/Compare buttons render as visual placeholders (saved=false, comparing=false);
+  JS interactivity deferred to a future phase.
+- FitFinderMiniPanel used once (section 2). Section 7 is a custom inline CTA block
+  (different layout, copy, button color) to avoid visual repetition.
+- Section tones alternate canvas/surface throughout for visual rhythm.
+
+No migrations. No schema changes. No RLS changes. No AI/auth/admin changes.
+No new npm dependencies. No other public pages changed.
+No set:html, no innerHTML, no service_role in new files.
+Build: PASS (Server built in 9.39s, zero errors).
 
 Phase 55B — Public Design System Foundation — complete.
 Extended the public design system established in Phase 55 to fully align with the

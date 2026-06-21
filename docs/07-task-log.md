@@ -4,6 +4,103 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 55C: Homepage Redesign Implementation
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Rewrite src/pages/index.astro from a basic placeholder into a full education-search
+portal homepage using Phase 55B design system components and real database queries.
+Create HomeHero.astro component. Follow locked Phase 55A section order and visual direction.
+
+Pre-implementation schema inspection:
+- Inspected src/pages/programs/index.astro, scholarships/index.astro, universities/index.astro,
+  guides/index.astro, programs/[slug].astro, admin/countries/new.astro, admin/degree-levels/[id].astro
+- Confirmed degree_levels has: id, code, name, display_order, is_active
+- Confirmed countries has: id, name, slug, iso2, content_status, is_destination_enabled
+- Confirmed scholarships fields: amount_min, amount_max, currency, deadline, deadline_text
+- Confirmed articles join: article_categories(id, name)
+- Confirmed program subject FK: subjects!programs_primary_subject_id_fkey(name)
+- Confirmed NO /countries/[slug].astro route exists — destination links use /programs?country=<id>
+- Confirmed countries public queries only use is_destination_enabled filter (no content_status filter)
+
+Files created (1):
+  src/components/public/home/HomeHero.astro
+    - Props: degreeLevels, destinations, dynamicDestination?
+    - <h1>Find study-abroad programs with source-backed confidence</h1>
+    - Subtitle copy
+    - GET /programs form: keyword input + degree_level select + country select + submit button
+    - All inputs have explicit <label for> associations
+    - Quick-link SearchChips: Bachelor's (if found), Master's (if found), Find scholarships,
+      dynamic first-destination chip (if destinations available)
+    - Uses degree_levels(code) to find bachelor/master IDs for chip links
+
+Files modified (1 in src):
+  src/pages/index.astro — complete rewrite
+    - 6 parallel Promise.all queries with per-query error logging (console.error server-only)
+    - Defensive defaults: data ?? [] for all queries
+    - Sections (in approved order):
+        1. HomeHero (H1 + 3-field search form)
+        2. FitFinderMiniPanel (canvas bg, first Fit Finder placement)
+        3. Featured programs — ProgramCard × 4, 1/2-col grid, conditional on data
+        4. Browse by study goal — SearchChips from subjects (FALLBACK_SUBJECTS if 0 rows)
+        5. Popular destinations — DestinationCard × 6, conditional on data
+        6. Scholarships & funding — ScholarshipRow × 4, conditional on data
+        7. Fit Finder CTA (inline navy block, centered, no step list — visually distinct)
+        8. Study abroad guides — GuideCard × 3, conditional on data
+    - Helper functions: formatDuration, abbreviateDegree, formatTuition, formatDeadline,
+      formatDate, formatAmount (all local to page)
+    - ProgramCard props: saves/comparing = false (JS interactivity deferred)
+    - Section tones: surface/canvas alternating
+
+Data strategy decisions:
+  - degree_levels: id, name, code — is_active=true, ordered by display_order
+  - destinations: id, name — is_destination_enabled=true (no content_status filter,
+    matching existing public page convention), limit 30
+  - programs: with joins to universities(name,slug), degree_levels(name,code),
+    subjects!programs_primary_subject_id_fkey(name), countries(name,iso2), cities(name);
+    published, limit 4, newest first
+  - subjects: id, name, limit 12 — FALLBACK_SUBJECTS if 0 rows returned
+  - scholarships: amount_min/max/currency/deadline/deadline_text; published, limit 4
+  - articles: with article_categories(id, name); published, limit 3
+  - No destination program counts (would require aggregation join; deferred)
+  - Destination cards link to /programs?country=<id> (no country detail pages exist)
+  - countries.iso2 included in programs join for ProgramCard countryCode badge
+
+Sections hidden due to no data (development state):
+  - Featured programs: hidden (no published programs yet in dev)
+  - Destinations: shown if any countries have is_destination_enabled=true
+  - Scholarships: hidden (no published scholarships in dev)
+  - Guides: shown if any published articles exist
+
+FitFinderMiniPanel placement:
+  - Used once: section 2 (inline after hero, canvas bg, standard navy panel)
+  - Section 7: custom inline CTA block (centered, different copy, white button on navy bg)
+  - The two are visually distinct — no repetition issue
+
+Schema queries:
+  grep for "service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient"
+    in src/pages/index.astro src/components/public/home/ → 0 matches
+  grep for "set:html|innerHTML"
+    in src/pages/index.astro src/components/public/home/ → 0 matches
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 9.39s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient in new files: 0 matches.
+  set:html|innerHTML in new files: 0 matches.
+
+Manual verification:
+  Build artifact structure verified; no TypeScript compile errors in build output.
+  Runtime rendering with a live Supabase connection not performed (dev environment).
+
+Deferred to future phase:
+  Save/Compare JS interactivity for ProgramCard buttons
+  Destination program/scholarship counts
+  Search page redesign
+  Scholarship listing redesign
+  AI Finder redesign
+
 ## 2026-06-21 - Phase 55B: Public Design System Foundation
 
 Tool:
