@@ -5,6 +5,7 @@
 // policy by design; all writes are server-only via service role.
 import { createServiceClient } from '../../supabase/service'
 import type { AIRuntimeEnv } from '../types'
+import { sanitizeAIExplanation } from './sanitize'
 
 export interface FinderPersistInput {
   studentProfileId: string
@@ -83,4 +84,63 @@ export async function persistFinderResult(
   }
 
   return resultId
+}
+
+export interface FinderSummaryTokenUsage {
+  promptTokens?: number
+  completionTokens?: number
+}
+
+// updateFinderSummary stores an AI explanation onto an existing finder result
+// using the service role. Called by the async summary endpoint after the
+// rule-based result row already exists. Text is sanitized here so the stored
+// value is always safe plain text regardless of the caller.
+//
+// A summary-generation failure must NOT mark the result failed — this helper
+// only ever writes ai_explanation / ai_model_used / token counts. It never
+// touches result_status. Returns true on success, false on any failure.
+// Never throws; raw DB errors are logged server-side only, never returned.
+export async function updateFinderSummary(
+  resultId: string,
+  text: string,
+  model: string | null,
+  tokenUsage: FinderSummaryTokenUsage | undefined,
+  env: AIRuntimeEnv,
+): Promise<boolean> {
+  const key = env.SUPABASE_SERVICE_ROLE_KEY
+  if (!key) {
+    return false
+  }
+
+  const cleaned = sanitizeAIExplanation(text)
+  if (!cleaned) {
+    return false
+  }
+
+  const update: Record<string, unknown> = {
+    ai_explanation: cleaned,
+  }
+  if (model) {
+    update.ai_model_used = model
+  }
+  if (tokenUsage?.promptTokens != null) {
+    update.prompt_token_count = tokenUsage.promptTokens
+  }
+  if (tokenUsage?.completionTokens != null) {
+    update.completion_token_count = tokenUsage.completionTokens
+  }
+
+  const serviceClient = createServiceClient(key)
+
+  const { error } = await serviceClient
+    .from('ai_finder_results')
+    .update(update)
+    .eq('id', resultId)
+
+  if (error) {
+    console.error('updateFinderSummary update failed:', error.message)
+    return false
+  }
+
+  return true
 }

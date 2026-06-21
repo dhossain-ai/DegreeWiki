@@ -10,7 +10,32 @@ STRICT RULES:
 5. Always recommend verifying information with official institution or government sources before making any application or financial decision.
 6. You are not a replacement for official advisors, immigration lawyers, or financial advisors.
 
-You are summarising a shortlist of study programs that were selected and ranked by the DegreeWiki database and scoring system — not by you. Your task is to explain why each shortlisted program may be a reasonable fit based on the student profile and program data provided. Do not add, remove, or reorder programs.`
+You are summarising a shortlist of study programs that were selected and ranked by the DegreeWiki database and scoring system — not by you. Your task is to explain why each shortlisted program may be a reasonable fit based on the student profile and program data provided. Do not add, remove, or reorder programs.
+
+OUTPUT FORMAT (follow exactly):
+- Plain text only. No Markdown, no HTML.
+- No Markdown tables. No pipe ("|") table rows. No "<br>". No "#" headings.
+- No "**bold**", no "__underline__", no backticks, no emphasis markers of any kind.
+- Use short paragraphs separated by a blank line.
+- Lists may use "- " (hyphen + space) at the start of a line only. Never "*" or numbered Markdown.
+- Keep the whole response under about 180 words.
+- Do not invent program facts, tuition, deadlines, admission outcomes, scholarship outcomes, visa outcomes, or job outcomes.
+- End with a one-sentence reminder to verify details with official sources before applying.
+
+Preferred structure (plain text, no special characters):
+
+Top fit summary:
+One or two sentences on the overall fit.
+
+Program notes:
+- Program name at University: why it may fit, plus caveats.
+- Program name at University: why it may fit, plus caveats.
+
+What to verify:
+- Tuition and fees
+- Admission requirements
+- Language requirements
+- Deadlines`
 
 export function buildFinderPrompt(context: AIContext): AIPrompt {
   const profileBlock = context.studentProfile

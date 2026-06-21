@@ -2,10 +2,9 @@
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
-import { callAI } from '../../lib/ai/gateway'
 import { getAIEnv } from '../../lib/ai/env'
-import type { AIContext, AIFailureReason } from '../../lib/ai/types'
 import { persistFinderResult } from '../../lib/ai/finder/persist'
+import { sanitizeAIExplanation } from '../../lib/ai/finder/sanitize'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
@@ -71,8 +70,6 @@ let savedSignalCount = 0
 let candidatesChecked = 0
 let missingSignals: string[] = []
 let aiExplanation: string | null = null
-let aiUnavailable = false
-let aiFailure: AIFailureReason | null = null
 let savedResultId: string | null = null
 let persistAttempted = false
 
@@ -311,65 +308,16 @@ if (!user) {
           pageState = matches.length > 0 ? 'ready' : 'no_matches'
 
           if (pageState === 'ready' && matches.length > 0) {
+            // The AI summary is generated asynchronously by /api/ai/finder-summary
+            // after this page loads. Here we only persist (or reuse) the
+            // rule-based result row — no provider call happens during render.
             const aiEnv = getAIEnv(Astro.locals as Record<string, unknown>)
-
-            let aiModelUsed: string | null = null
-            let promptTokenCount = 0
-            let completionTokenCount = 0
-
-            try {
-              const top3 = matches.slice(0, 3)
-              const aiContext: AIContext = {
-                source: 'programs',
-                records: top3.map(m => ({
-                  title:           m.program.title,
-                  university:      m.program.universities?.name ?? null,
-                  country:         m.program.countries?.name ?? null,
-                  city:            m.program.cities?.name ?? null,
-                  degreeLevel:     m.program.degree_levels?.name ?? null,
-                  subject:         m.program.subjects?.name ?? null,
-                  tuitionRange:    formatTuition(m.program),
-                  officialUrl:     m.program.official_url ?? null,
-                  matchPercentage: m.percentage,
-                  matchReasons:    m.reasons,
-                  warnings:        m.warnings,
-                })),
-                studentProfile: {
-                  degreeLevel:     degreeLevelName ?? undefined,
-                  targetCountries: countryNames.length > 0 ? countryNames : undefined,
-                  subjects:        subjectNames.length > 0 ? subjectNames : undefined,
-                  budgetMin:       profile?.budget_min ?? undefined,
-                  budgetMax:       profile?.budget_max ?? undefined,
-                  currency:        profile?.budget_currency ?? undefined,
-                },
-              }
-              const aiResponse = await callAI(
-                {
-                  sessionType: 'finder',
-                  userMessage: 'Explain the shortlisted programs for this student.',
-                  context: aiContext,
-                  userId: user?.id,
-                },
-                aiEnv,
-              )
-              if (!aiResponse.fallbackUsed && !aiResponse.guardrailTripped && aiResponse.text.trim().length > 0) {
-                aiExplanation = aiResponse.text.trim()
-                aiModelUsed = aiResponse.modelUsed
-                promptTokenCount = aiResponse.promptTokens
-                completionTokenCount = aiResponse.completionTokens
-              } else {
-                aiUnavailable = true
-                aiFailure = aiResponse.failure ?? null
-              }
-            } catch {
-              aiUnavailable = true
-            }
 
             try {
               const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString()
               const { data: recentResult } = await supabase
                 .from('ai_finder_results')
-                .select('id')
+                .select('id, ai_explanation')
                 .eq('student_profile_id', profile!.id)
                 .eq('result_status', 'complete')
                 .gte('created_at', sixtySecondsAgo)
@@ -378,17 +326,23 @@ if (!user) {
                 .maybeSingle()
 
               if (recentResult?.id) {
+                // Reuse the recent result. If it already has a cached summary,
+                // show it immediately — the client never calls the provider.
                 savedResultId = recentResult.id as string
+                const cached = recentResult.ai_explanation as string | null
+                if (cached && cached.trim().length > 0) {
+                  aiExplanation = sanitizeAIExplanation(cached)
+                }
               } else {
                 persistAttempted = true
                 savedResultId = await persistFinderResult(
                   {
                     studentProfileId:  profile!.id,
                     shortlistCount:    matches.length,
-                    aiExplanation,
-                    aiModelUsed,
-                    promptTokenCount,
-                    completionTokenCount,
+                    aiExplanation:     null,
+                    aiModelUsed:       null,
+                    promptTokenCount:  0,
+                    completionTokenCount: 0,
                     matches: matches.map((m, i) => ({
                       programId:    m.program.id as string,
                       rank:         i + 1,
@@ -416,23 +370,10 @@ const showDevPersistWarning =
   pageState === 'ready' &&
   matches.length > 0 &&
   savedResultId === null
-const showDevAIWarning =
-  import.meta.env.DEV &&
-  pageState === 'ready' &&
-  aiUnavailable
-const devAIWarningMessage = (() => {
-  if (!aiFailure) return 'AI summary is unavailable. Check the server console for safe AI diagnostics.'
-  if (aiFailure.source === 'rate_limit') {
-    return `AI summary is unavailable: service-role/rate limiter issue (${aiFailure.reason}).`
-  }
-  if (aiFailure.source === 'provider') {
-    return `AI summary is unavailable: ${aiFailure.provider} provider failed (status: ${aiFailure.status ?? 'none'}, category: ${aiFailure.category}).`
-  }
-  if (aiFailure.source === 'provider_config') {
-    return `AI summary is unavailable: ${aiFailure.provider} provider configuration issue.`
-  }
-  return 'AI summary is unavailable: AI provider configuration issue.'
-})()
+// The AI summary card is shown (with an async-loading placeholder) whenever a
+// result row was saved but does not yet have a cached explanation.
+const showAISummaryCard = pageState === 'ready' && matches.length > 0 && !!savedResultId
+const aiCardPending = showAISummaryCard && !aiExplanation
 ---
 <PublicLayout
   title={`${pageTitle} — DegreeWiki`}
@@ -579,29 +520,29 @@ const devAIWarningMessage = (() => {
             <strong>Developer note:</strong> this result displayed but was not saved. Check that <code class="font-mono bg-yellow-100 px-1 rounded">SUPABASE_SERVICE_ROLE_KEY</code> is set in the server/runtime environment.
           </div>
         )}
-        {showDevAIWarning && (
-          <div class="max-w-3xl mb-5 px-4 py-3 rounded-md bg-yellow-50 border border-yellow-300 text-sm text-yellow-900">
-            <strong>Developer note:</strong> {devAIWarningMessage}
-          </div>
-        )}
-
-        {aiExplanation && (
-          <div class="max-w-3xl mb-7 bg-purple-50 border border-purple-100 rounded-md px-4 py-4">
+        {showAISummaryCard && (
+          <div
+            id="ai-summary-card"
+            class="max-w-3xl mb-7 bg-purple-50 border border-purple-100 rounded-md px-4 py-4"
+            data-result-id={savedResultId}
+            data-pending={aiCardPending ? 'true' : 'false'}
+          >
             <h2 class="text-sm font-semibold text-purple-900 mb-2">AI summary</h2>
             <p class="text-xs text-purple-700 mb-3">
               This explanation is AI-assisted and based only on your saved preferences and the matched programs shown here. Verify all details directly with official university sources before applying.
             </p>
-            <div class="space-y-2">
-              {aiExplanation.split(/\n\n+/).map(para => (
-                <p class="text-sm text-gray-700 leading-relaxed">{para}</p>
-              ))}
+            <div id="ai-summary-body" class="space-y-2">
+              {aiExplanation
+                ? aiExplanation.split(/\n\n+/).map(para => (
+                    <p class="text-sm text-gray-700 leading-relaxed">{para}</p>
+                  ))
+                : (
+                  <p id="ai-summary-status" class="text-sm text-gray-500 leading-relaxed">
+                    Preparing your personalized explanation…
+                  </p>
+                )}
             </div>
           </div>
-        )}
-        {!aiExplanation && aiUnavailable && (
-          <p class="max-w-3xl mb-5 text-sm text-gray-500">
-            AI summary is unavailable right now. Your rule-based matches are still shown.
-          </p>
         )}
 
         {deviation && (
@@ -738,4 +679,65 @@ const devAIWarningMessage = (() => {
       </>
     )}
   </div>
+
+  <script>
+    // Async AI summary loader. Fetches the summary once after rule-based matches
+    // are already on screen. Renders with textContent only — never innerHTML.
+    // No automatic retry loop: a single fetch per page load.
+    const card = document.getElementById('ai-summary-card')
+    if (card && card.getAttribute('data-pending') === 'true') {
+      const resultId = card.getAttribute('data-result-id')
+      const body = document.getElementById('ai-summary-body')
+      const status = document.getElementById('ai-summary-status')
+
+      const showText = (msg: string) => {
+        if (status) {
+          status.textContent = msg
+        } else if (body) {
+          const p = document.createElement('p')
+          p.className = 'text-sm text-gray-500 leading-relaxed'
+          p.textContent = msg
+          body.replaceChildren(p)
+        }
+      }
+
+      const render = (explanation: string) => {
+        if (!body) return
+        const paragraphs = explanation.split(/\n\n+/).map(s => s.trim()).filter(Boolean)
+        const nodes = paragraphs.map(text => {
+          const p = document.createElement('p')
+          p.className = 'text-sm text-gray-700 leading-relaxed'
+          p.textContent = text
+          return p
+        })
+        if (nodes.length === 0) {
+          showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
+          return
+        }
+        body.replaceChildren(...nodes)
+      }
+
+      if (resultId) {
+        fetch('/api/ai/finder-summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ finder_result_id: resultId }),
+        })
+          .then(async (res) => {
+            const data = await res.json().catch(() => null)
+            if (res.ok && data && data.ok && typeof data.ai_explanation === 'string') {
+              render(data.ai_explanation)
+            } else {
+              showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
+            }
+          })
+          .catch(() => {
+            showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
+          })
+          .finally(() => {
+            card.setAttribute('data-pending', 'done')
+          })
+      }
+    }
+  </script>
 </PublicLayout>

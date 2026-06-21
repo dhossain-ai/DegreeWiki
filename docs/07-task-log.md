@@ -4,6 +4,50 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 54A: AI Summary Formatting + Async Result UX
+
+Tool:
+Claude Opus 4.8 (Claude Code)
+
+Task:
+Make Fit Finder results render rule-based matches immediately, then generate the
+AI summary asynchronously, cache it in ai_finder_results.ai_explanation, and
+render it safely as plain text. Stop the provider being called on every page
+refresh.
+
+Changes:
+
+- src/lib/ai/prompts/finder-summary.ts: added strict plain-text OUTPUT FORMAT
+  rules (no Markdown/HTML/tables/pipes/headings/emphasis, "- " lists only,
+  ~180-word cap, verification reminder, preferred structure).
+- src/lib/ai/finder/sanitize.ts (new): sanitizeAIExplanation() — converts <br>
+  to newlines, strips HTML tags, drops Markdown table separator rows, flattens
+  obvious pipe table rows, removes leading heading markers and ** __ ` markers,
+  normalizes blank lines, trims, caps length. No dependencies.
+- src/lib/ai/finder/persist.ts: persistFinderResult now stores a null summary
+  (summary is async); added updateFinderSummary() — service-role write of
+  ai_explanation/ai_model_used/token counts. Never touches result_status, so a
+  summary failure never marks a valid result failed. Sanitizes before write.
+- src/pages/api/ai/finder-summary.ts (new): POST { finder_result_id }. RLS
+  ownership check; returns cached ai_explanation without a provider call;
+  otherwise loads top-3 matches + optional profile summary, calls callAI,
+  sanitizes, stores via updateFinderSummary, returns it. Provider failure →
+  503 ai_unavailable (DEV-only safe failure detail), result not marked failed.
+- src/pages/fit-finder/result.astro: removed the blocking callAI from
+  frontmatter; only persists/reuses the result row. Reused recent result shows
+  its cached summary immediately. Otherwise an AI card shows "Preparing your
+  personalized explanation…" and vanilla JS fetches /api/ai/finder-summary once
+  (no retry loop), rendering with textContent only.
+- src/pages/fit-finder/results/[id].astro: stored summary sanitized defensively
+  before safe text interpolation; added a "no AI summary" note. Provider never
+  called from this page. AI Advisor chat unchanged.
+
+No schema migration. No set:html. No innerHTML. No RLS/admin/security changes.
+
+Build Result:
+npm run build: PASS (Cloudflare server build, ~9.9s, zero errors).
+No npm run check script exists in package.json.
+
 ## 2026-06-21 - Phase 52: Country Role Flags + Fit Finder AI Pipeline Reliability
 
 Tool:

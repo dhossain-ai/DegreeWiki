@@ -1,8 +1,15 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21
+Last updated: 2026-06-21 (Phase 54A)
 
 ## Current Phase
+
+Phase 54A — AI Summary Formatting + Async Result UX — complete.
+Rule-based Fit Finder matches now render immediately; the AI summary is generated
+asynchronously by /api/ai/finder-summary, cached in ai_finder_results.ai_explanation,
+and reused on refresh (no repeat provider calls). Summaries are sanitized to plain
+text and rendered via safe text interpolation / textContent — no set:html, no
+innerHTML. No schema migration; matching logic, RLS, and admin guard unchanged.
 
 Phase 52 — Country Role Flags + Fit Finder AI Pipeline Reliability — complete.
 

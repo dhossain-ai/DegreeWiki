@@ -191,7 +191,9 @@ Get-ChildItem -Path src/pages,src/components,src/layouts -Recurse -File |
 Get-ChildItem -Path src -Recurse -File |
   Select-String -Pattern "PUBLIC_SUPABASE_SERVICE|PUBLIC_.*SERVICE"
 
-# Must return only src/pages/fit-finder/result.astro (callAI); no Gemini/OpenAI in pages/components
+# Must return only the AI API routes (callAI): src/pages/api/ai/chat.ts and
+# src/pages/api/ai/finder-summary.ts. No Gemini/OpenAI in pages/components, and
+# (since Phase 54A) no callAI in any .astro page — the finder summary is async.
 Get-ChildItem -Path src/pages,src/components -Recurse -File |
   Select-String -Pattern "callAI|Gemini|OpenAI"
 
@@ -220,19 +222,36 @@ Run these manually after deployment. Requires at least one published program in 
 - Visit `/fit-finder/result`.
 - Expected: "Add more preferences" state with missing signals listed; no AI note.
 
-**Test 4 — Valid profile, AI available:**
+**Test 4 — Valid profile, AI available (async summary, Phase 54A):**
 - Sign in as a user with a valid profile (at least one scoring signal).
 - Visit `/fit-finder/result`.
-- Expected: Rule-based matches shown; purple AI summary section visible; green "Your matches have been saved." banner with "View saved result →" link.
-- Verify Supabase: new row in `ai_usage_logs` with `session_type = 'finder'`.
-- Verify Supabase: new row in `ai_finder_results` with `result_status = 'complete'`.
+- Expected: Rule-based matches shown immediately; green "Your matches have been
+  saved." banner; purple AI summary card initially shows "Preparing your
+  personalized explanation…", then updates in place (no full page reload) once
+  `POST /api/ai/finder-summary` returns. The summary is plain text — no Markdown
+  tables, `<br>`, `**` markers, or HTML.
+- Verify Supabase: new row in `ai_finder_results` with `result_status = 'complete'`
+  (created with `ai_explanation = null`, then updated with the summary).
 - Verify Supabase: rows in `ai_finder_program_matches` for that result UUID.
+- Verify Supabase: `ai_usage_logs` row with `session_type = 'finder'` written by
+  the summary endpoint when the provider was actually called.
 
-**Test 5 — AI unavailable note:**
-- Trigger AI unavailability by temporarily setting `AI_RATE_LIMIT_USER_DAILY=1` and running the Fit Finder twice, or by testing with `GEMINI_API_KEY` absent/invalid.
-- Second run or invalid-key run: rule-based matches render normally; gray note visible:
-  "AI summary is unavailable right now. Your rule-based matches are still shown."
-- No 500 error. No stack trace. No internal details exposed.
+**Test 4b — Cached summary on refresh (no repeat provider call):**
+- After Test 4, refresh `/fit-finder/result` within 60s (same result reused).
+- Expected: the cached `ai_explanation` renders immediately server-side; the
+  client does not call the provider (any `/api/ai/finder-summary` call returns
+  `cached: true` without a provider request).
+- Open `/fit-finder/results/[id]` for that result: stored summary renders; the
+  summary provider is never called from this page.
+
+**Test 5 — AI unavailable (async, no retry loop):**
+- Trigger AI unavailability via `AI_RATE_LIMIT_USER_DAILY=1` then a second run, or
+  with `GEMINI_API_KEY`/`OPENROUTER_API_KEY` absent/invalid.
+- Expected: rule-based matches render normally; the AI card replaces the
+  placeholder with: "AI summary is unavailable right now. Your rule-based matches
+  are still shown." `/api/ai/finder-summary` returns 503 `ai_unavailable`.
+- The result row is NOT marked `failed`. The client fetches once — no retry loop.
+- No 500 error, no stack trace, no internal details or secrets exposed.
 
 **Test 6 — no_matches state:**
 - Sign in as a user whose preferences match no published programs.

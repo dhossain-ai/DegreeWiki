@@ -3,6 +3,7 @@ import PublicLayout from '../../../layouts/PublicLayout.astro'
 import { createClient } from '../../../lib/supabase/server'
 import { SITE_URL } from '../../../lib/site'
 import SavedResultChat from '../../../components/ai/SavedResultChat.astro'
+import { sanitizeAIExplanation } from '../../../lib/ai/finder/sanitize'
 
 const { id } = Astro.params
 
@@ -112,7 +113,12 @@ const savedDate = result.created_at
     })
   : null
 
-const aiExplanation = result.ai_explanation as string | null
+const rawExplanation = result.ai_explanation as string | null
+// Defensively sanitize stored output before display, regardless of when it was
+// generated. Rendering still relies on safe text interpolation below.
+const aiExplanation = rawExplanation && rawExplanation.trim().length > 0
+  ? sanitizeAIExplanation(rawExplanation)
+  : null
 ---
 <PublicLayout
   title="Saved Fit Finder result — DegreeWiki"
@@ -179,6 +185,11 @@ const aiExplanation = result.ai_explanation as string | null
             <p class="text-sm text-gray-700 leading-relaxed">{para}</p>
           ))}
         </div>
+      </div>
+    )}
+    {!aiExplanation && (
+      <div class="max-w-3xl mb-7 bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm text-gray-500">
+        No AI summary was generated for this saved result. Your rule-based matches are shown below.
       </div>
     )}
 
