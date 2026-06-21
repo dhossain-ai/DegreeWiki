@@ -1,12 +1,12 @@
 ---
 import AdminLayout from '../../layouts/AdminLayout.astro'
-import { requireSuperAdmin } from '../../lib/admin/guard'
+import { forbiddenAdminResponse, requireSuperAdmin } from '../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
 import { type FormErrors, validateIn } from '../../lib/admin/validate'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
-if (guard.type === 'forbidden') return new Response('403 Forbidden: admin role required.', { status: 403 })
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
 

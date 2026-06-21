@@ -29,3 +29,13 @@ export async function requireAdminUser(
 }
 
 export const requireSuperAdmin = requireAdminUser
+
+export function forbiddenAdminResponse(): Response {
+  return new Response(
+    '403 Forbidden: an admin role is required to access DegreeWiki admin pages.',
+    {
+      status: 403,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    },
+  )
+}
