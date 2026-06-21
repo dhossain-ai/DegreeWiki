@@ -48,7 +48,7 @@ const { data: matchRows, error: matchError } = await supabase
       countries(name),
       cities(name),
       degree_levels(name),
-      subjects(name)
+      subjects!programs_primary_subject_id_fkey(name)
     )
   `)
   .eq('ai_finder_result_id', result.id)

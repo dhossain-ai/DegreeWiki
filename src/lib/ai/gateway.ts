@@ -51,6 +51,9 @@ export async function callAI(
     { serviceClient, dailyLimit },
   )
   if (!allowed) {
+    if (limitReason === 'service_unavailable' && !env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.warn('[AI gateway] AI call denied: SUPABASE_SERVICE_ROLE_KEY is not set. Add it to .env.local (local dev) or Cloudflare secrets (production) to enable AI rate limiting and AI calls.')
+    }
     const text = limitReason === 'limit_exceeded'
       ? "You have reached today's AI usage limit. Your rule-based matches are still available."
       : 'AI is temporarily unavailable.'
