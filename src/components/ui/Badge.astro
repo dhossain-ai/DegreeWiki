@@ -1,0 +1,22 @@
+---
+interface Props {
+  variant?: 'neutral' | 'level' | 'verified' | 'scholarship' | 'deadline' | 'info'
+  class?: string
+}
+const { variant = 'neutral', class: className = '' } = Astro.props
+
+/* Base: rounded-md (matches reference card badge shape; use rounded-full via className for pill chips) */
+const base = 'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold'
+
+const variants: Record<string, string> = {
+  neutral:     'bg-ink/5 text-muted',
+  level:       'bg-primary-surface text-primary border border-primary-border uppercase tracking-wide',
+  verified:    'bg-verified-surface text-verified border border-verified-border',
+  scholarship: 'bg-verified-surface text-verified border border-verified-border',
+  deadline:    'bg-deadline-surface text-deadline border border-deadline-border',
+  info:        'bg-ink/5 text-ink',
+}
+---
+<span class={`${base} ${variants[variant]} ${className}`}>
+  <slot />
+</span>

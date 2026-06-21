@@ -1,8 +1,43 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21 (Phase 55A)
+Last updated: 2026-06-21 (Phase 55B)
 
 ## Current Phase
+
+Phase 55B — Public Design System Foundation — complete.
+Extended the public design system established in Phase 55 to fully align with the
+locked Phase 55A design references. Key deliverables:
+
+- `src/styles/global.css`: extended @theme with 10 new color tokens (primary-surface,
+  primary-border, verified-surface, verified-border, deadline-surface, deadline-border,
+  edge-subtle, ink-secondary, ink-tertiary, slate-light) + font tokens (--font-sans,
+  --font-mono: IBM Plex Sans/Mono) + body font-family base style.
+- `src/layouts/BaseLayout.astro`: IBM Plex Sans + IBM Plex Mono loaded via Google Fonts
+  preconnect/link (no new npm dependency).
+- `src/components/ui/Container.astro`: added `xl` width (max-w-7xl); changed `wide`
+  to 1200px (matches design reference); added sm:px-8 responsive horizontal padding.
+- `src/components/ui/Button.astro`: added `soft` variant (light blue fill) and `lg`
+  size; updated border-radius to rounded-[9px] (reference-matched).
+- `src/components/ui/Badge.astro`: added `scholarship` variant; changed base from
+  `rounded-full` to `rounded-md`; added bordered treatment to `level`, `verified`,
+  `scholarship`, `deadline` variants matching the reference.
+- `src/components/public/cards/ProgramCard.astro`: full anatomy rewrite matching the
+  locked program-card reference — monogram block, degree badge, subject field, title,
+  university (with optional link), country code + location, data row (duration /
+  language / intake / deadline), status badges (scholarship / verified / source-checked /
+  deadline-soon), tuition panel, View details / Save / Compare buttons with correct
+  visual state per props. Save/Compare are visual placeholders; JS interactivity deferred
+  to Phase 55C.
+- `src/components/public/PublicNav.astro`: upgraded to reference header — navy square
+  logo mark (IBM Plex Mono "D"), 66px height, sticky + backdrop blur, proper color
+  treatment for nav links and auth actions.
+- `src/components/public/PublicFooter.astro`: upgraded to dark navy multi-column footer
+  — 4-column grid (logo/tagline/trust badge + Explore/Learn/Account link columns),
+  copyright + legal bottom row matching the reference.
+- `docs/design/public-design-system.md`: new design system documentation.
+
+No homepage redesign. No `src/pages/` edits. No schema/API/AI/auth/admin changes.
+No new npm dependencies. Build: PASS (Server built in 7.66s, zero errors).
 
 Phase 55A — Design Reference Lock + public-ui-direction.md — complete (including
 amendment). Created `docs/design/public-ui-direction.md` locking the approved

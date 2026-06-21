@@ -1,0 +1,305 @@
+---
+/**
+ * Full-anatomy program card matching the Phase 55A locked design reference.
+ * All fields beyond href+title are optional — the card degrades gracefully.
+ * Save/Compare buttons render correct visual state from props; JS interactivity
+ * is wired in Phase 55C+.
+ */
+interface Props {
+  href: string
+  title: string
+  universityName?: string | null
+  universityHref?: string | null
+  /** Short university monogram, e.g. "UvA". Auto-computed from universityName if omitted. */
+  monogram?: string | null
+  /** Abbreviated degree label, e.g. "MSc", "BSc", "MA" */
+  degreeLevel?: string | null
+  /** Subject / field of study label */
+  field?: string | null
+  /** ISO country code, e.g. "NL", "FI" */
+  countryCode?: string | null
+  /** City and country string, e.g. "Amsterdam, Netherlands" */
+  location?: string | null
+  /** e.g. "24 months" */
+  duration?: string | null
+  /** e.g. "English" */
+  language?: string | null
+  /** e.g. "Sep 2026" */
+  intake?: string | null
+  /** e.g. "15 Oct 2026" */
+  deadline?: string | null
+  /** When true, deadline is colored amber */
+  deadlineSoon?: boolean
+  /** Short deadline urgency label, e.g. "Deadline in 18 days" */
+  deadlineNote?: string | null
+  scholarshipAvailable?: boolean
+  verified?: boolean
+  /** Human-readable date when source was last checked, e.g. "18 Jun 2026" */
+  sourceChecked?: string | null
+  /** Formatted tuition string, e.g. "€15,300" */
+  tuitionDisplay?: string | null
+  /** e.g. "per year" */
+  tuitionPer?: string | null
+  saved?: boolean
+  comparing?: boolean
+  class?: string
+}
+
+const {
+  href,
+  title,
+  universityName = null,
+  universityHref = null,
+  monogram = null,
+  degreeLevel = null,
+  field = null,
+  countryCode = null,
+  location = null,
+  duration = null,
+  language = null,
+  intake = null,
+  deadline = null,
+  deadlineSoon = false,
+  deadlineNote = null,
+  scholarshipAvailable = false,
+  verified = false,
+  sourceChecked = null,
+  tuitionDisplay = null,
+  tuitionPer = null,
+  saved = false,
+  comparing = false,
+  class: className = '',
+} = Astro.props
+
+/* Auto-compute monogram from university name (up to 3 initials). */
+const displayMonogram: string | null = monogram
+  ?? (universityName
+    ? universityName
+        .split(/\s+/)
+        .filter((w: string) => /^[A-Za-z]/.test(w))
+        .slice(0, 3)
+        .map((w: string) => w[0].toUpperCase())
+        .join('')
+        .slice(0, 4)
+    : null)
+
+const hasBadges = scholarshipAvailable || verified || !!sourceChecked || (deadlineSoon && !!deadlineNote)
+const hasDataRow = !!(duration || language || intake || deadline)
+
+/* Card border + shadow changes when selected for compare. */
+const cardState = comparing
+  ? 'border-primary shadow-[0_0_0_3px_rgba(29,78,216,0.12)]'
+  : 'border-edge shadow-[0_1px_2px_rgba(11,31,58,0.04)]'
+---
+
+<article
+  class={[
+    'flex flex-col sm:flex-row gap-5 bg-surface border rounded-xl p-5',
+    'transition-[transform,box-shadow,border-color] duration-[180ms] ease-in-out',
+    'hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(11,31,58,0.10)] hover:border-[#cbd5e1]',
+    cardState,
+    className,
+  ].join(' ')}
+>
+
+  {/* ── Monogram block ──────────────────────────────── */}
+  {displayMonogram && (
+    <div
+      class="flex-none self-start w-14 h-14 rounded-[10px] bg-[#f1f5f9] border border-edge
+             flex items-center justify-center font-mono text-[15px] font-bold text-ink tracking-wide"
+      aria-hidden="true"
+    >
+      {displayMonogram}
+    </div>
+  )}
+
+  {/* ── Main body ───────────────────────────────────── */}
+  <div class="flex-1 min-w-0 flex flex-col gap-[10px]">
+
+    {/* Degree badge + subject field */}
+    {(degreeLevel || field) && (
+      <div class="flex items-center gap-2.5 flex-wrap">
+        {degreeLevel && (
+          <span class="inline-flex items-center text-[11px] font-bold uppercase tracking-[0.06em] text-primary bg-primary-surface border border-primary-border px-2 py-0.5 rounded-md">
+            {degreeLevel}
+          </span>
+        )}
+        {field && <span class="text-xs text-slate-light">{field}</span>}
+      </div>
+    )}
+
+    {/* Program title + university */}
+    <div>
+      <h3 class="text-[18px] font-semibold text-ink leading-[1.25] tracking-[-0.01em] line-clamp-2">
+        {title}
+      </h3>
+      {universityName && (
+        <p class="mt-0.5 text-sm text-ink-secondary">
+          {universityHref
+            ? <a href={universityHref} class="hover:text-primary transition-colors">{universityName}</a>
+            : universityName
+          }
+        </p>
+      )}
+    </div>
+
+    {/* Country code + location */}
+    {(countryCode || location) && (
+      <div class="flex items-center gap-2 text-sm text-muted">
+        {countryCode && (
+          <span class="text-[10px] font-bold tracking-[0.05em] text-muted border border-edge rounded-[4px] px-[5px] py-px bg-surface leading-tight">
+            {countryCode}
+          </span>
+        )}
+        {location && <span>{location}</span>}
+      </div>
+    )}
+
+    {/* Data row: duration / language / start / deadline */}
+    {hasDataRow && (
+      <div class="flex gap-6 flex-wrap border-t border-edge-subtle pt-3 mt-0.5">
+        {duration && (
+          <div class="flex flex-col gap-0.5">
+            <span class="text-[11px] uppercase tracking-[0.05em] text-slate-light">Duration</span>
+            <span class="text-sm font-medium text-ink">{duration}</span>
+          </div>
+        )}
+        {language && (
+          <div class="flex flex-col gap-0.5">
+            <span class="text-[11px] uppercase tracking-[0.05em] text-slate-light">Language</span>
+            <span class="text-sm font-medium text-ink">{language}</span>
+          </div>
+        )}
+        {intake && (
+          <div class="flex flex-col gap-0.5">
+            <span class="text-[11px] uppercase tracking-[0.05em] text-slate-light">Start</span>
+            <span class="text-sm font-medium text-ink">{intake}</span>
+          </div>
+        )}
+        {deadline && (
+          <div class="flex flex-col gap-0.5">
+            <span class="text-[11px] uppercase tracking-[0.05em] text-slate-light">Next deadline</span>
+            <span class={`text-sm font-semibold ${deadlineSoon ? 'text-deadline' : 'text-ink'}`}>
+              {deadline}
+            </span>
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* Status badges row */}
+    {hasBadges && (
+      <div class="flex gap-2 flex-wrap items-center">
+        {scholarshipAvailable && (
+          <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-verified bg-verified-surface border border-verified-border px-2 py-1 rounded-md">
+            <span class="w-1.5 h-1.5 rounded-full bg-verified flex-none" aria-hidden="true"></span>
+            Scholarship available
+          </span>
+        )}
+        {verified && (
+          <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-verified bg-surface border border-verified-border px-2 py-1 rounded-md">
+            <span class="flex-none w-[14px] h-[14px] rounded-full bg-verified inline-flex items-center justify-center">
+              <svg class="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                <path d="M1 4l2 2.5L7 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            Verified
+          </span>
+        )}
+        {sourceChecked && (
+          <span class="inline-flex items-center gap-1.5 text-xs text-muted">
+            <span class="w-1.5 h-1.5 rounded-full bg-verified flex-none" aria-hidden="true"></span>
+            Source checked · {sourceChecked}
+          </span>
+        )}
+        {deadlineSoon && deadlineNote && (
+          <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-deadline bg-deadline-surface border border-deadline-border px-2 py-1 rounded-md">
+            <span class="w-1.5 h-1.5 rounded-full bg-deadline flex-none" aria-hidden="true"></span>
+            {deadlineNote}
+          </span>
+        )}
+      </div>
+    )}
+  </div>
+
+  {/* ── Right action panel ──────────────────────────── */}
+  <div class="flex-none flex flex-col gap-4 border-t border-edge-subtle pt-4 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5 sm:w-[180px]">
+
+    {/* Tuition */}
+    {tuitionDisplay && (
+      <div class="sm:text-right">
+        <div class="text-[21px] font-bold text-ink tracking-tight leading-tight">
+          {tuitionDisplay}
+        </div>
+        <div class="text-xs text-muted">{tuitionPer ?? 'per year'}</div>
+      </div>
+    )}
+
+    {/* Action buttons — pushed to bottom on desktop */}
+    <div class="flex flex-col gap-2 w-full sm:mt-auto">
+      <a
+        href={href}
+        class="flex items-center justify-center w-full px-3.5 py-[9px] text-[13.5px] font-semibold
+               text-white bg-primary border border-primary rounded-lg
+               hover:bg-primary-hover transition-colors"
+      >
+        View details
+      </a>
+      <div class="flex gap-2 w-full">
+        {/* Save button — visual state only; JS interactivity added in Phase 55C */}
+        <button
+          type="button"
+          class={[
+            'flex-1 inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold',
+            'rounded-lg px-3 py-2 border transition-all',
+            saved
+              ? 'text-primary bg-primary-surface border-primary'
+              : 'text-ink-secondary bg-surface border-edge hover:border-[#cbd5e1] hover:bg-[#f8fafc]',
+          ].join(' ')}
+          aria-label={saved ? 'Remove from saved' : 'Save program'}
+        >
+          <svg
+            class="flex-none"
+            width="9" height="12" viewBox="0 0 9 12"
+            fill={saved ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M0.75 0.75h7.5v10.5l-3.75-2.7-3.75 2.7V0.75z"/>
+          </svg>
+          {saved ? 'Saved' : 'Save'}
+        </button>
+
+        {/* Compare button — visual state only; JS interactivity added in Phase 55C */}
+        <button
+          type="button"
+          class={[
+            'flex-1 inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold',
+            'rounded-lg px-3 py-2 border transition-all',
+            comparing
+              ? 'text-primary bg-primary-surface border-primary'
+              : 'text-ink-secondary bg-surface border-edge hover:border-[#cbd5e1] hover:bg-[#f8fafc]',
+          ].join(' ')}
+          aria-label={comparing ? 'Remove from compare' : 'Add to compare'}
+        >
+          <span
+            class={[
+              'flex-none w-[15px] h-[15px] rounded inline-flex items-center justify-center border transition-colors',
+              comparing ? 'bg-primary border-primary' : 'bg-surface border-[#cbd5e1]',
+            ].join(' ')}
+          >
+            {comparing && (
+              <svg class="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                <path d="M1 4l2 2.5L7 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            )}
+          </span>
+          Compare
+        </button>
+      </div>
+    </div>
+  </div>
+
+</article>

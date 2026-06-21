@@ -22,6 +22,9 @@ const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescri
     {noindex && <meta name="robots" content="noindex, follow" />}
     {canonical && <link rel="canonical" href={canonical} />}
     <link rel="icon" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
     <meta property="og:site_name" content="DegreeWiki" />
     <meta property="og:type" content={ogType ?? 'website'} />
     <meta property="og:title" content={ogTitle ?? title ?? 'DegreeWiki'} />

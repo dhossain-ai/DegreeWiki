@@ -4,6 +4,91 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 55B: Public Design System Foundation
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Extend the Phase 55 public design system primitives to fully align with the locked
+Phase 55A design references. Upgrade ProgramCard to full anatomy. Upgrade PublicNav
+and PublicFooter to match the reference. Add IBM Plex Sans/Mono fonts. Extend token
+palette. Add Button/Badge variants. Create design system documentation.
+No homepage redesign. No src/pages/ edits.
+
+Changes:
+
+- src/styles/global.css: added 10 new color tokens (primary-surface, primary-border,
+  verified-surface, verified-border, deadline-surface, deadline-border, edge-subtle,
+  ink-secondary, ink-tertiary, slate-light) + font tokens (--font-sans IBM Plex Sans,
+  --font-mono IBM Plex Mono) + body font-family base style in @layer base.
+
+- src/layouts/BaseLayout.astro: added Google Fonts preconnect + link for IBM Plex Sans
+  (wght 400;500;600;700) and IBM Plex Mono (wght 500;600) with display=swap.
+
+- src/components/ui/Container.astro: added 'xl' width (max-w-7xl); changed 'wide'
+  from max-w-6xl to max-w-[1200px] (reference-matched); added sm:px-8 padding.
+
+- src/components/ui/Button.astro: added 'soft' variant (light blue bg-primary-surface,
+  border-primary-border); added 'lg' size (px-6 py-3 text-base); updated border-radius
+  to rounded-[9px]; all variants use border for consistent layout.
+
+- src/components/ui/Badge.astro: added 'scholarship' variant (bg-verified-surface,
+  border-verified-border); changed base shape from rounded-full to rounded-md (use
+  className override for pill shape); added bordered treatment to level, verified,
+  scholarship, deadline variants to match reference; font-semibold base.
+
+- src/components/public/cards/ProgramCard.astro: full anatomy rewrite. Props added:
+  monogram (auto-computed from universityName if absent), universityHref, field,
+  countryCode, location, duration, intake, deadline, deadlineSoon, deadlineNote,
+  scholarshipAvailable, verified, sourceChecked, tuitionDisplay, tuitionPer, saved,
+  comparing. Card outer element changed from <a> (full-card link) to <article>
+  (separate action buttons). Layout: monogram block | main body (degree+field, title,
+  university, location, data-row, badges) | right panel (tuition + View details +
+  Save/Compare). Hover state (translateY -2px, shadow lift, border darken) and compare
+  selected state (blue ring) are CSS-only. Save/Compare buttons render correct visual
+  state from props but have no onclick — JS interactivity deferred to Phase 55C.
+
+- src/components/public/PublicNav.astro: upgraded to reference header. Navy square logo
+  mark (30×30px, rounded-[7px], font-mono "D"), 66px fixed height (h-[66px]), sticky
+  top-0 z-50, bg-white/92 backdrop-blur-[6px] backdrop-saturate-110, nav links in
+  text-ink-tertiary (color:#475569) with hover:text-ink, max-w-[1200px] container.
+  Added "Destinations" to nav links. Mobile: logo + CTA only (nav links hidden md+).
+
+- src/components/public/PublicFooter.astro: upgraded to dark navy (bg-ink) multi-column
+  footer. 4-column grid (lg:grid-cols-4): logo/tagline/trust-badge + Explore/Learn/
+  Account link columns. Trust badge: green circle checkmark + "Program data re-checked
+  weekly". Bottom row: copyright + Privacy/Terms/Disclaimer. Link colors: #9fb3d1 hover
+  white. Same max-w-[1200px] container. No hardcoded year (uses new Date().getFullYear()).
+
+- docs/design/public-design-system.md (new): design system documentation. Covers token
+  direction (color and font tables), all primitive components (Container/Section/
+  SectionHeader/Button/Badge/Card), public card components (ProgramCard with all props
+  documented, DestinationCard, ScholarshipRow, GuideCard), search/filter UI, layout
+  shell, usage rules (10 rules), what not to do, and Phase 55C handoff scope.
+
+Boundaries honored:
+- src/pages/: not touched.
+- Database schema / migrations / RLS: not changed.
+- AI routes / auth logic / admin area: not changed.
+- Deployment config / wrangler: not changed.
+- package.json / package-lock.json: not changed (no new npm dependencies).
+- No set:html or innerHTML introduced.
+- No service-role usage in pages/components/layouts.
+
+Validation:
+  npm run build: PASS (Cloudflare server build, Server built in 7.66s, zero errors).
+  service_role|SERVICE_ROLE|SUPABASE_SERVICE in src/pages,src/components,src/layouts: 0 matches.
+  innerHTML|set:html in src/components: 0 matches (confirmed).
+  git diff package.json: no changes.
+
+Deferred to Phase 55C:
+- Homepage rewrite (src/pages/index.astro).
+- Save/Compare JS interactivity on ProgramCard.
+- Two-column search/listing layout (filter rail + results column).
+- Real data queries for homepage sections.
+- Section width="wide" wiring for all homepage sections.
+
 ## 2026-06-21 - Phase 55A amendment: Normalize locked design reference files
 
 Tool:

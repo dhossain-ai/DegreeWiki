@@ -1,12 +1,93 @@
 ---
 const year = new Date().getFullYear()
+
+const footerCols = [
+  {
+    title: 'Explore',
+    links: [
+      { href: '/programs',      label: 'Programs'      },
+      { href: '/universities',  label: 'Universities'  },
+      { href: '/scholarships',  label: 'Scholarships'  },
+      { href: '/destinations',  label: 'Destinations'  },
+    ],
+  },
+  {
+    title: 'Learn',
+    links: [
+      { href: '/guides',       label: 'Study guides'  },
+      { href: '/fit-finder',   label: 'Fit Finder'    },
+    ],
+  },
+  {
+    title: 'Account',
+    links: [
+      { href: '/login',    label: 'Sign in'     },
+      { href: '/signup',   label: 'Get started' },
+      { href: '/privacy',  label: 'Privacy'     },
+      { href: '/terms',    label: 'Terms'       },
+    ],
+  },
+]
 ---
-<footer class="border-t border-gray-100 bg-white">
-  <div class="max-w-5xl mx-auto px-4 py-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-gray-400">
-    <span>&copy; {year} DegreeWiki</span>
-    <a href="/about"      class="hover:text-gray-600">About</a>
-    <a href="/privacy"    class="hover:text-gray-600">Privacy</a>
-    <a href="/terms"      class="hover:text-gray-600">Terms</a>
-    <a href="/disclaimer" class="hover:text-gray-600">Disclaimer</a>
+
+<footer class="bg-ink text-[#cdd9ea]">
+  <div class="max-w-[1200px] mx-auto px-4 sm:px-8 pt-12 pb-8">
+
+    {/* Four-column grid */}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 pb-8 border-b border-white/10">
+
+      {/* Column 1: Logo + tagline + trust badge */}
+      <div class="sm:col-span-2 lg:col-span-1">
+        <div class="flex items-center gap-[10px] mb-3.5">
+          <div class="w-7 h-7 rounded-[7px] bg-white text-ink flex items-center justify-center font-mono font-bold text-sm flex-none">
+            D
+          </div>
+          <span class="text-[17px] font-bold text-white">DegreeWiki</span>
+        </div>
+        <p class="text-[13px] leading-relaxed text-[#8fa1bd] mb-3.5 max-w-[300px]">
+          A source-backed search portal for international students comparing degree programs abroad.
+        </p>
+        <div class="inline-flex items-center gap-2 text-[12.5px] text-[#9fb3d1] bg-white/5 border border-white/10 px-3 py-[7px] rounded-lg">
+          <span class="flex-none w-3.5 h-3.5 rounded-full bg-[#34d399] inline-flex items-center justify-center">
+            <svg class="w-2 h-2 text-ink" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+              <path d="M1 4l2 2.5L7 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          Program data re-checked weekly
+        </div>
+      </div>
+
+      {/* Link columns */}
+      {footerCols.map(col => (
+        <div>
+          <h3 class="text-[12.5px] font-semibold text-white uppercase tracking-[0.06em] mb-3.5">
+            {col.title}
+          </h3>
+          <nav class="flex flex-col gap-2.5">
+            {col.links.map(link => (
+              <a
+                href={link.href}
+                class="text-[13.5px] text-[#9fb3d1] no-underline hover:text-white transition-colors"
+              >
+                {link.label}
+              </a>
+            ))}
+          </nav>
+        </div>
+      ))}
+    </div>
+
+    {/* Bottom row: copyright + legal */}
+    <div class="flex items-center justify-between flex-wrap gap-3 pt-[22px]">
+      <span class="text-[12.5px] text-[#7d8fae]">
+        &copy; {year} DegreeWiki. Independent education search — not affiliated with listed universities.
+      </span>
+      <div class="flex gap-5">
+        <a href="/privacy"    class="text-[12.5px] text-[#9fb3d1] no-underline hover:text-white transition-colors">Privacy</a>
+        <a href="/terms"      class="text-[12.5px] text-[#9fb3d1] no-underline hover:text-white transition-colors">Terms</a>
+        <a href="/disclaimer" class="text-[12.5px] text-[#9fb3d1] no-underline hover:text-white transition-colors">Disclaimer</a>
+      </div>
+    </div>
+
   </div>
 </footer>

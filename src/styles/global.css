@@ -1,1 +1,53 @@
 @import "tailwindcss";
+
+/* DegreeWiki public design system tokens (Phase 55 / 55B).
+   Tailwind v4 CSS-first config — every --color-* generates bg-*, text-*, border-* utilities.
+   Every --font-* generates font-* utilities. */
+@theme {
+  /* ── Page surfaces ─────────────────────────────────────────── */
+  --color-canvas: #faf8f3;          /* warm off-white page background */
+  --color-surface: #ffffff;         /* card / panel surface */
+
+  /* ── Text hierarchy ─────────────────────────────────────────── */
+  --color-ink: #0b1f3a;             /* deep navy — headings, CTA surface, logo */
+  --color-ink-secondary: #334155;   /* secondary text — university names, metadata */
+  --color-ink-tertiary: #475569;    /* nav links, supporting body text */
+  --color-muted: #64748b;           /* metadata, labels, captions */
+  --color-slate-light: #94a3b8;     /* data-cell labels, placeholder text */
+
+  /* ── Primary blue ───────────────────────────────────────────── */
+  --color-primary: #1d4ed8;         /* academic blue — CTA, links, active state */
+  --color-primary-hover: #1e40af;   /* primary button hover */
+  --color-primary-surface: #eff4ff; /* light blue bg — level badges, filter chips */
+  --color-primary-border: #dbe4ff;  /* border for primary-surface elements */
+
+  /* ── Verified / scholarship green ──────────────────────────── */
+  --color-verified: #047857;        /* green text/icon — verified, scholarship */
+  --color-verified-surface: #ecfdf5;/* light green bg */
+  --color-verified-border: #a7f3d0; /* green border */
+
+  /* ── Deadline / warning amber ───────────────────────────────── */
+  --color-deadline: #b45309;        /* amber text/icon — deadline urgency only */
+  --color-deadline-surface: #fffbeb;/* light amber bg */
+  --color-deadline-border: #fcd9a5; /* amber border */
+
+  /* ── Borders ─────────────────────────────────────────────────── */
+  --color-edge: #e2e8f0;            /* standard card / component border */
+  --color-edge-subtle: #eef2f7;     /* inner dividers, data-row separator */
+
+  /* ── IBM Plex type families ─────────────────────────────────── */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* App-wide base styles — kept minimal so admin/auth pages are unaffected. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  body {
+    font-family: var(--font-sans);
+  }
+}

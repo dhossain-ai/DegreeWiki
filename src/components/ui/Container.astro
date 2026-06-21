@@ -1,0 +1,18 @@
+---
+interface Props {
+  as?: keyof HTMLElementTagNameMap
+  width?: 'narrow' | 'default' | 'wide' | 'xl'
+  class?: string
+}
+const { as = 'div', width = 'default', class: className = '' } = Astro.props
+const Tag = as as any
+const widths: Record<string, string> = {
+  narrow:  'max-w-3xl',
+  default: 'max-w-5xl',
+  wide:    'max-w-[1200px]', /* matches design reference 1200px max */
+  xl:      'max-w-7xl',
+}
+---
+<Tag class={`${widths[width]} mx-auto px-4 sm:px-8 ${className}`}>
+  <slot />
+</Tag>
