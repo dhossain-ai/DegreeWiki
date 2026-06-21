@@ -1,0 +1,132 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { forbiddenAdminResponse, requireAdminUser } from '../../../lib/admin/guard'
+import { cloudinaryUrl } from '../../../lib/cloudinary/url'
+
+const guard = await requireAdminUser(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
+
+const { user, supabase } = guard
+
+const { data: canManage } = await supabase.rpc('has_permission', { permission_code: 'manage_media' })
+if (!canManage) return forbiddenAdminResponse()
+
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
+const { data: assets, error } = await supabase
+  .from('media_assets')
+  .select(
+    'id, cloudinary_public_id, cloudinary_url, display_name, alt_text, ' +
+    'media_type, upload_status, is_public, is_reusable, folder, ' +
+    'width, height, format, created_at'
+  )
+  .is('deleted_at', null)
+  .order('created_at', { ascending: false })
+
+type MediaAsset = {
+  id: string
+  cloudinary_public_id: string | null
+  cloudinary_url: string | null
+  display_name: string | null
+  alt_text: string | null
+  media_type: string
+  upload_status: string
+  is_public: boolean
+  is_reusable: boolean
+  folder: string | null
+  width: number | null
+  height: number | null
+  format: string | null
+  created_at: string
+}
+
+const assetList = (assets ?? []) as MediaAsset[]
+
+function thumbUrl(asset: MediaAsset): string | null {
+  if (!asset.cloudinary_public_id || !cloudName || asset.upload_status !== 'ready') {
+    return null
+  }
+  return cloudinaryUrl(cloudName, asset.cloudinary_public_id, { width: 160, height: 160, crop: 'fill' })
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+---
+<AdminLayout title="Media Library — DegreeWiki Admin" activePath="/admin/media" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Media Library</h1>
+    <a href="/admin/media/new"
+      class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      + Upload / Import
+    </a>
+  </div>
+
+  {error && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
+      Could not load media assets. Please try again.
+    </div>
+  )}
+
+  {assetList.length === 0 && !error && (
+    <div class="text-center py-16 text-gray-500">
+      <p class="text-sm">No media assets yet.</p>
+      <a href="/admin/media/new" class="mt-2 inline-block text-sm text-blue-600 hover:underline">
+        Upload or import your first image
+      </a>
+    </div>
+  )}
+
+  {assetList.length > 0 && (
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      {assetList.map(asset => {
+        const thumb = thumbUrl(asset)
+        const label = asset.display_name ?? asset.alt_text ?? asset.cloudinary_public_id ?? 'Untitled'
+        return (
+          <a href={`/admin/media/${asset.id}`}
+            class="group block rounded-lg border border-gray-200 overflow-hidden hover:border-blue-400 hover:shadow-sm transition-all bg-white">
+            <div class="w-full aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+              {thumb ? (
+                <img
+                  src={thumb}
+                  alt={asset.alt_text ?? label}
+                  width="160"
+                  height="160"
+                  loading="lazy"
+                  class="w-full h-full object-cover"
+                />
+              ) : (
+                <span class="text-xs text-gray-400 px-2 text-center leading-tight">
+                  {asset.upload_status === 'ready' ? 'No preview' : asset.upload_status}
+                </span>
+              )}
+            </div>
+            <div class="px-2 py-1.5">
+              <p class="text-xs font-medium text-gray-800 truncate group-hover:text-blue-700" title={label}>
+                {label}
+              </p>
+              <p class="text-xs text-gray-400 mt-0.5 truncate">
+                {asset.folder ?? '—'} · {formatDate(asset.created_at)}
+              </p>
+              <div class="flex gap-1 mt-1 flex-wrap">
+                {asset.is_public ? (
+                  <span class="text-xs px-1 py-0.5 rounded bg-green-100 text-green-700">public</span>
+                ) : (
+                  <span class="text-xs px-1 py-0.5 rounded bg-gray-100 text-gray-500">private</span>
+                )}
+                {asset.upload_status !== 'ready' && (
+                  <span class="text-xs px-1 py-0.5 rounded bg-yellow-100 text-yellow-700">
+                    {asset.upload_status}
+                  </span>
+                )}
+              </div>
+            </div>
+          </a>
+        )
+      })}
+    </div>
+  )}
+</AdminLayout>

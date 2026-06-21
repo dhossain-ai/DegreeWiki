@@ -3,17 +3,17 @@
 > AI agent reading rule:
 > Read this active status file first for current context. Do not read archived status/history files unless the current task explicitly needs older phase details. For old phase details, use `docs/archive/README.md` to choose the smallest relevant archive file.
 
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 56C - Repo Docs Compaction - complete.
-This phase archived the large status/task-log history, added an archive index, and rewrote the active docs into compact entry points.
+Phase 57A - Cloudinary / Media Asset Foundation - complete.
+This phase added the admin media library, signed direct upload, URL import, MediaImage component, and the 022 migration extending media_assets/entity_media.
+Entity image attachment (country/university/scholarship/article forms and public page rendering) is deferred to Phase 57B.
 
 Current branch / git status note:
 - Branch: `main`
-- The worktree was already dirty before this phase, with unrelated admin UI/source changes still pending in the repo.
-- This phase only changed docs and archive files.
+- Worktree was clean before Phase 57A. All Phase 57A changes are uncommitted and ready for review.
 
 ## Current Product Summary
 
@@ -28,15 +28,6 @@ Current branch / git status note:
 - Public UI built from Astro components and design tokens.
 - Fit Finder AI runtime that can fall back to rule-based results when AI is unavailable.
 
-## Safety Rules
-
-- This phase is docs-only.
-- Do not change source code, migrations, package files, or dependency state unless a later task explicitly asks for that.
-- Keep RLS and Supabase permissions as the final enforcement layer.
-- Avoid service-role access in page code.
-- Keep public/admin routing logic role-aware and server-side.
-- When a question involves old history, open `docs/archive/README.md` first and then the smallest relevant archive file.
-
 ## Current Architecture Decisions
 
 - Admin access is role-based, not email-based.
@@ -44,10 +35,15 @@ Current branch / git status note:
 - Admin sidebar navigation is permission-filtered for clarity, but direct route access still depends on admin-role admission plus RLS/permissions.
 - Public pages use the locked design system and token-based UI components.
 - Fit Finder AI remains fail-closed and can show rule-based matches without an AI summary.
-- Docs are now split into compact active files plus archive files for older history.
+- Docs are split into compact active files plus archive files for older history.
+- Cloudinary stores and delivers media assets. Supabase stores metadata. Secrets stay server-only.
+- Upload flow: server-signed direct browser → Cloudinary upload; server verifies response signature before DB insert.
+- URL import: server calls Cloudinary upload API with SSRF-guarded remote URL.
+- Entity image attachment (FK columns → form pickers → public rendering) is deferred to Phase 57B.
 
 ## Last Completed Phases
 
+- Phase 57A: Cloudinary/media asset foundation; migration 022, admin media library, signed upload, URL import, MediaImage component.
 - Phase 56C: repo docs compaction complete; exact snapshots were taken, archive files were created, and the active docs were rewritten.
 - Phase 56B: admin-role QA and navigation hardening; shared 403 helper plus filtered sidebar links.
 - Phase 56A: auth role routing fix; admin users route to `/admin`, student users route to `/account`.
@@ -55,22 +51,18 @@ Current branch / git status note:
 - Phase 55E: program discovery redesign bundle.
 - Phase 55D: homepage visual QA and responsive polish.
 - Phase 55C: homepage redesign implementation.
-- Phase 55B: public design system foundation.
-- Phase 55A: locked design reference files and normalized public direction docs.
 
 ## Known Active Issues
 
-- The worktree is still dirty with unrelated admin/source changes that predate this docs phase.
+- Entity image slots (cover_image_id for cities/subjects, logo_id/cover_image_id for scholarships) are not yet in the schema — deferred to Phase 57B.
+- Admin entity forms (countries, universities, articles, etc.) do not yet have image pickers — deferred to Phase 57B.
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
-- Some admin URLs can still be opened directly by admin-role users unless the page logic or RLS blocks the action.
 - Dashboard count cards are not fully permission-tailored yet.
-- In-page action visibility still needs section-by-section hardening.
 
 ## Immediate Next Phases
 
-- Verify this compaction pass with line counts, git status, and archive checks.
-- Resume product hardening with admin route permission boundaries and in-page permission gating.
-- Keep using the compact active docs for day-to-day context and only open archive files when a task needs older phase detail.
+- Phase 57B: entity image attachment — add missing FK columns, MediaPicker component, image slots in admin forms, image rendering on public entity pages.
+- Continue admin permission boundary hardening.
 
 ## Archive Map
 

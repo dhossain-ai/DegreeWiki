@@ -1,0 +1,51 @@
+---
+// Safe for public and server use. Does not import secrets.
+// Only PUBLIC_CLOUDINARY_CLOUD_NAME is used here.
+import { cloudinaryUrl, type CloudinaryUrlOpts } from '../../lib/cloudinary/url'
+
+interface Props {
+  publicId: string | null | undefined
+  alt: string
+  width?: number
+  height?: number
+  crop?: CloudinaryUrlOpts['crop']
+  class?: string
+  loading?: 'lazy' | 'eager'
+  fallbackText?: string
+}
+
+const {
+  publicId,
+  alt,
+  width,
+  height,
+  crop = 'fill',
+  class: className,
+  loading = 'lazy',
+  fallbackText,
+} = Astro.props
+
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
+const src = publicId && cloudName
+  ? cloudinaryUrl(cloudName, publicId, { width, height, crop })
+  : null
+---
+{src ? (
+  <img
+    src={src}
+    alt={alt}
+    width={width}
+    height={height}
+    loading={loading}
+    class={className}
+  />
+) : (
+  <span
+    class={className}
+    aria-label={alt}
+    role="img"
+  >
+    {fallbackText ?? alt}
+  </span>
+)}

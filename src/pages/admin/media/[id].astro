@@ -1,0 +1,306 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { forbiddenAdminResponse, requireAdminUser } from '../../../lib/admin/guard'
+import { cloudinaryUrl } from '../../../lib/cloudinary/url'
+
+const guard = await requireAdminUser(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
+
+const { user, supabase } = guard
+
+const { data: canManage } = await supabase.rpc('has_permission', { permission_code: 'manage_media' })
+if (!canManage) return forbiddenAdminResponse()
+
+const { id } = Astro.params
+
+if (!id) return Astro.redirect('/admin/media')
+
+const { data: asset, error: fetchError } = await supabase
+  .from('media_assets')
+  .select(
+    'id, cloudinary_public_id, cloudinary_url, cloudinary_asset_id, ' +
+    'cloudinary_version, cloudinary_resource_type, display_name, alt_text, ' +
+    'attribution, caption, credit_text, license_type, license_url, ' +
+    'copyright_owner, media_type, upload_status, is_public, is_reusable, ' +
+    'folder, source_type, source_url, width, height, file_size_bytes, ' +
+    'format, deleted_at, created_at, updated_at'
+  )
+  .eq('id', id)
+  .single()
+
+if (fetchError || !asset) {
+  return Astro.redirect('/admin/media')
+}
+
+type MediaAsset = typeof asset & {
+  cloudinary_public_id: string | null
+  deleted_at: string | null
+}
+const typedAsset = asset as MediaAsset
+
+const LICENSE_TYPES = [
+  { value: '', label: '— none —' },
+  { value: 'owned', label: 'Owned / Original' },
+  { value: 'royalty_free', label: 'Royalty Free' },
+  { value: 'cc0', label: 'CC0 (Public Domain)' },
+  { value: 'cc_by', label: 'CC BY' },
+  { value: 'cc_by_sa', label: 'CC BY-SA' },
+  { value: 'editorial', label: 'Editorial' },
+  { value: 'other', label: 'Other' },
+]
+
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
+const previewUrl = typedAsset.cloudinary_public_id && cloudName && typedAsset.upload_status === 'ready'
+  ? cloudinaryUrl(cloudName, typedAsset.cloudinary_public_id, { width: 400, height: 400, crop: 'fit' })
+  : null
+
+let successMessage = ''
+let serverError = ''
+let values = {
+  display_name:    String(typedAsset.display_name    ?? ''),
+  alt_text:        String(typedAsset.alt_text        ?? ''),
+  caption:         String(typedAsset.caption         ?? ''),
+  credit_text:     String(typedAsset.credit_text     ?? ''),
+  license_type:    String(typedAsset.license_type    ?? ''),
+  license_url:     String(typedAsset.license_url     ?? ''),
+  copyright_owner: String(typedAsset.copyright_owner ?? ''),
+  is_public:       typedAsset.is_public  as boolean,
+  is_reusable:     typedAsset.is_reusable as boolean,
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  const action = String(form.get('_action') ?? 'save')
+
+  if (action === 'soft_delete') {
+    if (typedAsset.deleted_at) {
+      serverError = 'This asset is already archived.'
+    } else {
+      const { error: delError } = await supabase
+        .from('media_assets')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+
+      if (delError) {
+        serverError = 'Could not archive the asset. Please try again.'
+      } else {
+        return Astro.redirect('/admin/media')
+      }
+    }
+  } else {
+    const VALID_LICENSE_TYPES = ['owned','cc_by','cc_by_sa','cc0','royalty_free','editorial','other']
+    const rawLicense = String(form.get('license_type') ?? '')
+
+    values = {
+      display_name:    String(form.get('display_name')    ?? '').trim(),
+      alt_text:        String(form.get('alt_text')        ?? '').trim(),
+      caption:         String(form.get('caption')         ?? '').trim(),
+      credit_text:     String(form.get('credit_text')     ?? '').trim(),
+      license_type:    VALID_LICENSE_TYPES.includes(rawLicense) ? rawLicense : '',
+      license_url:     String(form.get('license_url')     ?? '').trim(),
+      copyright_owner: String(form.get('copyright_owner') ?? '').trim(),
+      is_public:       form.get('is_public')   === 'on',
+      is_reusable:     form.get('is_reusable') === 'on',
+    }
+
+    const { error: updateError } = await supabase
+      .from('media_assets')
+      .update({
+        display_name:    values.display_name    || null,
+        alt_text:        values.alt_text        || null,
+        caption:         values.caption         || null,
+        credit_text:     values.credit_text     || null,
+        license_type:    values.license_type    || null,
+        license_url:     values.license_url     || null,
+        copyright_owner: values.copyright_owner || null,
+        is_public:       values.is_public,
+        is_reusable:     values.is_reusable,
+      })
+      .eq('id', id)
+
+    if (updateError) {
+      serverError = 'Could not save. Please try again.'
+    } else {
+      successMessage = 'Changes saved.'
+    }
+  }
+}
+
+function formatBytes(bytes: number | null): string {
+  if (!bytes) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+const pageTitle = values.display_name || typedAsset.cloudinary_public_id || 'Media Asset'
+const isDeleted = !!typedAsset.deleted_at
+---
+<AdminLayout title={`${pageTitle} — DegreeWiki Admin`} activePath="/admin/media" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900 truncate max-w-xl">{pageTitle}</h1>
+    <a href="/admin/media" class="text-sm text-gray-500 hover:underline shrink-0 ml-4">← Back to Media Library</a>
+  </div>
+
+  {isDeleted && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
+      This asset has been archived and is no longer publicly accessible.
+    </div>
+  )}
+
+  {serverError && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
+  )}
+
+  {successMessage && (
+    <div class="mb-4 px-4 py-3 rounded-md bg-green-50 border border-green-200 text-sm text-green-700">{successMessage}</div>
+  )}
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+    <!-- Preview column -->
+    <div class="md:col-span-1">
+      <div class="rounded-lg border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center aspect-square">
+        {previewUrl ? (
+          <img
+            src={previewUrl}
+            alt={values.alt_text || pageTitle}
+            width="400"
+            height="400"
+            class="object-contain w-full h-full"
+          />
+        ) : (
+          <span class="text-sm text-gray-400 text-center px-4">
+            {typedAsset.upload_status !== 'ready' ? `Status: ${typedAsset.upload_status}` : 'No preview available'}
+          </span>
+        )}
+      </div>
+
+      <!-- Read-only Cloudinary info -->
+      <div class="mt-4 space-y-2 text-xs text-gray-500">
+        <div><span class="font-medium text-gray-700">Public ID</span><br /><span class="font-mono break-all">{typedAsset.cloudinary_public_id ?? '—'}</span></div>
+        <div><span class="font-medium text-gray-700">Dimensions</span><br />{typedAsset.width && typedAsset.height ? `${typedAsset.width} × ${typedAsset.height}px` : '—'}</div>
+        <div><span class="font-medium text-gray-700">Format</span><br />{typedAsset.format ?? '—'}</div>
+        <div><span class="font-medium text-gray-700">File size</span><br />{formatBytes(typedAsset.file_size_bytes as number | null)}</div>
+        <div><span class="font-medium text-gray-700">Source</span><br />{typedAsset.source_type ?? '—'}</div>
+        {typedAsset.source_url && (
+          <div><span class="font-medium text-gray-700">Source URL</span><br /><span class="break-all">{typedAsset.source_url}</span></div>
+        )}
+        <div><span class="font-medium text-gray-700">Folder</span><br />{typedAsset.folder ?? '—'}</div>
+        <div><span class="font-medium text-gray-700">Upload status</span><br />{typedAsset.upload_status}</div>
+        <div><span class="font-medium text-gray-700">Created</span><br />{formatDate(typedAsset.created_at as string)}</div>
+        <div><span class="font-medium text-gray-700">Updated</span><br />{formatDate(typedAsset.updated_at as string)}</div>
+        {typedAsset.cloudinary_url && (
+          <div>
+            <span class="font-medium text-gray-700">Cloudinary URL</span><br />
+            <a href={String(typedAsset.cloudinary_url)} target="_blank" rel="noopener noreferrer"
+              class="text-blue-600 hover:underline break-all">
+              Open original
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <!-- Edit form column -->
+    <div class="md:col-span-2">
+      <form method="post" class="space-y-4">
+        <input type="hidden" name="_action" value="save" />
+
+        <div>
+          <label for="display_name" class="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+          <input type="text" id="display_name" name="display_name" value={values.display_name}
+            placeholder="Friendly name for the media library"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div>
+          <label for="alt_text" class="block text-sm font-medium text-gray-700 mb-1">Alt Text</label>
+          <input type="text" id="alt_text" name="alt_text" value={values.alt_text}
+            placeholder="Describe the image for accessibility"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div>
+          <label for="caption" class="block text-sm font-medium text-gray-700 mb-1">Caption</label>
+          <input type="text" id="caption" name="caption" value={values.caption}
+            placeholder="Optional editorial caption"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div>
+          <label for="credit_text" class="block text-sm font-medium text-gray-700 mb-1">Credit / Attribution</label>
+          <input type="text" id="credit_text" name="credit_text" value={values.credit_text}
+            placeholder="Photographer or source name"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="license_type" class="block text-sm font-medium text-gray-700 mb-1">License</label>
+            <select id="license_type" name="license_type"
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {LICENSE_TYPES.map(lt => (
+                <option value={lt.value} selected={values.license_type === lt.value}>{lt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label for="license_url" class="block text-sm font-medium text-gray-700 mb-1">License URL</label>
+            <input type="url" id="license_url" name="license_url" value={values.license_url}
+              placeholder="https://..."
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+        </div>
+
+        <div>
+          <label for="copyright_owner" class="block text-sm font-medium text-gray-700 mb-1">Copyright Owner</label>
+          <input type="text" id="copyright_owner" name="copyright_owner" value={values.copyright_owner}
+            placeholder="Name of the copyright holder"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div class="flex gap-6">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" name="is_public" id="is_public" checked={values.is_public}
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+            <span class="text-sm text-gray-700">Make public</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" name="is_reusable" id="is_reusable" checked={values.is_reusable}
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+            <span class="text-sm text-gray-700">Reusable (media picker)</span>
+          </label>
+        </div>
+
+        <div class="flex items-center gap-3 pt-2 flex-wrap">
+          <button type="submit"
+            class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+            Save Changes
+          </button>
+          <a href="/admin/media" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+
+          {!isDeleted && (
+            <form method="post" class="ml-auto"
+              onsubmit="return confirm('Archive this asset? It will be hidden from public pages.')">
+              <input type="hidden" name="_action" value="soft_delete" />
+              <button type="submit"
+                class="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 rounded-md hover:bg-red-50">
+                Archive
+              </button>
+            </form>
+          )}
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>

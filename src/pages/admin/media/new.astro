@@ -1,0 +1,305 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { forbiddenAdminResponse, requireAdminUser } from '../../../lib/admin/guard'
+import { ALLOWED_SUBFOLDERS } from '../../../lib/cloudinary/config'
+
+const guard = await requireAdminUser(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
+
+const { user, supabase } = guard
+
+const { data: canManage } = await supabase.rpc('has_permission', { permission_code: 'manage_media' })
+if (!canManage) return forbiddenAdminResponse()
+
+const LICENSE_TYPES = [
+  { value: '', label: '— none —' },
+  { value: 'owned', label: 'Owned / Original' },
+  { value: 'royalty_free', label: 'Royalty Free' },
+  { value: 'cc0', label: 'CC0 (Public Domain)' },
+  { value: 'cc_by', label: 'CC BY' },
+  { value: 'cc_by_sa', label: 'CC BY-SA' },
+  { value: 'editorial', label: 'Editorial' },
+  { value: 'other', label: 'Other' },
+]
+---
+<AdminLayout title="Upload / Import Media — DegreeWiki Admin" activePath="/admin/media" userEmail={user.email ?? ''}>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-bold text-gray-900">Upload / Import Media</h1>
+    <a href="/admin/media" class="text-sm text-gray-500 hover:underline">← Back to Media Library</a>
+  </div>
+
+  <div id="error-banner" class="hidden mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700"></div>
+  <div id="progress-banner" class="hidden mb-4 px-4 py-3 rounded-md bg-blue-50 border border-blue-200 text-sm text-blue-700"></div>
+
+  <!-- Mode selector -->
+  <div class="mb-6 flex gap-4">
+    <label class="flex items-center gap-2 cursor-pointer">
+      <input type="radio" name="mode" value="upload" id="mode-upload" checked
+        class="text-blue-600 focus:ring-blue-500" />
+      <span class="text-sm font-medium text-gray-700">Upload File</span>
+    </label>
+    <label class="flex items-center gap-2 cursor-pointer">
+      <input type="radio" name="mode" value="import" id="mode-import"
+        class="text-blue-600 focus:ring-blue-500" />
+      <span class="text-sm font-medium text-gray-700">Import from URL</span>
+    </label>
+  </div>
+
+  <div class="max-w-xl space-y-4">
+    <!-- File upload section -->
+    <div id="section-upload">
+      <label for="file-input" class="block text-sm font-medium text-gray-700 mb-1">Image File *</label>
+      <input type="file" id="file-input" accept="image/*"
+        class="w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+      <p class="mt-1 text-xs text-gray-500">Accepted: jpg, jpeg, png, webp, gif, svg, avif</p>
+    </div>
+
+    <!-- URL import section -->
+    <div id="section-import" class="hidden">
+      <label for="import-url" class="block text-sm font-medium text-gray-700 mb-1">Image URL *</label>
+      <input type="url" id="import-url" placeholder="https://example.com/image.jpg"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <p class="mt-1 text-xs text-gray-500">Must be a public HTTPS URL. Cloudinary will fetch the image.</p>
+    </div>
+
+    <!-- Shared metadata fields -->
+    <hr class="my-2 border-gray-200" />
+
+    <div>
+      <label for="subfolder" class="block text-sm font-medium text-gray-700 mb-1">Folder *</label>
+      <select id="subfolder"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        {ALLOWED_SUBFOLDERS.map(f => (
+          <option value={f}>{f}</option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label for="display-name" class="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+      <input type="text" id="display-name" placeholder="Friendly name for the media library"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div>
+      <label for="alt-text" class="block text-sm font-medium text-gray-700 mb-1">Alt Text</label>
+      <input type="text" id="alt-text" placeholder="Describe the image for accessibility"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div>
+      <label for="caption" class="block text-sm font-medium text-gray-700 mb-1">Caption</label>
+      <input type="text" id="caption" placeholder="Optional editorial caption"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div>
+      <label for="credit-text" class="block text-sm font-medium text-gray-700 mb-1">Credit / Attribution</label>
+      <input type="text" id="credit-text" placeholder="Photographer or source name"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label for="license-type" class="block text-sm font-medium text-gray-700 mb-1">License</label>
+        <select id="license-type"
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          {LICENSE_TYPES.map(lt => (
+            <option value={lt.value}>{lt.label}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label for="license-url" class="block text-sm font-medium text-gray-700 mb-1">License URL</label>
+        <input type="url" id="license-url" placeholder="https://..."
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+    </div>
+
+    <div>
+      <label for="copyright-owner" class="block text-sm font-medium text-gray-700 mb-1">Copyright Owner</label>
+      <input type="text" id="copyright-owner" placeholder="Name of the copyright holder"
+        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+
+    <div class="flex gap-6">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="is-public"
+          class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+        <span class="text-sm text-gray-700">Make public</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="is-reusable" checked
+          class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+        <span class="text-sm text-gray-700">Reusable (media picker)</span>
+      </label>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="button" id="submit-btn"
+        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
+        Upload / Import
+      </button>
+      <a href="/admin/media" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+  // Mode toggle
+  const modeUpload = document.getElementById('mode-upload') as HTMLInputElement
+  const modeImport = document.getElementById('mode-import') as HTMLInputElement
+  const sectionUpload = document.getElementById('section-upload') as HTMLElement
+  const sectionImport = document.getElementById('section-import') as HTMLElement
+
+  function updateMode() {
+    const isImport = modeImport.checked
+    sectionUpload.classList.toggle('hidden', isImport)
+    sectionImport.classList.toggle('hidden', !isImport)
+  }
+
+  modeUpload.addEventListener('change', updateMode)
+  modeImport.addEventListener('change', updateMode)
+
+  // Form helpers
+  const errorBanner = document.getElementById('error-banner') as HTMLElement
+  const progressBanner = document.getElementById('progress-banner') as HTMLElement
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement
+
+  function showError(msg: string) {
+    errorBanner.textContent = msg
+    errorBanner.classList.remove('hidden')
+    progressBanner.classList.add('hidden')
+    submitBtn.disabled = false
+  }
+
+  function showProgress(msg: string) {
+    progressBanner.textContent = msg
+    progressBanner.classList.remove('hidden')
+    errorBanner.classList.add('hidden')
+    submitBtn.disabled = true
+  }
+
+  function clearBanners() {
+    errorBanner.classList.add('hidden')
+    progressBanner.classList.add('hidden')
+  }
+
+  function collectMetadata() {
+    return {
+      subfolder:       (document.getElementById('subfolder')        as HTMLSelectElement).value,
+      display_name:    (document.getElementById('display-name')     as HTMLInputElement).value.trim(),
+      alt_text:        (document.getElementById('alt-text')         as HTMLInputElement).value.trim(),
+      caption:         (document.getElementById('caption')          as HTMLInputElement).value.trim(),
+      credit_text:     (document.getElementById('credit-text')      as HTMLInputElement).value.trim(),
+      license_type:    (document.getElementById('license-type')     as HTMLSelectElement).value,
+      license_url:     (document.getElementById('license-url')      as HTMLInputElement).value.trim(),
+      copyright_owner: (document.getElementById('copyright-owner')  as HTMLInputElement).value.trim(),
+      is_public:       (document.getElementById('is-public')        as HTMLInputElement).checked,
+      is_reusable:     (document.getElementById('is-reusable')      as HTMLInputElement).checked,
+    }
+  }
+
+  // File upload flow
+  async function handleFileUpload() {
+    const fileInput = document.getElementById('file-input') as HTMLInputElement
+    const file = fileInput.files?.[0]
+    if (!file) {
+      showError('Please select a file to upload.')
+      return
+    }
+
+    const meta = collectMetadata()
+
+    // Step 1: get signed upload params
+    showProgress('Preparing upload…')
+    let signData: Record<string, unknown>
+    try {
+      const signResp = await fetch('/api/admin/media/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subfolder: meta.subfolder, timestamp: Math.floor(Date.now() / 1000) }),
+      })
+      signData = await signResp.json() as Record<string, unknown>
+      if (!signData['ok']) throw new Error(String(signData['error'] ?? 'sign_failed'))
+    } catch {
+      showError('Could not prepare the upload. Please try again.')
+      return
+    }
+
+    // Step 2: upload file directly to Cloudinary
+    showProgress('Uploading to Cloudinary…')
+    let cloudData: Record<string, unknown>
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('api_key',         String(signData['api_key']))
+      form.append('timestamp',       String(signData['timestamp']))
+      form.append('signature',       String(signData['signature']))
+      form.append('folder',          String(signData['folder']))
+      form.append('resource_type',   String(signData['resource_type']))
+      form.append('allowed_formats', String(signData['allowed_formats']))
+
+      const cloudResp = await fetch(
+        `https://api.cloudinary.com/v1_1/${signData['cloud_name']}/image/upload`,
+        { method: 'POST', body: form },
+      )
+      cloudData = await cloudResp.json() as Record<string, unknown>
+      if (!cloudResp.ok) throw new Error(String((cloudData['error'] as Record<string,unknown>)?.['message'] ?? 'upload_failed'))
+    } catch {
+      showError('Upload to Cloudinary failed. Check the file type and try again.')
+      return
+    }
+
+    // Step 3: save metadata to database
+    showProgress('Saving to media library…')
+    try {
+      const saveResp = await fetch('/api/admin/media/complete-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cloudData, ...meta }),
+      })
+      const saveData = await saveResp.json() as Record<string, unknown>
+      if (!saveData['ok']) throw new Error(String(saveData['error'] ?? 'save_failed'))
+      window.location.href = `/admin/media/${saveData['id']}`
+    } catch {
+      showError('Upload succeeded but could not save to database. Please contact support.')
+    }
+  }
+
+  // URL import flow
+  async function handleUrlImport() {
+    const urlInput = document.getElementById('import-url') as HTMLInputElement
+    const sourceUrl = urlInput.value.trim()
+    if (!sourceUrl) {
+      showError('Please enter a URL to import.')
+      return
+    }
+
+    const meta = collectMetadata()
+    showProgress('Importing from URL…')
+
+    try {
+      const resp = await fetch('/api/admin/media/import-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_url: sourceUrl, ...meta }),
+      })
+      const data = await resp.json() as Record<string, unknown>
+      if (!data['ok']) throw new Error(String(data['error'] ?? 'import_failed'))
+      window.location.href = `/admin/media/${data['id']}`
+    } catch {
+      showError('Import failed. Check the URL is a public HTTPS image and try again.')
+    }
+  }
+
+  submitBtn.addEventListener('click', () => {
+    clearBanners()
+    if (modeImport.checked) {
+      handleUrlImport()
+    } else {
+      handleFileUpload()
+    }
+  })
+</script>

@@ -16,6 +16,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: '/admin/programs', label: 'Programs', requiredPermissions: ['edit_content', 'publish_content', 'manage_programs'] },
   { href: '/admin/scholarships', label: 'Scholarships', requiredPermissions: ['edit_content', 'publish_content', 'manage_scholarships'] },
   { href: '/admin/articles', label: 'Articles', requiredPermissions: ['edit_content', 'publish_content', 'manage_articles'] },
+  { href: '/admin/media', label: 'Media', requiredPermissions: ['manage_media'] },
   { href: '/admin/data-quality', label: 'Data Quality', requiredPermissions: ['view_data_quality', 'manage_data_sources'] },
   { href: '/admin/imports', label: 'Imports', requiredPermissions: ['manage_imports', 'approve_import', 'reject_import'] },
   { href: '/admin/users', label: 'Users', requiredPermissions: ['manage_users', 'manage_roles'] },

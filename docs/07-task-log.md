@@ -136,9 +136,86 @@ Notes:
 - Non-phase foundation entries were grouped into the phase 01-10 archive.
 - The standalone Phase 28 tail entry was grouped into the phase 21-30 archive by its phase number.
 
+## 2026-06-22 - Phase 57A: Cloudinary / Media Asset Foundation
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Add the missing application-layer media foundation on top of the existing 003_media.sql schema.
+- Extend media_assets and entity_media with provenance, soft-delete, and override columns.
+- Add admin media library with signed upload, URL import, and metadata editing.
+- Add public MediaImage component.
+
+Schema context:
+- 003_media.sql (already applied) created media_assets, entity_media, and all RLS policies using manage_media.
+- 015_seed_data.sql (already applied) seeded manage_media and assigned it to content_admin and super_admin.
+- Phase 57A adds migration 022 to extend those tables — does not recreate them.
+
+Core findings:
+- Direct FK columns already existed: countries.og_image_id, universities.logo_id/cover_image_id/og_image_id, scholarships.og_image_id, articles.featured_image_id/og_image_id.
+- No Cloudinary lib files, admin media pages, or API endpoints existed before this phase.
+- No Cloudinary SDK installed — all signing and upload calls use Web Crypto + fetch (Cloudflare-compatible).
+
+Migration:
+- supabase/migrations/022_media_extended.sql:
+  - Extends media_assets with cloudinary_asset_id, cloudinary_version, cloudinary_resource_type, display_name, caption, folder, source_type, source_url, credit_text, license_type, license_url, copyright_owner, is_reusable, deleted_at.
+  - Drops and recreates media_assets_select_public_ready to add deleted_at IS NULL guard.
+  - Extends entity_media with is_primary, alt_text_override, caption_override, updated_at.
+  - Creates idempotent updated_at trigger (DO $$ ... $$ block checking pg_trigger).
+  - Creates UNIQUE partial index idx_entity_media_primary_unique (entity_type, entity_id, role) WHERE is_primary = true.
+
+Library files created:
+- src/lib/cloudinary/config.ts: reads env vars, validates, returns CloudinaryConfig; defines ALLOWED_SUBFOLDERS.
+- src/lib/cloudinary/url.ts: cloudinaryUrl() builder with f_auto/q_auto; no secrets; safe for public components.
+- src/lib/cloudinary/upload.ts: signCloudinaryParams() (SHA-256/SHA-1 via crypto.subtle), verifyCloudinaryResponseSignature(), validateImportUrl() (SSRF guard), callCloudinaryUploadApi().
+
+API endpoints created:
+- src/pages/api/admin/media/sign-upload.ts: generates server-signed upload params for browser-to-Cloudinary direct upload.
+- src/pages/api/admin/media/complete-upload.ts: verifies Cloudinary response signature before inserting into media_assets.
+- src/pages/api/admin/media/import-url.ts: SSRF-guarded URL import via Cloudinary upload API (fetch-based).
+
+Admin pages created:
+- src/pages/admin/media/index.astro: grid list of non-deleted assets, thumbnails via cloudinaryUrl, links to new/edit.
+- src/pages/admin/media/new.astro: mode selector (upload file / import URL), shared metadata fields, JS-driven both flows.
+- src/pages/admin/media/[id].astro: image preview, editable metadata, read-only Cloudinary fields, soft-delete (sets deleted_at).
+
+Component created:
+- src/components/public/MediaImage.astro: accepts publicId + required alt; renders optimized img or accessible fallback span; no secrets; no set:html.
+
+Navigation updated:
+- src/lib/admin/navigation.ts: added Media Library nav item with requiredPermissions: ['manage_media'].
+
+Env example updated:
+- .env.example: added PUBLIC_CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET, CLOUDINARY_UPLOAD_FOLDER, CLOUDINARY_SIGNATURE_ALGORITHM with security comments.
+
+Security measures:
+- CLOUDINARY_API_SECRET stays server-only; never returned to browser.
+- sign-upload returns only signature + timestamp + api_key (not secret).
+- complete-upload verifies Cloudinary response signature before any DB write.
+- import-url rejects non-HTTPS, localhost, 10.x, 127.x, 192.168.x, 172.16–31.x, ::1.
+- Folder containment: subfolder must be in allowed list; full path always under CLOUDINARY_UPLOAD_FOLDER/.
+- resource_type: 'image' enforced in allowed_formats signed param and in complete-upload validation.
+- All media endpoints: requireAdminUser + has_permission('manage_media') RPC check.
+- No service role used in any media page or endpoint.
+
+Validation:
+- npm run build: PASS.
+- service_role grep: zero new matches in Phase 57A files.
+- set:html / innerHTML grep: zero matches in Phase 57A files.
+- Cloudinary secret exposure grep: zero matches for PUBLIC_CLOUDINARY_API_SECRET or PUBLIC_CLOUDINARY_API_KEY.
+
+Deferred to Phase 57B:
+- Adding cover_image_id to cities/subjects, logo_id/cover_image_id to scholarships.
+- MediaPicker component for entity form image attachment.
+- Image slots in admin country/university/scholarship/article forms.
+- Image rendering on public entity pages.
+- Cloudinary hard-delete (destroy API).
+- Public entity_media SELECT (gallery support).
+
 ## Current / Open Notes
 
-- The worktree still contains unrelated pending admin UI/source changes from prior work.
-- The active docs now point to the archive README first, which should cut context usage in normal sessions.
+- Phase 57A changes are uncommitted and ready for review before commit.
+- Entity image attachment to public pages deferred to Phase 57B.
+- Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).
 - If a future task needs older history, open the smallest relevant archive file instead of rereading the full snapshots.
-- The next product hardening direction remains admin route permission boundaries and in-page permission gating.
