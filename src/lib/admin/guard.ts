@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js'
 import type { AstroCookies } from 'astro'
+import { userHasAdminRole } from '../auth/dashboard'
 import { createClient } from '../supabase/server'
 
 type GuardResult =
@@ -7,7 +8,7 @@ type GuardResult =
   | { type: 'forbidden' }
   | { type: 'ok'; user: User; supabase: ReturnType<typeof createClient> }
 
-export async function requireSuperAdmin(
+export async function requireAdminUser(
   cookies: AstroCookies,
   request: Request,
   requestPath: string,
@@ -20,13 +21,11 @@ export async function requireSuperAdmin(
     return { type: 'redirect', to: `/login?redirect=${encodeURIComponent(requestPath)}` }
   }
 
-  const { data: isSuperAdmin, error: roleError } = await supabase.rpc('has_role', {
-    role_code: 'super_admin',
-  })
-
-  if (roleError || !isSuperAdmin) {
+  if (!(await userHasAdminRole(supabase))) {
     return { type: 'forbidden' }
   }
 
   return { type: 'ok', user, supabase }
 }
+
+export const requireSuperAdmin = requireAdminUser
