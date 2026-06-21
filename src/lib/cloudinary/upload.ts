@@ -26,16 +26,26 @@ function toSubtleAlgorithm(algorithm: SignatureAlgorithm): 'SHA-256' | 'SHA-1' {
 // Signs a set of upload parameters for the Cloudinary upload API.
 // The string-to-sign is: sorted_params_string + api_secret
 //   where sorted_params_string is "&"-joined "key=value" pairs sorted
-//   alphabetically by key. The api_key parameter must NOT be included.
+//   alphabetically by key. Cloudinary request metadata such as api_key,
+//   cloud_name, file, resource_type, and signature must NOT be included.
 //
 // Returns the hex-encoded hash.
 // ---------------------------------------------------------------------------
+const UNSIGNED_UPLOAD_PARAM_KEYS = new Set([
+  'api_key',
+  'cloud_name',
+  'file',
+  'resource_type',
+  'signature',
+])
+
 export async function signCloudinaryParams(
   params: Record<string, string | number>,
   apiSecret: string,
   algorithm: SignatureAlgorithm = 'sha256',
 ): Promise<string> {
   const sorted = Object.keys(params)
+    .filter(k => !UNSIGNED_UPLOAD_PARAM_KEYS.has(k))
     .sort()
     .map(k => `${k}=${params[k]}`)
     .join('&')
@@ -49,6 +59,8 @@ export async function signCloudinaryParams(
 // Verifies the `signature` field returned in a Cloudinary upload response.
 // Cloudinary computes this as:
 //   hash("public_id=" + public_id + "&version=" + version + api_secret)
+// Cloudinary's response signature examples use SHA-1; callers may pass
+// sha256 as a fallback for accounts configured that way.
 //
 // Returns true only if the computed hash matches the provided signature.
 // Call this in complete-upload.ts before inserting into the database.
@@ -58,7 +70,7 @@ export async function verifyCloudinaryResponseSignature({
   version,
   signature,
   apiSecret,
-  algorithm = 'sha256',
+  algorithm = 'sha1',
 }: {
   publicId: string
   version: string | number
@@ -122,6 +134,14 @@ export function validateImportUrl(
   return { ok: true }
 }
 
+function getCloudinaryErrorMessage(json: Record<string, unknown>): string {
+  const error = json['error']
+  if (!error || typeof error !== 'object') return 'unknown_error'
+
+  const message = (error as Record<string, unknown>)['message']
+  return typeof message === 'string' && message ? message : 'unknown_error'
+}
+
 // ---------------------------------------------------------------------------
 // callCloudinaryUploadApi
 //
@@ -148,8 +168,12 @@ export async function callCloudinaryUploadApi(
   const json = await resp.json() as Record<string, unknown>
 
   if (!resp.ok) {
-    // Log server-side detail; do not surface to caller
-    console.error('Cloudinary upload API error:', resp.status, json)
+    if (import.meta.env.DEV) {
+      console.error('Cloudinary upload API error:', {
+        status: resp.status,
+        message: getCloudinaryErrorMessage(json),
+      })
+    }
     throw new Error('cloudinary_upload_failed')
   }
 

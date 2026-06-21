@@ -16,7 +16,11 @@
 
 import type { APIRoute } from 'astro'
 import { createClient } from '../../../../lib/supabase/server'
-import { getCloudinaryConfig, isAllowedSubfolder } from '../../../../lib/cloudinary/config'
+import {
+  getCloudinaryConfig,
+  isAllowedSubfolder,
+  type SignatureAlgorithm,
+} from '../../../../lib/cloudinary/config'
 import { verifyCloudinaryResponseSignature } from '../../../../lib/cloudinary/upload'
 
 const VALID_LICENSE_TYPES = [
@@ -30,6 +34,76 @@ function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
+type DevErrorInfo = {
+  stage: string
+  code?: string
+  message?: string
+  details?: string
+  hint?: string
+}
+
+type SupabaseErrorLike = {
+  code?: unknown
+  message?: unknown
+  details?: unknown
+  hint?: unknown
+}
+
+function asSafeString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined
+}
+
+function sanitizeSupabaseError(stage: string, error: SupabaseErrorLike | null): DevErrorInfo {
+  return {
+    stage,
+    code: asSafeString(error?.code),
+    message: asSafeString(error?.message),
+    details: asSafeString(error?.details),
+    hint: asSafeString(error?.hint),
+  }
+}
+
+function logDevInfo(info: DevErrorInfo) {
+  console.error('complete-upload:', info)
+}
+
+function errorResponse(status: number, error: string, devInfo?: DevErrorInfo): Response {
+  const body: Record<string, unknown> = { ok: false, error }
+  if (import.meta.env.DEV && devInfo) body['debug'] = devInfo
+  return jsonResponse(status, body)
+}
+
+async function getMatchingResponseSignatureAlgorithm({
+  publicId,
+  version,
+  signature,
+  apiSecret,
+  configuredAlgorithm,
+}: {
+  publicId: string
+  version: string | number
+  signature: string
+  apiSecret: string
+  configuredAlgorithm: SignatureAlgorithm
+}): Promise<SignatureAlgorithm | null> {
+  const algorithms: SignatureAlgorithm[] = ['sha1']
+  if (configuredAlgorithm !== 'sha1') algorithms.push(configuredAlgorithm)
+
+  for (const algorithm of algorithms) {
+    const isValid = await verifyCloudinaryResponseSignature({
+      publicId,
+      version,
+      signature,
+      apiSecret,
+      algorithm,
+    })
+
+    if (isValid) return algorithm
+  }
+
+  return null
+}
+
 export const POST: APIRoute = async ({ cookies, request }) => {
   // Auth
   const supabase = createClient(cookies, request)
@@ -39,11 +113,18 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   }
 
   // Permission
-  const { data: canManage } = await supabase.rpc('has_permission', {
+  const { data: canManage, error: permissionError } = await supabase.rpc('has_permission', {
     permission_code: 'manage_media',
   })
-  if (!canManage) {
-    return jsonResponse(403, { ok: false, error: 'forbidden' })
+  if (permissionError) {
+    const info = sanitizeSupabaseError('manage_media_permission', permissionError)
+    logDevInfo(info)
+    return errorResponse(500, 'permission_check_failed', info)
+  }
+  if (canManage !== true) {
+    const info = { stage: 'manage_media_permission', message: 'manage_media_denied' }
+    logDevInfo(info)
+    return errorResponse(403, 'forbidden', info)
   }
 
   // Parse body
@@ -85,36 +166,42 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   try {
     config = getCloudinaryConfig()
   } catch (e) {
-    console.error('Cloudinary config error:', e)
+    logDevInfo({
+      stage: 'cloudinary_config',
+      message: e instanceof Error ? e.message : 'configuration_error',
+    })
     return jsonResponse(500, { ok: false, error: 'configuration_error' })
   }
 
   // public_id must start with the configured upload folder
   if (!publicId.startsWith(config.uploadFolder + '/')) {
-    console.error('complete-upload: public_id outside upload folder:', publicId)
-    return jsonResponse(400, { ok: false, error: 'invalid_public_id' })
+    const info = { stage: 'request_validation', message: 'invalid_public_id' }
+    logDevInfo(info)
+    return errorResponse(400, 'invalid_public_id', info)
   }
 
   // Validate the subfolder portion is in the allowed list
   const parts = publicId.replace(config.uploadFolder + '/', '').split('/')
   const subfolder = parts[0]
   if (!isAllowedSubfolder(subfolder)) {
-    console.error('complete-upload: disallowed subfolder:', subfolder)
-    return jsonResponse(400, { ok: false, error: 'invalid_subfolder' })
+    const info = { stage: 'request_validation', message: 'invalid_subfolder' }
+    logDevInfo(info)
+    return errorResponse(400, 'invalid_subfolder', info)
   }
 
   // Verify Cloudinary response signature
-  const isValid = await verifyCloudinaryResponseSignature({
+  const responseSignatureAlgorithm = await getMatchingResponseSignatureAlgorithm({
     publicId,
     version: version as string | number,
     signature,
     apiSecret: config.apiSecret,
-    algorithm: config.signatureAlgorithm,
+    configuredAlgorithm: config.signatureAlgorithm,
   })
 
-  if (!isValid) {
-    console.error('complete-upload: Cloudinary response signature verification failed for:', publicId)
-    return jsonResponse(400, { ok: false, error: 'invalid_signature' })
+  if (!responseSignatureAlgorithm) {
+    const info = { stage: 'cloudinary_response_signature', message: 'invalid_signature' }
+    logDevInfo(info)
+    return errorResponse(400, 'invalid_signature', info)
   }
 
   // Extract and sanitize admin metadata
@@ -164,8 +251,11 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     .single()
 
   if (insertError || !newAsset) {
-    console.error('complete-upload: DB insert error:', insertError)
-    return jsonResponse(500, { ok: false, error: 'save_failed' })
+    const info = insertError
+      ? sanitizeSupabaseError('media_assets_insert', insertError)
+      : { stage: 'media_assets_insert', message: 'missing_insert_result' }
+    logDevInfo(info)
+    return errorResponse(500, 'save_failed', info)
   }
 
   return jsonResponse(200, { ok: true, id: newAsset.id })

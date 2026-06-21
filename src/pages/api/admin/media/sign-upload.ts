@@ -9,10 +9,10 @@
 //
 // Success response:
 //   { ok: true, signature, timestamp, api_key, cloud_name, folder,
-//     resource_type, allowed_formats }
+//     allowed_formats }
 //
-// The browser must include ALL returned fields (except ok, cloud_name)
-// in its FormData POST to Cloudinary, or the signature will be rejected.
+// The browser must include api_key, signature, and every signed param
+// (timestamp, folder, allowed_formats) in its FormData POST to Cloudinary.
 
 import type { APIRoute } from 'astro'
 import { createClient } from '../../../../lib/supabase/server'
@@ -77,10 +77,10 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   const folder = `${config.uploadFolder}/${subfolder}`
 
   // Params to sign — must match exactly what the browser will send to Cloudinary
+  // Do not sign resource_type; the /image/upload endpoint supplies it.
   const paramsToSign: Record<string, string | number> = {
     allowed_formats: ALLOWED_FORMATS,
     folder,
-    resource_type: 'image',
     timestamp,
   }
 
@@ -97,7 +97,6 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     api_key: config.apiKey,
     cloud_name: config.cloudName,
     folder,
-    resource_type: 'image',
     allowed_formats: ALLOWED_FORMATS,
   })
 }

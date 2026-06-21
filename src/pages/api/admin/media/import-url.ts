@@ -96,7 +96,6 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 
   const paramsToSign: Record<string, string | number> = {
     folder,
-    resource_type: 'image',
     timestamp,
   }
 

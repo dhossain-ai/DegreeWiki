@@ -186,6 +186,38 @@ const LICENSE_TYPES = [
     progressBanner.classList.add('hidden')
   }
 
+  function getCloudinaryErrorMessage(data: Record<string, unknown>): string | null {
+    const error = data['error']
+    if (!error || typeof error !== 'object') return null
+
+    const message = (error as Record<string, unknown>)['message']
+    return typeof message === 'string' && message ? message : null
+  }
+
+  function logCloudinaryUploadError(status: number, data: Record<string, unknown>) {
+    if (!import.meta.env.DEV) return
+
+    const message = getCloudinaryErrorMessage(data)
+    if (!message) return
+
+    console.error('Cloudinary upload failed:', { status, message })
+  }
+
+  function logSaveError(status: number, data: Record<string, unknown>) {
+    if (!import.meta.env.DEV) return
+
+    const debug = data['debug']
+    if (!debug || typeof debug !== 'object') {
+      console.error('Media save failed:', {
+        status,
+        error: typeof data['error'] === 'string' ? data['error'] : 'save_failed',
+      })
+      return
+    }
+
+    console.error('Media save failed:', { status, ...debug })
+  }
+
   function collectMetadata() {
     return {
       subfolder:       (document.getElementById('subfolder')        as HTMLSelectElement).value,
@@ -238,7 +270,6 @@ const LICENSE_TYPES = [
       form.append('timestamp',       String(signData['timestamp']))
       form.append('signature',       String(signData['signature']))
       form.append('folder',          String(signData['folder']))
-      form.append('resource_type',   String(signData['resource_type']))
       form.append('allowed_formats', String(signData['allowed_formats']))
 
       const cloudResp = await fetch(
@@ -246,8 +277,14 @@ const LICENSE_TYPES = [
         { method: 'POST', body: form },
       )
       cloudData = await cloudResp.json() as Record<string, unknown>
-      if (!cloudResp.ok) throw new Error(String((cloudData['error'] as Record<string,unknown>)?.['message'] ?? 'upload_failed'))
-    } catch {
+      if (!cloudResp.ok) {
+        logCloudinaryUploadError(cloudResp.status, cloudData)
+        throw new Error('upload_failed')
+      }
+    } catch (error) {
+      if (import.meta.env.DEV && error instanceof Error && error.message !== 'upload_failed') {
+        console.error('Cloudinary upload request failed:', error.message)
+      }
       showError('Upload to Cloudinary failed. Check the file type and try again.')
       return
     }
@@ -261,7 +298,10 @@ const LICENSE_TYPES = [
         body: JSON.stringify({ ...cloudData, ...meta }),
       })
       const saveData = await saveResp.json() as Record<string, unknown>
-      if (!saveData['ok']) throw new Error(String(saveData['error'] ?? 'save_failed'))
+      if (!saveData['ok']) {
+        logSaveError(saveResp.status, saveData)
+        throw new Error(String(saveData['error'] ?? 'save_failed'))
+      }
       window.location.href = `/admin/media/${saveData['id']}`
     } catch {
       showError('Upload succeeded but could not save to database. Please contact support.')
