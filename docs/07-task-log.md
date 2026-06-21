@@ -4,6 +4,128 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 56A: Auth Role Routing Fix
+
+Tool:
+Codex GPT-5
+
+Task:
+Fix dashboard routing after the student dashboard caused the admin account
+`degreewiki@gmail.com` to land on the student dashboard instead of `/admin`.
+Do not start Cloudinary/media work, do not add dependencies, and do not create
+migrations.
+
+Pre-implementation inspection:
+- `src/pages/login.astro`
+- `src/pages/signup.astro`
+- `src/pages/auth/callback.astro`
+- `src/pages/account.astro`
+- `src/pages/admin/**`
+- `src/layouts/BaseLayout.astro`, `src/layouts/PublicLayout.astro`,
+  `src/layouts/AdminLayout.astro`
+- `src/components/public/PublicNav.astro`
+- `src/lib/auth/redirect.ts`
+- `src/lib/admin/guard.ts`
+- `src/lib/supabase/**`
+- `src/middleware.ts`
+- `supabase/migrations/002_auth_roles.sql`
+- `supabase/migrations/015_seed_data.sql`
+- `docs/06-status.md`, `docs/07-task-log.md`
+
+Findings:
+- Post-login redirect is decided in `src/pages/login.astro`; email callback redirect
+  is decided in `src/pages/auth/callback.astro`; signup uses the same sanitized
+  redirect flow.
+- `src/lib/auth/redirect.ts` now defaults auth redirects to `/account`.
+- `src/pages/account.astro` is the existing student dashboard route; no
+  `src/pages/dashboard*` route existed before this phase.
+- `PublicNav` hardcoded signed-in "Dashboard" to `/account`.
+- Admin detection already exists through Supabase `has_role(role_code)`, backed by
+  `roles` and `user_roles`.
+- Prior docs record `degreewiki@gmail.com` as bootstrapped to `super_admin`.
+- `/admin` already had a guard, but it only checked `super_admin`.
+- `/account` had a signed-in guard but did not redirect admin users away.
+
+Root cause:
+- The auth default was changed to the student dashboard path (`/account`), and the
+  login/callback/nav/account surfaces did not resolve the destination by user role.
+  Admin sessions were valid, but the routing layer treated every authenticated user
+  as a student after login.
+
+Implementation:
+- Added `src/lib/auth/dashboard.ts` with:
+  - `ADMIN_DASHBOARD_PATH = '/admin'`
+  - `STUDENT_DASHBOARD_PATH = '/account'`
+  - `ADMIN_ROLE_CODES = ['admin', 'super_admin', 'content_admin', 'reviewer',
+    'data_import_manager']`
+  - `userHasAdminRole(supabase)` using the existing `has_role` RPC
+  - `getDashboardDestination(supabase)`
+  - `resolveAuthRedirectForUser(supabase, redirectTo)`
+- Updated login, signup, and auth callback to role-resolve default student-dashboard
+  redirects so admins land on `/admin`.
+- Updated `/account` to redirect admin-role users to `/admin`.
+- Added `/dashboard` as a small authenticated router/alias:
+  - signed-out -> `/login?redirect=/dashboard`
+  - admin-role -> `/admin`
+  - normal authenticated user -> `/account`
+- Updated `PublicNav` so signed-in "Dashboard" points to `/admin` for admin-role
+  users and `/account` for students.
+- Updated admin guard role detection to use the shared admin-role helper.
+- Updated admin page 403 text from `super_admin role required` to
+  `admin role required`; no admin page business logic was rewritten.
+
+Files changed:
+- `src/lib/auth/dashboard.ts`
+- `src/lib/admin/guard.ts`
+- `src/pages/login.astro`
+- `src/pages/signup.astro`
+- `src/pages/auth/callback.astro`
+- `src/pages/account.astro`
+- `src/pages/dashboard.astro`
+- `src/components/public/PublicNav.astro`
+- `src/pages/admin/**/*.astro` (403 response text only)
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Redirect/guard behavior after fix:
+- Admin login with a valid admin role, including `degreewiki@gmail.com` as
+  `super_admin`, routes to `/admin`.
+- Normal student login routes to `/account`, the current student dashboard.
+- Signed-out `/admin`, `/account`, or `/dashboard` routes go to login with a
+  same-origin `redirect` parameter.
+- Admin manually opening `/account` or `/dashboard` redirects to `/admin`.
+- Student manually opening `/admin` receives a safe 403 block.
+- Shared public nav sends admins to `/admin` and students to `/account`.
+
+How admin vs student is detected:
+- Uses existing Supabase role lookup only: `has_role(role_code)`.
+- No database schema changes, migrations, service-role auth, or new role tables.
+- `degreewiki@gmail.com` uses the `super_admin` role lookup. No temporary email
+  fallback was added.
+
+Validation:
+- `npm run build`: PASS (Server built in 4.47s, zero errors).
+- Requested literal `grep` commands failed because `grep` is not installed in this
+  Windows PowerShell environment.
+- Equivalent `rg -n "service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient"
+  src/pages src/lib src/layouts` result:
+  - Pre-existing matches in `src/lib/supabase/service.ts`, `src/lib/ai/**`, and
+    `src/pages/fit-finder/result.astro`.
+  - No matches introduced by Phase 56A files.
+- Equivalent `rg -n "set:html|innerHTML" src/pages src/lib src/layouts` result:
+  - One pre-existing comment in `src/pages/fit-finder/result.astro`.
+  - No `set:html` or `innerHTML` usage introduced by Phase 56A.
+
+Remaining risks:
+- Live success for `degreewiki@gmail.com` depends on the existing Supabase
+  `user_roles` row still assigning `super_admin`.
+- The admin shell now admits all seeded admin staff roles; RLS/permission policies
+  remain the enforcement layer, but the admin UI is not yet fine-grained by role.
+
+Recommended next phase:
+Phase 56B - Admin Role QA and Fine-Grained Admin Navigation. Verify each seeded
+admin role against admin sections and tailor navigation/actions to role permissions.
+
 ## 2026-06-21 - Phase 55F: Public Pages Redesign Completion Bundle
 
 Tool:

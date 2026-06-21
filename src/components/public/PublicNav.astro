@@ -1,10 +1,12 @@
 ---
 import { createClient } from '../../lib/supabase/server'
+import { getDashboardDestination } from '../../lib/auth/dashboard'
 import Button from '../ui/Button.astro'
 
 const pathname = Astro.url.pathname
 const supabase = createClient(Astro.cookies, Astro.request)
 const { data: { user } } = await supabase.auth.getUser()
+const dashboardHref = user ? await getDashboardDestination(supabase) : '/account'
 
 const navLinks = [
   { href: '/programs',      label: 'Programs'      },
@@ -50,10 +52,10 @@ const navLinks = [
       {user ? (
         <>
           <a
-            href="/account"
+            href={dashboardHref}
             class={[
               'hidden sm:block text-sm font-medium no-underline transition-colors whitespace-nowrap',
-              pathname === '/account' ? 'text-ink' : 'text-ink-tertiary hover:text-ink',
+              pathname === dashboardHref ? 'text-ink' : 'text-ink-tertiary hover:text-ink',
             ].join(' ')}
           >
             Dashboard

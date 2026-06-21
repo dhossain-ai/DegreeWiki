@@ -4,7 +4,7 @@ import { requireSuperAdmin } from '../../lib/admin/guard'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
-if (guard.type === 'forbidden') return new Response('403 Forbidden: super_admin role required.', { status: 403 })
+if (guard.type === 'forbidden') return new Response('403 Forbidden: admin role required.', { status: 403 })
 
 const { user, supabase } = guard
 

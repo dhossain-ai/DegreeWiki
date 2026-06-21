@@ -1,8 +1,79 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21 (Phase 55F)
+Last updated: 2026-06-21 (Phase 56A)
 
 ## Current Phase
+
+Phase 56A - Auth Role Routing Fix - complete.
+Fixed login/dashboard routing so admin-role users are sent to the admin dashboard
+and normal authenticated users continue to the existing student dashboard at
+`/account`. No migrations, no dependencies, no Cloudinary/media work, and no
+public redesign page changes beyond the shared nav dashboard link.
+
+Root cause:
+- The student dashboard work made `/account` the default auth redirect through
+  `DEFAULT_AUTH_REDIRECT`.
+- Login, signup, and auth callback redirected all authenticated users to that
+  sanitized destination without checking admin roles.
+- `PublicNav` hardcoded the signed-in "Dashboard" link to `/account`.
+- `/account` authenticated users but did not redirect admin users away from the
+  student dashboard.
+
+Files changed:
+- `src/lib/auth/dashboard.ts` - new shared dashboard destination helper.
+- `src/lib/admin/guard.ts` - admin guard now uses the shared admin-role check.
+- `src/pages/login.astro`, `src/pages/signup.astro`,
+  `src/pages/auth/callback.astro` - post-auth redirects now resolve against role.
+- `src/pages/account.astro` - signed-out users go to login; admin-role users
+  redirect to `/admin`; students render the student dashboard.
+- `src/pages/dashboard.astro` - new alias/router for `/dashboard`.
+- `src/components/public/PublicNav.astro` - signed-in dashboard link points to
+  `/admin` for admin-role users and `/account` for students.
+- `src/pages/admin/**/*.astro` - 403 response text changed from
+  `super_admin role required` to `admin role required`; no page logic rewritten.
+
+Redirect/guard behavior after fix:
+- Signed-out `/admin` -> `/login?redirect=/admin`.
+- Signed-out `/account` -> `/login?redirect=/account`.
+- Signed-out `/dashboard` -> `/login?redirect=/dashboard`.
+- Admin-role default login/signup/callback -> `/admin`.
+- Student default login/signup/callback -> `/account`.
+- Admin-role manual `/account` or `/dashboard` -> `/admin`.
+- Student manual `/admin` -> 403 blocked by the admin guard.
+- Shared nav "Dashboard" -> `/admin` for admin-role users, `/account` for students.
+
+Admin vs student detection:
+- Uses the existing Supabase `has_role(role_code)` RPC.
+- Admin-role codes checked: `admin`, `super_admin`, `content_admin`, `reviewer`,
+  `data_import_manager`.
+- Users without one of those roles are treated as normal student/authenticated users.
+
+`degreewiki@gmail.com` handling:
+- No email fallback was added.
+- The account is expected to route via the existing `super_admin` role lookup, matching
+  prior project docs that record this account as bootstrapped to `super_admin`.
+
+Validation:
+- `npm run build`: PASS (Server built in 4.47s, zero errors).
+- Requested literal `grep` commands could not run in this Windows shell because
+  `grep` is not installed. Equivalent `rg` scans were run over the same paths.
+- Security grep result: only pre-existing matches in `src/lib/supabase/service.ts`,
+  `src/lib/ai/**`, and the existing `src/pages/fit-finder/result.astro` developer
+  note. No new service-role usage added by Phase 56A.
+- XSS grep result: one pre-existing `innerHTML` comment in
+  `src/pages/fit-finder/result.astro`; no `set:html` or `innerHTML` usage added.
+
+Remaining risks:
+- Admin pages now route all seeded admin staff roles to `/admin`; table-level RLS and
+  existing permission policies still gate data/actions, but the admin UI is not yet
+  role-tailored per section.
+- Live behavior still depends on `degreewiki@gmail.com` retaining its `super_admin`
+  assignment in Supabase `user_roles`.
+
+Recommended next phase:
+- Phase 56B - Admin Role QA and Fine-Grained Admin Navigation: verify each seeded
+  admin role against `/admin` sections, hide/disable sections that the role cannot
+  use, and keep RLS as the final enforcement layer.
 
 Phase 55F — Public Pages Redesign Completion Bundle — complete.
 Redesigned all remaining public directory and detail pages using the Phase 55B public

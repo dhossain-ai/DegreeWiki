@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
+import { resolveAuthRedirectForUser } from '../lib/auth/dashboard'
 import { sanitizeAuthRedirect } from '../lib/auth/redirect'
 import { createClient } from '../lib/supabase/server'
 
@@ -10,7 +11,7 @@ const redirectTo = sanitizeAuthRedirect(Astro.url.searchParams.get('redirect'))
 
 const { data: { user } } = await supabase.auth.getUser()
 if (user) {
-  return Astro.redirect(redirectTo)
+  return Astro.redirect(await resolveAuthRedirectForUser(supabase, redirectTo))
 }
 
 let errorMessage: string | null = null
@@ -46,7 +47,7 @@ if (Astro.request.method === 'POST') {
     if (error) {
       errorMessage = 'Could not create your account right now. Please try again.'
     } else if (data.session) {
-      return Astro.redirect(redirectTo)
+      return Astro.redirect(await resolveAuthRedirectForUser(supabase, redirectTo))
     } else if (data.user) {
       successMessage = 'Check your email to confirm your account, then sign in to continue.'
     } else {

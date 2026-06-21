@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
+import { resolveAuthRedirectForUser } from '../lib/auth/dashboard'
 import { sanitizeAuthRedirect } from '../lib/auth/redirect'
 import { createClient } from '../lib/supabase/server'
 
@@ -12,7 +13,7 @@ const authMessage = Astro.url.searchParams.get('auth') === 'error'
 // Redirect already-authenticated users.
 const { data: { user } } = await supabase.auth.getUser()
 if (user) {
-  return Astro.redirect(redirectTo)
+  return Astro.redirect(await resolveAuthRedirectForUser(supabase, redirectTo))
 }
 
 let errorMessage: string | null = null
@@ -31,7 +32,7 @@ if (Astro.request.method === 'POST') {
       ? 'Invalid email or password.'
       : 'Could not sign you in right now. Please try again.'
   } else {
-    return Astro.redirect(redirectTo)
+    return Astro.redirect(await resolveAuthRedirectForUser(supabase, redirectTo))
   }
 }
 ---

@@ -1,5 +1,6 @@
 ---
 import PublicLayout from '../layouts/PublicLayout.astro'
+import { userHasAdminRole } from '../lib/auth/dashboard'
 import { createClient } from '../lib/supabase/server'
 
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -7,6 +8,10 @@ const supabase = createClient(Astro.cookies, Astro.request)
 const { data: { user } } = await supabase.auth.getUser()
 if (!user) {
   return Astro.redirect('/login?redirect=/account')
+}
+
+if (await userHasAdminRole(supabase)) {
+  return Astro.redirect('/admin')
 }
 
 type LatestResult = {

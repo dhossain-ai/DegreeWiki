@@ -1,4 +1,5 @@
 ---
+import { resolveAuthRedirectForUser } from '../../lib/auth/dashboard'
 import { sanitizeAuthRedirect } from '../../lib/auth/redirect'
 import { createClient } from '../../lib/supabase/server'
 
@@ -13,5 +14,5 @@ if (code) {
   }
 }
 
-return Astro.redirect(redirectTo)
+return Astro.redirect(await resolveAuthRedirectForUser(supabase, redirectTo))
 ---

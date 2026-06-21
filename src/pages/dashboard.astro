@@ -1,0 +1,13 @@
+---
+import { getDashboardDestination } from '../lib/auth/dashboard'
+import { createClient } from '../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+const { data: { user } } = await supabase.auth.getUser()
+
+if (!user) {
+  return Astro.redirect('/login?redirect=/dashboard')
+}
+
+return Astro.redirect(await getDashboardDestination(supabase))
+---
