@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="{{ cardStyle }}" style-hover="{{ cardHover }}">
+
+  <div style="flex:none; width:56px; height:56px; border-radius:10px; background:#f1f5f9; border:1px solid #e2e8f0; display:flex; align-items:center; justify-content:center; color:#0b1f3a; font-weight:700; font-size:15px; letter-spacing:0.02em; font-family:'IBM Plex Mono', ui-monospace, monospace;">{{ p.monogram }}</div>
+
+  <div style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:9px;">
+
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span style="font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#1d4ed8; background:#eff4ff; border:1px solid #dbe4ff; padding:3px 8px; border-radius:6px;">{{ p.level }}</span>
+      <span style="font-size:12px; color:#94a3b8;">{{ p.field }}</span>
+    </div>
+
+    <div>
+      <div style="font-size:18px; font-weight:600; color:#0b1f3a; line-height:1.25; letter-spacing:-0.01em;">{{ p.title }}</div>
+      <div style="margin-top:3px; font-size:14px; color:#334155;">{{ p.university }}</div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:#64748b;">
+      <span style="font-size:10px; font-weight:700; letter-spacing:0.05em; color:#64748b; border:1px solid #e2e8f0; border-radius:4px; padding:1px 5px; background:#fff;">{{ p.code }}</span>
+      <span>{{ p.location }}</span>
+    </div>
+
+    <div style="display:flex; gap:26px; flex-wrap:wrap; padding-top:11px; border-top:1px solid #eef2f7; margin-top:3px;">
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <span style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Duration</span>
+        <span style="font-size:14px; color:#0b1f3a; font-weight:500;">{{ p.duration }}</span>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <span style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Language</span>
+        <span style="font-size:14px; color:#0b1f3a; font-weight:500;">{{ p.language }}</span>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <span style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Start</span>
+        <span style="font-size:14px; color:#0b1f3a; font-weight:500;">{{ p.start }}</span>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <span style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Next deadline</span>
+        <span style="{{ deadlineStyle }}">{{ p.deadline }}</span>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding-top:6px;">
+      <sc-if value="{{ p.scholarship }}" hint-placeholder-val="{{ true }}">
+        <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#047857; background:#ecfdf5; border:1px solid #a7f3d0; padding:4px 9px; border-radius:6px;">
+          <span style="width:6px; height:6px; border-radius:50%; background:#047857;"></span>{{ p.scholarshipLabel }}
+        </span>
+      </sc-if>
+      <sc-if value="{{ p.verified }}" hint-placeholder-val="{{ true }}">
+        <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#047857; background:#fff; border:1px solid #a7f3d0; padding:4px 9px; border-radius:6px;">
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#047857;">
+            <span style="display:block; width:3px; height:6px; border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg); margin-top:-1px;"></span>
+          </span>Verified
+        </span>
+      </sc-if>
+      <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#64748b;">
+        <span style="width:6px; height:6px; border-radius:50%; background:#047857;"></span>Source checked &middot; {{ p.checked }}
+      </span>
+      <sc-if value="{{ p.deadlineSoon }}" hint-placeholder-val="{{ false }}">
+        <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#b45309; background:#fffbeb; border:1px solid #fcd9a5; padding:4px 9px; border-radius:6px;">
+          <span style="width:6px; height:6px; border-radius:50%; background:#b45309;"></span>{{ p.deadlineNote }}
+        </span>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="flex:none; width:188px; display:flex; flex-direction:column; align-items:flex-end; justify-content:space-between; gap:16px; padding-left:20px; border-left:1px solid #eef2f7;">
+    <div style="text-align:right;">
+      <div style="font-size:21px; font-weight:700; color:#0b1f3a; letter-spacing:-0.01em;">{{ p.tuition }}</div>
+      <div style="font-size:12px; color:#64748b;">{{ p.tuitionPer }}</div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
+      <button onClick="{{ onView }}" style="width:100%; padding:9px 14px; font-size:13.5px; font-weight:600; font-family:inherit; color:#fff; background:#1d4ed8; border:1px solid #1d4ed8; border-radius:8px; cursor:pointer; transition:background .16s ease;" style-hover="{{ viewHover }}">View details</button>
+      <div style="display:flex; gap:8px; width:100%;">
+        <button onClick="{{ onSave }}" style="{{ saveStyle }}" style-hover="{{ saveHover }}">
+          <span style="{{ bookmarkStyle }}"></span>{{ saveLabel }}
+        </button>
+        <button onClick="{{ onCompare }}" style="{{ compareStyle }}" style-hover="{{ compareHover }}">
+          <span style="{{ checkboxStyle }}">
+            <sc-if value="{{ comparing }}" hint-placeholder-val="{{ false }}">
+              <span style="display:block; width:3px; height:6px; border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg); margin-top:-1px;"></span>
+            </sc-if>
+          </span>Compare
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:780,&quot;height&quot;:210},&quot;program&quot;:{&quot;editor&quot;:null,&quot;default&quot;:{&quot;id&quot;:&quot;p1&quot;,&quot;monogram&quot;:&quot;UvA&quot;,&quot;level&quot;:&quot;MSc&quot;,&quot;field&quot;:&quot;Computer &amp; Data Science&quot;,&quot;title&quot;:&quot;Data Science&quot;,&quot;university&quot;:&quot;University of Amsterdam&quot;,&quot;code&quot;:&quot;NL&quot;,&quot;location&quot;:&quot;Amsterdam, Netherlands&quot;,&quot;duration&quot;:&quot;24 months&quot;,&quot;language&quot;:&quot;English&quot;,&quot;start&quot;:&quot;Sep 2026&quot;,&quot;deadline&quot;:&quot;15 Oct 2026&quot;,&quot;deadlineSoon&quot;:false,&quot;deadlineNote&quot;:&quot;&quot;,&quot;tuition&quot;:&quot;€15,300&quot;,&quot;tuitionPer&quot;:&quot;per year&quot;,&quot;scholarship&quot;:true,&quot;scholarshipLabel&quot;:&quot;Scholarship available&quot;,&quot;verified&quot;:true,&quot;checked&quot;:&quot;18 Jun 2026&quot;},&quot;tsType&quot;:&quot;Program&quot;},&quot;saved&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;comparing&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;forceHover&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;onToggleSave&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(id: string) =&gt; void&quot;},&quot;onToggleCompare&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(id: string) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const sample = {
+      id: 'p1', monogram: 'UvA', level: 'MSc', field: 'Computer & Data Science',
+      title: 'Data Science', university: 'University of Amsterdam',
+      code: 'NL', location: 'Amsterdam, Netherlands',
+      duration: '24 months', language: 'English', start: 'Sep 2026',
+      deadline: '15 Oct 2026', deadlineSoon: false, deadlineNote: '',
+      tuition: '€15,300', tuitionPer: 'per year',
+      scholarship: true, scholarshipLabel: 'Scholarship available',
+      verified: true, checked: '18 Jun 2026'
+    };
+    const p = this.props.program || sample;
+    const saved = !!this.props.saved;
+    const comparing = !!this.props.comparing;
+    const force = !!this.props.forceHover;
+
+    const base = {
+      display: 'flex', gap: '20px', alignItems: 'stretch',
+      background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px',
+      padding: '20px',
+      transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
+      position: 'relative', boxShadow: '0 1px 2px rgba(11,31,58,0.04)'
+    };
+    const lift = { transform: 'translateY(-2px)', boxShadow: '0 12px 30px rgba(11,31,58,0.10)', borderColor: '#cbd5e1' };
+    const compareSel = { borderColor: '#1d4ed8', boxShadow: '0 0 0 3px rgba(29,78,216,0.12)' };
+
+    let cardStyle = { ...base };
+    if (force) cardStyle = { ...cardStyle, ...lift };
+    if (comparing) cardStyle = { ...cardStyle, ...compareSel };
+    const cardHover = force ? {} : lift;
+
+    const deadlineStyle = {
+      fontSize: '14px', fontWeight: 600,
+      color: p.deadlineSoon ? '#b45309' : '#0b1f3a'
+    };
+
+    const btnBase = {
+      flex: '1 1 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      gap: '6px', padding: '8px 10px', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+      borderRadius: '8px', cursor: 'pointer', transition: 'all .16s ease', whiteSpace: 'nowrap'
+    };
+    const saveStyle = saved
+      ? { ...btnBase, color: '#1d4ed8', background: '#eff4ff', border: '1px solid #1d4ed8' }
+      : { ...btnBase, color: '#334155', background: '#fff', border: '1px solid #e2e8f0' };
+    const saveHover = saved
+      ? { background: '#dbe4ff' }
+      : { borderColor: '#cbd5e1', background: '#f8fafc' };
+
+    const bookmarkStyle = {
+      display: 'block', width: '9px', height: '12px', flex: 'none',
+      background: saved ? '#1d4ed8' : 'transparent',
+      border: saved ? '1.5px solid #1d4ed8' : '1.5px solid #94a3b8',
+      borderRadius: '1px',
+      clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%)'
+    };
+
+    const compareStyle = comparing
+      ? { ...btnBase, color: '#1d4ed8', background: '#eff4ff', border: '1px solid #1d4ed8' }
+      : { ...btnBase, color: '#334155', background: '#fff', border: '1px solid #e2e8f0' };
+    const compareHover = comparing
+      ? { background: '#dbe4ff' }
+      : { borderColor: '#cbd5e1', background: '#f8fafc' };
+
+    const checkboxStyle = {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      flex: 'none', width: '15px', height: '15px', borderRadius: '4px',
+      background: comparing ? '#1d4ed8' : '#fff',
+      border: comparing ? '1.5px solid #1d4ed8' : '1.5px solid #cbd5e1'
+    };
+
+    return {
+      p, saved, comparing,
+      cardStyle, cardHover, deadlineStyle,
+      saveStyle, saveHover, bookmarkStyle,
+      compareStyle, compareHover, checkboxStyle,
+      saveLabel: saved ? 'Saved' : 'Save',
+      viewHover: { background: '#1e40af' },
+      onSave: () => this.props.onToggleSave && this.props.onToggleSave(p.id),
+      onCompare: () => this.props.onToggleCompare && this.props.onToggleCompare(p.id),
+      onView: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>

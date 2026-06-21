@@ -4,6 +4,160 @@ This file is append-only.
 
 Every AI coding session must add a new entry.
 
+## 2026-06-21 - Phase 55A amendment: Normalize locked design reference files
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Normalize the design zip contents into the canonical locked reference filenames
+expected by docs/design/public-ui-direction.md. Confirm support.js dependency.
+Remove unreferenced thumbnail. Update status and task log.
+
+Changes:
+
+- docs/design/degreewiki-homepage-reference.html (new — copied from DegreeWiki.dc.html,
+  original removed)
+- docs/design/degreewiki-program-card-reference.html (new — copied from ProgramCard.dc.html,
+  original removed)
+- docs/design/DegreeWiki.dc.html (removed — replaced by canonical name above)
+- docs/design/ProgramCard.dc.html (removed — replaced by canonical name above)
+- docs/design/.thumbnail (removed — not referenced by either HTML file)
+- docs/design/support.js (retained — both HTML files reference it via ./support.js)
+- docs/design/public-ui-direction.md: updated locked references status note from
+  "absent" to "present"; updated note to reflect amendment completion.
+- docs/06-status.md: Phase 55A status entry updated with amendment details.
+
+Final docs/design/ contents:
+  degreewiki-homepage-reference.html
+  degreewiki-program-card-reference.html
+  public-ui-direction.md
+  support.js
+
+Boundaries honored:
+- No src/ files changed.
+- No package, config, migration, API, or deployment file changes.
+- Documentation/reference normalization only.
+
+Validation:
+  Grep for "support.js" in HTML files: both reference ./support.js — confirmed kept.
+  Grep for "thumbnail" in HTML files: no matches — confirmed removed.
+  docs/design/ listing: 4 expected files present, originals and thumbnail removed.
+
+## 2026-06-21 - Phase 55A: Design Reference Lock + public-ui-direction.md
+
+Tool:
+Claude Sonnet 4.6 (Claude Code)
+
+Task:
+Lock the approved public UI design direction before Phase 55B implementation begins.
+Create docs/design/public-ui-direction.md capturing the approved design reference,
+benchmark blend, visual language, homepage/listing/card direction, trust signals,
+responsive/accessibility baselines, prohibitions, and Phase 55B handoff conditions.
+Update docs/06-status.md and docs/07-task-log.md. No frontend implementation changes.
+
+Changes:
+
+- docs/design/public-ui-direction.md (new): Full public UI direction document.
+  Sections: phase note, product identity, locked design references, benchmark blend
+  (Mastersportal/Linear/Google Flights/Stripe/TopUniversities/DAAD/Airbnb with per-
+  benchmark contribution), core design principle, visual language (token table +
+  supporting tones + typography + surface/spacing), homepage section order (11
+  sections locked from reference), search/listing structure (12-point layout spec),
+  programme card anatomy (19-point spec from locked reference + 4 interaction states),
+  trust/verification direction, responsive direction (3 breakpoints + mobile
+  principles), accessibility direction (WCAG 2.1 AA target), explicit prohibitions
+  (10 "what not to do" rules), Phase 55B handoff conditions and scope, Phase 55A
+  non-goals.
+
+- docs/06-status.md: Updated current phase header and added Phase 55A status entry.
+
+Design reference file status:
+  docs/design/degreewiki-homepage-reference.html — NOT PRESENT in repository.
+  docs/design/degreewiki-program-card-reference.html — NOT PRESENT in repository.
+  Both files must be copied from the approved design artifacts (DegreeWiki.dc.html
+  and ProgramCard.dc.html) before Phase 55B implementation begins.
+
+Boundaries honored:
+- No src/ files changed (no pages, components, layouts, styles, or lib edits).
+- No Tailwind config or CSS token changes.
+- No npm dependency changes.
+- No database schema changes or migrations.
+- No RLS, AI, auth, or admin changes.
+- No Cloudflare/Vercel deployment changes.
+
+Validation:
+  No code changes — no build run required.
+  npm run build: not executed (docs-only phase).
+  service_role / innerHTML / set:html in src/: 0 new matches (no src/ edits).
+
+## 2026-06-21 - Phase 55: Public Design System Foundation
+
+Tool:
+Claude Opus 4.8 (Claude Code)
+
+Task:
+Create the reusable public design system foundation for the upcoming homepage
+redesign (premium education-portal style) without changing product behavior. Plan
+first, then implement tokens, public layout/header/footer polish, UI primitives,
+and reusable public cards/components. No homepage rewrite. No backend/AI/auth/admin
+changes.
+
+Changes:
+
+- src/styles/global.css: added Tailwind v4 @theme token block (canvas #faf8f3,
+  surface #ffffff, ink #0b1f3a, primary #1d4ed8, primary-hover #1e40af, verified
+  #047857, deadline #b45309, edge #e2e8f0, muted #64748b) and an @layer base
+  :focus-visible style (primary outline). No other app-wide style changes.
+- src/layouts/PublicLayout.astro: wrapper bg-white → bg-canvas text-ink. BaseLayout
+  intentionally left unchanged so admin/auth backgrounds are unaffected.
+- src/components/ui/Container.astro (new): page-width shell (narrow/default/wide).
+- src/components/ui/Section.astro (new): semantic section + Container + vertical
+  rhythm; canvas/surface tone.
+- src/components/ui/SectionHeader.astro (new): eyebrow + heading (h2/h3) + optional
+  "view all" link.
+- src/components/ui/Button.astro (new): variants primary/secondary/ghost; renders
+  <a> when href, else <button> (nav stays anchor-based for SEO).
+- src/components/ui/Badge.astro (new): variants neutral/level/verified/deadline/info
+  (no purple; green=verified, amber=deadline only).
+- src/components/ui/Card.astro (new): white surface, soft edge border, hover; <a>
+  when href.
+- src/components/public/cards/ProgramCard.astro (new): compact data-rich program card.
+- src/components/public/cards/DestinationCard.astro (new): country/destination card
+  with optional program/scholarship counts.
+- src/components/public/cards/ScholarshipRow.astro (new): scholarship row with amber
+  deadline badge.
+- src/components/public/cards/GuideCard.astro (new): study-guide card with category +
+  date.
+- src/components/public/SearchField.astro (new): presentational labeled input/select.
+- src/components/public/SearchChip.astro (new): link-based quick-filter chip.
+- src/components/public/FitFinderMiniPanel.astro (new): static, link-driven guided
+  panel on navy surface (no AI/island/logic).
+- src/components/public/PublicNav.astro: restyled to portal header via Container/Button
+  and tokens. Same nav links, same Supabase auth/user logic, same logout form.
+- src/components/public/PublicFooter.astro: restyled via Container + tokens. Same links.
+
+Boundaries honored:
+- No homepage rewrite (src/pages/index.astro untouched).
+- No schema/migration, no RLS, no AI, no auth, no admin changes.
+- No new npm dependencies.
+- No service-role usage and no set:html/innerHTML introduced in
+  pages/components/layouts.
+- BaseLayout not heavily modified; admin/global background unchanged.
+
+Validation results:
+  npm run build: PASS (Cloudflare server build, Server built in 4.31s, zero errors).
+
+Deferred to Phase 56 (homepage redesign):
+- Rewrite src/pages/index.astro to compose the new components (structured search
+  hero with single H1, Fit Finder panel, program/destination/scholarship/guide
+  sections).
+- Destination data queries (program/scholarship counts per country).
+- Replace remaining purple subject badges across listing pages with neutral.
+- Section spacing/responsive tuning for the assembled homepage.
+- Optional design reference HTML (docs/design/degreewiki-homepage-reference.html was
+  not present; built from the written brief).
+
 ## 2026-06-21 - Phase 54A: AI Summary Formatting + Async Result UX
 
 Tool:

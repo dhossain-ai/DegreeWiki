@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  ::selection{background:#dbe4ff;}
+  input,select,button{font-family:inherit;}
+</style>
+</helmet>
+
+<div style="font-family:'IBM Plex Sans', system-ui, -apple-system, sans-serif; background:#faf8f3; color:#0b1f3a; min-height:100vh; padding-bottom:80px;">
+
+  <!-- ============ HEADER ============ -->
+  <header style="background:rgba(255,255,255,0.92); backdrop-filter:saturate(1.1) blur(6px); border-bottom:1px solid #e2e8f0;">
+    <div style="max-width:1200px; margin:0 auto; padding:0 32px; height:66px; display:flex; align-items:center; justify-content:space-between; gap:24px;">
+      <div style="display:flex; align-items:center; gap:38px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:30px; height:30px; border-radius:7px; background:#0b1f3a; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; font-family:'IBM Plex Mono';">D</div>
+          <span style="font-size:18px; font-weight:700; letter-spacing:-0.01em;">DegreeWiki</span>
+        </div>
+        <nav style="display:flex; gap:24px;">
+          <sc-for list="{{ nav }}" as="item" hint-placeholder-count="5">
+            <a href="#" style="font-size:14px; font-weight:500; color:#475569; text-decoration:none; transition:color .15s;" style-hover="{{ navHover }}">{{ item }}</a>
+          </sc-for>
+        </nav>
+      </div>
+      <div style="display:flex; align-items:center; gap:18px;">
+        <a href="#" style="display:flex; align-items:center; gap:7px; font-size:14px; font-weight:500; color:#475569; text-decoration:none;" style-hover="{{ navHover }}">
+          Saved
+          <span style="font-size:12px; font-weight:600; color:#1d4ed8; background:#eff4ff; border:1px solid #dbe4ff; padding:1px 7px; border-radius:999px;">{{ savedCount }}</span>
+        </a>
+        <a href="#" style="font-size:14px; font-weight:500; color:#475569; text-decoration:none;" style-hover="{{ navHover }}">Sign in</a>
+        <button style="font-size:14px; font-weight:600; color:#fff; background:#1d4ed8; border:1px solid #1d4ed8; padding:9px 16px; border-radius:9px; cursor:pointer; transition:background .15s;" style-hover="{{ primaryHover }}">Get started</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- section label -->
+  <div style="max-width:1200px; margin:0 auto; padding:36px 32px 0;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <span style="font-family:'IBM Plex Mono'; font-size:12px; font-weight:600; color:#1d4ed8; background:#eff4ff; border:1px solid #dbe4ff; padding:4px 11px; border-radius:999px;">01 · Homepage</span>
+      <span style="flex:1; height:1px; background:#e2e8f0;"></span>
+    </div>
+  </div>
+
+  <!-- ============ HERO ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:44px 32px 8px;">
+    <div style="max-width:760px;">
+      <span style="display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; color:#047857; background:#ecfdf5; border:1px solid #a7f3d0; padding:5px 11px; border-radius:999px; margin-bottom:18px;">
+        <span style="width:6px; height:6px; border-radius:50%; background:#047857;"></span>Program data verified against official university sources
+      </span>
+      <h1 style="font-size:46px; line-height:1.08; font-weight:700; letter-spacing:-0.025em; margin:0 0 16px;">Find and compare degrees abroad</h1>
+      <p style="font-size:18px; line-height:1.5; color:#475569; margin:0 0 28px; max-width:620px;">Search bachelor's and master's programs, scholarships, universities, and study guides for international students.</p>
+    </div>
+
+    <!-- search module -->
+    <div style="background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:18px; box-shadow:0 6px 30px rgba(11,31,58,0.06);">
+      <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+        <div style="display:flex; flex-direction:column; gap:7px; flex:2 1 240px; min-width:200px;">
+          <label style="font-size:11px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em;">What do you want to study?</label>
+          <input placeholder="e.g. Data Science, Law, Medicine" style="padding:11px 13px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; color:#0b1f3a; background:#fff; outline:none; transition:border-color .15s, box-shadow .15s;" style-focus="{{ focusRing }}" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:7px; flex:1 1 150px; min-width:140px;">
+          <label style="font-size:11px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em;">Degree level</label>
+          <select style="padding:11px 12px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; color:#0b1f3a; background:#fff; outline:none; cursor:pointer; transition:border-color .15s, box-shadow .15s;" style-focus="{{ focusRing }}">
+            <option>Any level</option><option>Bachelor's</option><option>Master's</option><option>PhD</option>
+          </select>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:7px; flex:1 1 150px; min-width:140px;">
+          <label style="font-size:11px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em;">Destination</label>
+          <select style="padding:11px 12px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; color:#0b1f3a; background:#fff; outline:none; cursor:pointer; transition:border-color .15s, box-shadow .15s;" style-focus="{{ focusRing }}">
+            <option>Anywhere</option><option>Netherlands</option><option>Germany</option><option>Sweden</option><option>United Kingdom</option>
+          </select>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:7px; flex:1 1 150px; min-width:140px;">
+          <label style="font-size:11px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em;">Tuition / budget</label>
+          <select style="padding:11px 12px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; color:#0b1f3a; background:#fff; outline:none; cursor:pointer; transition:border-color .15s, box-shadow .15s;" style-focus="{{ focusRing }}">
+            <option>Any budget</option><option>Free / no tuition</option><option>Under €5,000</option><option>€5,000–15,000</option><option>€15,000+</option>
+          </select>
+        </div>
+        <button style="padding:12px 26px; height:44px; font-size:14.5px; font-weight:600; color:#fff; background:#1d4ed8; border:1px solid #1d4ed8; border-radius:10px; cursor:pointer; transition:background .15s;" style-hover="{{ primaryHover }}">Search</button>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; flex-wrap:wrap; gap:12px;">
+        <button style="display:inline-flex; align-items:center; gap:7px; font-size:13.5px; font-weight:600; color:#1d4ed8; background:#fff; border:1px solid #dbe4ff; padding:7px 13px; border-radius:9px; cursor:pointer; transition:all .15s;" style-hover="{{ ghostHover }}">
+          <span style="font-size:15px; line-height:0;">+</span> More filters
+        </button>
+        <span style="font-size:13px; color:#64748b;">12,400+ programs &middot; 1,900 universities &middot; sources re-checked weekly</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FIT FINDER PANEL ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:40px 32px 0;">
+    <div style="background:#0b1f3a; border-radius:18px; padding:30px 32px; display:flex; gap:36px; align-items:center; flex-wrap:wrap; box-shadow:0 10px 40px rgba(11,31,58,0.18);">
+      <div style="flex:1 1 280px; min-width:260px;">
+        <span style="font-family:'IBM Plex Mono'; font-size:11px; font-weight:600; letter-spacing:.14em; color:#7aa0e8;">FIT FINDER</span>
+        <h2 style="font-size:25px; font-weight:600; color:#fff; margin:9px 0 8px; letter-spacing:-0.01em;">Tell us your goals — we'll match programs</h2>
+        <p style="font-size:14.5px; line-height:1.5; color:#aab8cc; margin:0;">A guided, source-backed match. Four quick steps, no account needed.</p>
+      </div>
+      <div style="flex:1 1 440px; min-width:300px; display:flex; flex-direction:column; gap:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:11px; padding:12px 14px;">
+            <div style="font-size:11px; color:#7aa0e8; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:9px;">Study level</div>
+            <div style="display:flex; gap:6px;">
+              <span style="font-size:12.5px; font-weight:600; color:#0b1f3a; background:#fff; padding:5px 11px; border-radius:7px;">Master's</span>
+              <span style="font-size:12.5px; color:#cdd9ea; background:rgba(255,255,255,0.07); padding:5px 11px; border-radius:7px;">Bachelor's</span>
+            </div>
+          </div>
+          <div style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:11px; padding:12px 14px;">
+            <div style="font-size:11px; color:#7aa0e8; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:9px;">Subject</div>
+            <div style="font-size:14px; color:#fff; display:flex; align-items:center; justify-content:space-between;">Computer Science <span style="border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #7aa0e8;"></span></div>
+          </div>
+          <div style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:11px; padding:12px 14px;">
+            <div style="font-size:11px; color:#7aa0e8; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:9px;">Destination</div>
+            <div style="font-size:14px; color:#fff; display:flex; align-items:center; justify-content:space-between;">Europe <span style="border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #7aa0e8;"></span></div>
+          </div>
+          <div style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:11px; padding:12px 14px;">
+            <div style="font-size:11px; color:#7aa0e8; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:9px;">Budget / deadline</div>
+            <div style="font-size:14px; color:#fff; display:flex; align-items:center; justify-content:space-between;">Under €15,000 <span style="border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #7aa0e8;"></span></div>
+          </div>
+        </div>
+        <button style="width:100%; padding:13px; font-size:14.5px; font-weight:600; color:#fff; background:#1d4ed8; border:none; border-radius:11px; cursor:pointer; transition:background .15s;" style-hover="{{ primaryHover }}">Find my matches</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURED PROGRAMS ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:46px 32px 0;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:20px; gap:16px;">
+      <div>
+        <h2 style="font-size:24px; font-weight:700; letter-spacing:-0.015em; margin:0 0 5px;">Featured programs</h2>
+        <p style="font-size:14px; color:#64748b; margin:0;">Source-checked this week &middot; ranked by fit for international students</p>
+      </div>
+      <a href="#" style="font-size:14px; font-weight:600; color:#1d4ed8; text-decoration:none; white-space:nowrap;">View all programs &rarr;</a>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:14px;">
+      <sc-for list="{{ featured }}" as="p" hint-placeholder-count="3">
+        <dc-import name="ProgramCard" program="{{ p }}" saved="{{ p.saved }}" comparing="{{ p.comparing }}" on-toggle-save="{{ toggleSave }}" on-toggle-compare="{{ toggleCompare }}" hint-size="100%,210px"></dc-import>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ BROWSE BY STUDY GOAL ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:46px 32px 0;">
+    <h2 style="font-size:24px; font-weight:700; letter-spacing:-0.015em; margin:0 0 20px;">Browse by study goal</h2>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px;">
+      <sc-for list="{{ studyGoals }}" as="g" hint-placeholder-count="6">
+        <a href="#" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:18px 18px 16px; text-decoration:none; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; min-height:118px;" style-hover="{{ tileHover }}">
+          <span style="font-size:15.5px; font-weight:600; color:#0b1f3a;">{{ g.title }}</span>
+          <span style="font-size:13px; color:#64748b; line-height:1.4;">{{ g.sub }}</span>
+          <span style="margin-top:auto; font-size:12.5px; font-weight:600; color:#1d4ed8;">{{ g.count }} &rarr;</span>
+        </a>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ POPULAR DESTINATIONS ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:46px 32px 0;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:20px; gap:16px;">
+      <h2 style="font-size:24px; font-weight:700; letter-spacing:-0.015em; margin:0;">Popular study destinations</h2>
+      <a href="#" style="font-size:14px; font-weight:600; color:#1d4ed8; text-decoration:none; white-space:nowrap;">All destinations &rarr;</a>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px;">
+      <sc-for list="{{ destinations }}" as="d" hint-placeholder-count="4">
+        <a href="#" style="display:block; background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; text-decoration:none; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;" style-hover="{{ tileHover }}">
+          <div style="height:118px; background:repeating-linear-gradient(135deg,#eef2f7,#eef2f7 11px,#e6ecf3 11px,#e6ecf3 22px); display:flex; align-items:flex-end; padding:10px;">
+            <span style="font-family:'IBM Plex Mono'; font-size:10.5px; color:#7d8aa0; background:#fff; border:1px solid #e2e8f0; padding:2px 7px; border-radius:5px;">photo &middot; {{ d.tag }}</span>
+          </div>
+          <div style="padding:14px 16px 16px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+              <span style="font-size:10px; font-weight:700; letter-spacing:.05em; color:#64748b; border:1px solid #e2e8f0; border-radius:4px; padding:1px 5px;">{{ d.code }}</span>
+              <span style="font-size:16px; font-weight:600; color:#0b1f3a;">{{ d.name }}</span>
+            </div>
+            <div style="font-size:13px; color:#475569;">{{ d.programs }}</div>
+            <div style="font-size:13px; color:#64748b; margin-top:2px;">{{ d.tuition }}</div>
+          </div>
+        </a>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ SCHOLARSHIPS ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:46px 32px 0;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:20px; gap:16px;">
+      <div>
+        <h2 style="font-size:24px; font-weight:700; letter-spacing:-0.015em; margin:0 0 5px;">Scholarships &amp; funding</h2>
+        <p style="font-size:14px; color:#64748b; margin:0;">Verified funding for international students &middot; eligibility and deadlines checked at source</p>
+      </div>
+      <a href="#" style="font-size:14px; font-weight:600; color:#1d4ed8; text-decoration:none; white-space:nowrap;">All scholarships &rarr;</a>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px;">
+      <sc-for list="{{ scholarships }}" as="s" hint-placeholder-count="3">
+        <div style="display:flex; flex-direction:column; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;" style-hover="{{ tileHover }}">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:4px;">
+            <span style="font-size:16.5px; font-weight:600; color:#0b1f3a; line-height:1.25;">{{ s.name }}</span>
+            <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; color:#047857; background:#ecfdf5; border:1px solid #a7f3d0; padding:3px 8px; border-radius:6px;">
+              <span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; border-radius:50%; background:#047857;"><span style="display:block; width:3px; height:6px; border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg); margin-top:-1px;"></span></span>Verified
+            </span>
+          </div>
+          <div style="font-size:13px; color:#64748b; margin-bottom:14px;">{{ s.provider }}</div>
+          <div style="display:flex; flex-direction:column; gap:9px; padding:14px 0; border-top:1px solid #eef2f7; border-bottom:1px solid #eef2f7;">
+            <div style="display:flex; justify-content:space-between; font-size:13.5px;"><span style="color:#64748b;">Amount</span><span style="color:#0b1f3a; font-weight:600;">{{ s.amount }}</span></div>
+            <div style="display:flex; justify-content:space-between; font-size:13.5px;"><span style="color:#64748b;">Covers</span><span style="color:#0b1f3a; font-weight:500;">{{ s.cover }}</span></div>
+            <div style="display:flex; justify-content:space-between; font-size:13.5px;"><span style="color:#64748b;">Eligibility</span><span style="color:#0b1f3a; font-weight:500; text-align:right;">{{ s.eligibility }}</span></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin:14px 0;">
+            <span style="display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; color:#b45309; background:#fffbeb; border:1px solid #fcd9a5; padding:4px 9px; border-radius:6px;"><span style="width:6px; height:6px; border-radius:50%; background:#b45309;"></span>Deadline &middot; {{ s.deadline }}</span>
+          </div>
+          <button style="width:100%; padding:10px; font-size:13.5px; font-weight:600; color:#1d4ed8; background:#fff; border:1px solid #dbe4ff; border-radius:9px; cursor:pointer; transition:all .15s; margin-top:auto;" style-hover="{{ ghostHover }}">View scholarship</button>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ FIT FINDER CTA ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:46px 32px 0;">
+    <div style="background:#0b1f3a; border-radius:18px; padding:34px 36px; display:flex; align-items:center; justify-content:space-between; gap:28px; flex-wrap:wrap;">
+      <div style="flex:1 1 420px;">
+        <h2 style="font-size:23px; font-weight:600; color:#fff; margin:0 0 7px; letter-spacing:-0.01em;">Not sure where to start?</h2>
+        <p style="font-size:15px; color:#aab8cc; margin:0; line-height:1.5;">Answer four questions and Fit Finder will surface programs matched to your goals, budget, and deadlines.</p>
+      </div>
+      <button style="flex:none; padding:13px 26px; font-size:14.5px; font-weight:600; color:#0b1f3a; background:#fff; border:none; border-radius:11px; cursor:pointer; transition:transform .15s;" style-hover="{{ ctaWhiteHover }}">Open Fit Finder &rarr;</button>
+    </div>
+  </section>
+
+  <!-- ============ GUIDES ============ -->
+  <section style="max-width:1200px; margin:0 auto; padding:46px 32px 0;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:20px; gap:16px;">
+      <h2 style="font-size:24px; font-weight:700; letter-spacing:-0.015em; margin:0;">Study-abroad guides</h2>
+      <a href="#" style="font-size:14px; font-weight:600; color:#1d4ed8; text-decoration:none; white-space:nowrap;">All guides &rarr;</a>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px;">
+      <sc-for list="{{ guides }}" as="g" hint-placeholder-count="3">
+        <a href="#" style="display:block; background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; text-decoration:none; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;" style-hover="{{ tileHover }}">
+          <div style="height:140px; background:repeating-linear-gradient(135deg,#eef2f7,#eef2f7 11px,#e6ecf3 11px,#e6ecf3 22px); display:flex; align-items:flex-end; padding:10px;">
+            <span style="font-family:'IBM Plex Mono'; font-size:10.5px; color:#7d8aa0; background:#fff; border:1px solid #e2e8f0; padding:2px 7px; border-radius:5px;">illustration</span>
+          </div>
+          <div style="padding:16px 18px 18px;">
+            <span style="font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#1d4ed8;">{{ g.cat }}</span>
+            <div style="font-size:16px; font-weight:600; color:#0b1f3a; line-height:1.3; margin:8px 0 12px;">{{ g.title }}</div>
+            <span style="font-size:12.5px; color:#94a3b8;">{{ g.read }}</span>
+          </div>
+        </a>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer style="margin-top:54px; background:#0b1f3a; color:#cdd9ea;">
+    <div style="max-width:1200px; margin:0 auto; padding:48px 32px 32px;">
+      <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr 1fr; gap:32px; padding-bottom:34px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <div style="width:28px; height:28px; border-radius:7px; background:#fff; color:#0b1f3a; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; font-family:'IBM Plex Mono';">D</div>
+            <span style="font-size:17px; font-weight:700; color:#fff;">DegreeWiki</span>
+          </div>
+          <p style="font-size:13px; line-height:1.6; color:#8fa1bd; margin:0 0 14px; max-width:300px;">A source-backed search portal for international students comparing degree programs abroad.</p>
+          <div style="display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:#9fb3d1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); padding:7px 11px; border-radius:8px;">
+            <span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#34d399;"><span style="display:block; width:3px; height:6px; border-right:2px solid #0b1f3a; border-bottom:2px solid #0b1f3a; transform:rotate(45deg); margin-top:-1px;"></span></span>
+            Program data re-checked against official sources weekly
+          </div>
+        </div>
+        <sc-for list="{{ footerCols }}" as="col" hint-placeholder-count="3">
+          <div>
+            <div style="font-size:12.5px; font-weight:600; color:#fff; text-transform:uppercase; letter-spacing:.06em; margin-bottom:14px;">{{ col.title }}</div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <sc-for list="{{ col.items }}" as="link" hint-placeholder-count="4">
+                <a href="#" style="font-size:13.5px; color:#9fb3d1; text-decoration:none;" style-hover="{{ footerHover }}">{{ link }}</a>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; padding-top:22px; flex-wrap:wrap; gap:12px;">
+        <span style="font-size:12.5px; color:#7d8fae;">© 2026 DegreeWiki. Independent education search — not affiliated with listed universities.</span>
+        <div style="display:flex; gap:20px;">
+          <a href="#" style="font-size:12.5px; color:#9fb3d1; text-decoration:none;" style-hover="{{ footerHover }}">Privacy</a>
+          <a href="#" style="font-size:12.5px; color:#9fb3d1; text-decoration:none;" style-hover="{{ footerHover }}">Terms</a>
+          <a href="#" style="font-size:12.5px; color:#9fb3d1; text-decoration:none;" style-hover="{{ footerHover }}">Sources &amp; methodology</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+
+  <!-- ============================================================= -->
+  <!-- ============ 02 · LISTING / SEARCH PAGE ============ -->
+  <!-- ============================================================= -->
+  <div style="max-width:1200px; margin:0 auto; padding:56px 32px 0;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <span style="font-family:'IBM Plex Mono'; font-size:12px; font-weight:600; color:#1d4ed8; background:#eff4ff; border:1px solid #dbe4ff; padding:4px 11px; border-radius:999px;">02 · Program search</span>
+      <span style="flex:1; height:1px; background:#e2e8f0;"></span>
+    </div>
+  </div>
+
+  <section style="max-width:1200px; margin:0 auto; padding:24px 32px 0;">
+    <!-- compact search toolbar -->
+    <div style="background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; box-shadow:0 2px 12px rgba(11,31,58,0.04);">
+      <div style="display:flex; align-items:center; gap:8px; flex:2 1 220px; min-width:200px; height:44px; padding:0 14px; border:1px solid #e2e8f0; border-radius:10px; background:#fff;">
+        <span style="font-size:14px; color:#0b1f3a; font-weight:500; flex:1;">Data Science</span>
+        <span style="font-size:16px; color:#94a3b8; cursor:pointer; line-height:1;">×</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; height:44px; padding:0 14px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; cursor:pointer;">
+        <span style="font-size:14px; color:#0b1f3a;">Master's</span>
+        <span style="border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #64748b;"></span>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; height:44px; padding:0 14px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; cursor:pointer;">
+        <span style="font-size:14px; color:#0b1f3a;">Netherlands</span>
+        <span style="border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #64748b;"></span>
+      </div>
+      <button style="height:44px; padding:0 24px; font-size:14px; font-weight:600; color:#fff; background:#1d4ed8; border:1px solid #1d4ed8; border-radius:10px; cursor:pointer; transition:background .15s;" style-hover="{{ primaryHover }}">Search</button>
+      <button style="height:44px; padding:0 16px; font-size:14px; font-weight:600; color:#1d4ed8; background:#fff; border:1px solid #dbe4ff; border-radius:10px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; transition:all .15s;" style-hover="{{ ghostHover }}"><span style="font-size:15px; line-height:0;">+</span> More filters</button>
+    </div>
+
+    <!-- two-column layout -->
+    <div style="display:grid; grid-template-columns:264px 1fr; gap:24px; margin-top:22px; align-items:start;">
+
+      <!-- filter rail -->
+      <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:6px 18px 18px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 0 4px;">
+          <span style="font-size:14px; font-weight:700; color:#0b1f3a;">Filters</span>
+          <a href="#" style="font-size:12.5px; font-weight:600; color:#1d4ed8; text-decoration:none;">Reset</a>
+        </div>
+
+        <sc-for list="{{ filterGroups }}" as="g" hint-placeholder-count="4">
+          <div style="padding:15px 0; border-top:1px solid #eef2f7;">
+            <div style="font-size:13px; font-weight:600; color:#0b1f3a; margin-bottom:11px;">{{ g.title }}</div>
+            <sc-if value="{{ g.search }}" hint-placeholder-val="{{ false }}">
+              <input placeholder="Search…" style="width:100%; padding:8px 11px; border:1px solid #e2e8f0; border-radius:8px; font-size:13px; color:#0b1f3a; background:#fff; outline:none; margin-bottom:11px; transition:border-color .15s, box-shadow .15s;" style-focus="{{ focusRing }}" />
+            </sc-if>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <sc-for list="{{ g.options }}" as="opt" hint-placeholder-count="4">
+                <label style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
+                  <span style="display:flex; align-items:center; gap:9px; font-size:13.5px; color:#334155;">
+                    <sc-if value="{{ opt.checked }}" hint-placeholder-val="{{ false }}">
+                      <span style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:4px; background:#1d4ed8; border:1.5px solid #1d4ed8; flex:none;"><span style="display:block; width:3px; height:7px; border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg); margin-top:-1px;"></span></span>
+                    </sc-if>
+                    <sc-if value="{{ opt.unchecked }}" hint-placeholder-val="{{ true }}">
+                      <span style="display:inline-block; width:16px; height:16px; border-radius:4px; background:#fff; border:1.5px solid #cbd5e1; flex:none;"></span>
+                    </sc-if>
+                    {{ opt.label }}
+                  </span>
+                  <span style="font-size:12px; color:#94a3b8;">{{ opt.count }}</span>
+                </label>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+
+        <!-- tuition range -->
+        <div style="padding:15px 0; border-top:1px solid #eef2f7;">
+          <div style="font-size:13px; font-weight:600; color:#0b1f3a; margin-bottom:13px;">Tuition (per year)</div>
+          <div style="position:relative; height:4px; background:#e2e8f0; border-radius:999px; margin:0 4px 14px;">
+            <div style="position:absolute; left:8%; right:38%; top:0; bottom:0; background:#1d4ed8; border-radius:999px;"></div>
+            <div style="position:absolute; left:8%; top:50%; width:15px; height:15px; background:#fff; border:2px solid #1d4ed8; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 1px 3px rgba(11,31,58,0.2);"></div>
+            <div style="position:absolute; left:62%; top:50%; width:15px; height:15px; background:#fff; border:2px solid #1d4ed8; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 1px 3px rgba(11,31,58,0.2);"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; gap:8px;">
+            <span style="font-size:12.5px; color:#334155; border:1px solid #e2e8f0; border-radius:7px; padding:6px 10px; background:#fff;">€0</span>
+            <span style="font-size:12.5px; color:#334155; border:1px solid #e2e8f0; border-radius:7px; padding:6px 10px; background:#fff;">€18,000+</span>
+          </div>
+        </div>
+
+        <!-- toggles -->
+        <div style="padding:15px 0 6px; border-top:1px solid #eef2f7; display:flex; flex-direction:column; gap:14px;">
+          <sc-for list="{{ toggles }}" as="t" hint-placeholder-count="2">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <span style="font-size:13.5px; color:#334155; display:flex; align-items:center; gap:7px;">{{ t.label }}</span>
+              <span style="{{ t.trackStyle }}"><span style="{{ t.knobStyle }}"></span></span>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- mobile hint -->
+        <div style="margin-top:16px; padding:11px 13px; border:1px dashed #cbd5e1; border-radius:10px; background:#faf8f3;">
+          <span style="font-size:11.5px; color:#64748b; line-height:1.5;">On mobile, filters collapse into a sticky <strong style="color:#0b1f3a; font-weight:600;">Filters</strong> button with a result-count preview.</span>
+        </div>
+      </aside>
+
+      <!-- results column -->
+      <div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+          <div>
+            <span style="font-size:20px; font-weight:700; color:#0b1f3a;">{{ resultCount }}</span>
+            <span style="font-size:14px; color:#64748b; margin-left:8px;">match your filters</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:13px; color:#64748b;">Sort</span>
+            <select style="padding:9px 12px; border:1px solid #e2e8f0; border-radius:9px; font-size:13.5px; color:#0b1f3a; background:#fff; outline:none; cursor:pointer; transition:border-color .15s, box-shadow .15s;" style-focus="{{ focusRing }}">
+              <option>Best match</option><option>Tuition: low to high</option><option>Deadline: soonest</option><option>Duration: shortest</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- active filters -->
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
+          <span style="font-size:12.5px; color:#64748b;">Active:</span>
+          <sc-for list="{{ activeFilters }}" as="f" hint-placeholder-count="4">
+            <span style="display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:500; color:#1e40af; background:#eff4ff; border:1px solid #dbe4ff; padding:5px 7px 5px 11px; border-radius:999px; cursor:pointer; transition:background .15s;" style-hover="{{ chipBlueHover }}">
+              {{ f }}<span style="font-size:14px; line-height:0.6; color:#5b7cd6;">×</span>
+            </span>
+          </sc-for>
+          <a href="#" style="font-size:12.5px; font-weight:600; color:#64748b; text-decoration:none; margin-left:4px;">Clear all</a>
+        </div>
+
+        <!-- result cards -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <sc-for list="{{ programs }}" as="p" hint-placeholder-count="6">
+            <dc-import name="ProgramCard" program="{{ p }}" saved="{{ p.saved }}" comparing="{{ p.comparing }}" on-toggle-save="{{ toggleSave }}" on-toggle-compare="{{ toggleCompare }}" hint-size="100%,210px"></dc-import>
+          </sc-for>
+        </div>
+
+        <!-- compare tray (sticky within results) -->
+        <sc-if value="{{ showTray }}" hint-placeholder-val="{{ true }}">
+          <div style="position:sticky; bottom:18px; margin-top:18px; z-index:20; background:#0b1f3a; border-radius:14px; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; box-shadow:0 14px 40px rgba(11,31,58,0.28);">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <span style="font-size:14px; font-weight:600; color:#fff;">Comparing {{ compareCount }} of 4</span>
+              <div style="display:flex; gap:6px;">
+                <sc-for list="{{ compareList }}" as="c" hint-placeholder-count="2">
+                  <span style="font-family:'IBM Plex Mono'; font-size:11px; font-weight:600; color:#0b1f3a; background:#fff; border-radius:6px; padding:4px 8px;">{{ c.monogram }}</span>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <button onClick="{{ clearCompare }}" style="font-size:13.5px; font-weight:500; color:#9fb3d1; background:transparent; border:none; cursor:pointer;">Clear</button>
+              <button style="font-size:13.5px; font-weight:600; color:#0b1f3a; background:#fff; border:none; padding:9px 18px; border-radius:9px; cursor:pointer;">Compare programs &rarr;</button>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============================================================= -->
+  <!-- ============ 03 · CARD STATES ============ -->
+  <!-- ============================================================= -->
+  <div style="max-width:1200px; margin:0 auto; padding:60px 32px 0;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <span style="font-family:'IBM Plex Mono'; font-size:12px; font-weight:600; color:#1d4ed8; background:#eff4ff; border:1px solid #dbe4ff; padding:4px 11px; border-radius:999px;">03 · Program card — states</span>
+      <span style="flex:1; height:1px; background:#e2e8f0;"></span>
+    </div>
+  </div>
+
+  <section style="max-width:980px; margin:0 auto; padding:24px 32px 0;">
+    <p style="font-size:14.5px; color:#475569; margin:0 0 28px; max-width:660px; line-height:1.55;">The program card is the core record of the portal. It reads as structured data, not a marketing card — degree badge, title, university, location, tuition, duration, deadline, language, scholarship and verified signals, last-checked date, and save / compare / view actions.</p>
+
+    <div style="display:flex; flex-direction:column; gap:30px;">
+      <div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:11px;">
+          <span style="font-family:'IBM Plex Mono'; font-size:11.5px; font-weight:600; color:#475569; background:#fff; border:1px solid #e2e8f0; padding:3px 9px; border-radius:6px;">Default</span>
+          <span style="font-size:13px; color:#94a3b8;">resting state — full data record</span>
+        </div>
+        <dc-import name="ProgramCard" program="{{ demoA }}" saved="{{ false }}" comparing="{{ false }}" hint-size="100%,210px"></dc-import>
+      </div>
+
+      <div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:11px;">
+          <span style="font-family:'IBM Plex Mono'; font-size:11.5px; font-weight:600; color:#475569; background:#fff; border:1px solid #e2e8f0; padding:3px 9px; border-radius:6px;">Hover / active</span>
+          <span style="font-size:13px; color:#94a3b8;">lifts 2px, shadow deepens, border darkens</span>
+        </div>
+        <dc-import name="ProgramCard" program="{{ demoB }}" saved="{{ false }}" comparing="{{ false }}" force-hover="{{ true }}" hint-size="100%,210px"></dc-import>
+      </div>
+
+      <div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:11px;">
+          <span style="font-family:'IBM Plex Mono'; font-size:11.5px; font-weight:600; color:#1d4ed8; background:#eff4ff; border:1px solid #dbe4ff; padding:3px 9px; border-radius:6px;">Saved + selected to compare</span>
+          <span style="font-size:13px; color:#94a3b8;">save filled, compare checked, blue selection ring</span>
+        </div>
+        <dc-import name="ProgramCard" program="{{ demoC }}" saved="{{ true }}" comparing="{{ true }}" hint-size="100%,210px"></dc-import>
+      </div>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  state = { savedSet: ['p1'], compareSet: ['p2', 'p7'] };
+
+  toggleIn(arr, id) {
+    return arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id];
+  }
+
+  renderVals() {
+    const programsRaw = [
+      { id:'p1', monogram:'UvA', level:'MSc', field:'Computer & Data Science', title:'Data Science', university:'University of Amsterdam', code:'NL', location:'Amsterdam, Netherlands', duration:'24 months', language:'English', start:'Sep 2026', deadline:'15 Oct 2026', deadlineSoon:false, deadlineNote:'', tuition:'€15,300', tuitionPer:'per year', scholarship:true, scholarshipLabel:'Scholarship available', verified:true, checked:'18 Jun 2026' },
+      { id:'p2', monogram:'TUM', level:'MSc', field:'Computer Science', title:'Informatics', university:'Technical University of Munich', code:'DE', location:'Munich, Germany', duration:'24 months', language:'English', start:'Oct 2026', deadline:'30 Jun 2026', deadlineSoon:true, deadlineNote:'Deadline in 9 days', tuition:'€258', tuitionPer:'per semester', scholarship:true, scholarshipLabel:'DAAD scholarship', verified:true, checked:'20 Jun 2026' },
+      { id:'p3', monogram:'KTH', level:'MSc', field:'Engineering', title:'Mechanical Engineering', university:'KTH Royal Institute of Technology', code:'SE', location:'Stockholm, Sweden', duration:'24 months', language:'English', start:'Aug 2026', deadline:'15 Jan 2027', deadlineSoon:false, deadlineNote:'', tuition:'€16,200', tuitionPer:'per year', scholarship:false, scholarshipLabel:'', verified:true, checked:'12 Jun 2026' },
+      { id:'p4', monogram:'ScP', level:'MA', field:'Social Sciences', title:'International Relations', university:'Sciences Po', code:'FR', location:'Paris, France', duration:'24 months', language:'English', start:'Sep 2026', deadline:'10 Jul 2026', deadlineSoon:true, deadlineNote:'Deadline in 19 days', tuition:'€13,000', tuitionPer:'per year', scholarship:true, scholarshipLabel:'Émile-Boutmy scholarship', verified:true, checked:'19 Jun 2026' },
+      { id:'p5', monogram:'Boc', level:'MSc', field:'Business & Finance', title:'Finance', university:'Bocconi University', code:'IT', location:'Milan, Italy', duration:'24 months', language:'English', start:'Sep 2026', deadline:'Rolling', deadlineSoon:false, deadlineNote:'', tuition:'€15,948', tuitionPer:'per year', scholarship:true, scholarshipLabel:'Merit scholarship', verified:true, checked:'17 Jun 2026' },
+      { id:'p6', monogram:'EUR', level:'BSc', field:'Business', title:'International Business Administration', university:'Erasmus University Rotterdam', code:'NL', location:'Rotterdam, Netherlands', duration:'36 months', language:'English', start:'Sep 2026', deadline:'15 Jan 2027', deadlineSoon:false, deadlineNote:'', tuition:'€10,500', tuitionPer:'per year', scholarship:false, scholarshipLabel:'', verified:true, checked:'15 Jun 2026' },
+      { id:'p7', monogram:'UoE', level:'MSc', field:'Computer Science', title:'Artificial Intelligence', university:'University of Edinburgh', code:'GB', location:'Edinburgh, United Kingdom', duration:'12 months', language:'English', start:'Sep 2026', deadline:'5 Jul 2026', deadlineSoon:true, deadlineNote:'Deadline in 14 days', tuition:'£38,500', tuitionPer:'per year', scholarship:false, scholarshipLabel:'', verified:true, checked:'21 Jun 2026' },
+      { id:'p8', monogram:'DTU', level:'MSc', field:'Engineering', title:'Sustainable Energy', university:'Technical University of Denmark', code:'DK', location:'Lyngby, Denmark', duration:'24 months', language:'English', start:'Sep 2026', deadline:'15 Mar 2027', deadlineSoon:false, deadlineNote:'', tuition:'€0', tuitionPer:'EU/EEA · non-EU €15,000', scholarship:true, scholarshipLabel:'State scholarship', verified:true, checked:'10 Jun 2026' }
+    ];
+
+    const decorate = p => ({ ...p, saved: this.state.savedSet.includes(p.id), comparing: this.state.compareSet.includes(p.id) });
+    const programs = programsRaw.map(decorate);
+    const byId = id => programs.find(p => p.id === id);
+    const featured = ['p1', 'p4', 'p2'].map(byId);
+    const compareList = this.state.compareSet.map(byId).filter(Boolean);
+
+    const filterGroups = [
+      { title:'Degree level', search:false, options:[ {label:"Bachelor's",count:'4,120',checked:false},{label:"Master's",count:'7,460',checked:true},{label:'PhD',count:'1,240',checked:false},{label:'Short course',count:'860',checked:false} ] },
+      { title:'Subject area', search:true, options:[ {label:'Computer Science',count:'1,310',checked:true},{label:'Engineering',count:'1,940',checked:false},{label:'Business & Management',count:'2,260',checked:false},{label:'Social Sciences',count:'1,520',checked:false} ] },
+      { title:'Destination', search:true, options:[ {label:'Netherlands',count:'1,920',checked:true},{label:'Germany',count:'2,540',checked:false},{label:'Sweden',count:'880',checked:false},{label:'United Kingdom',count:'3,110',checked:false} ] },
+      { title:'Language', search:false, options:[ {label:'English',count:'9,300',checked:true},{label:'German',count:'1,200',checked:false},{label:'French',count:'640',checked:false} ] }
+    ].map(g => ({ ...g, options: g.options.map(o => ({ ...o, unchecked: !o.checked })) }));
+
+    const trackOn = { display:'inline-flex', alignItems:'center', width:'38px', height:'22px', borderRadius:'999px', background:'#1d4ed8', padding:'2px', justifyContent:'flex-end', cursor:'pointer', transition:'background .15s' };
+    const trackOff = { display:'inline-flex', alignItems:'center', width:'38px', height:'22px', borderRadius:'999px', background:'#cbd5e1', padding:'2px', justifyContent:'flex-start', cursor:'pointer', transition:'background .15s' };
+    const knob = { display:'block', width:'18px', height:'18px', borderRadius:'50%', background:'#fff', boxShadow:'0 1px 2px rgba(0,0,0,0.2)' };
+    const toggles = [
+      { label:'Scholarship available', trackStyle: trackOn, knobStyle: knob },
+      { label:'Verified sources only', trackStyle: trackOn, knobStyle: knob }
+    ];
+
+    return {
+      programs, featured, compareList,
+      savedCount: this.state.savedSet.length,
+      compareCount: compareList.length,
+      showTray: compareList.length > 0,
+      demoA: programsRaw[2], demoB: programsRaw[0], demoC: programsRaw[1],
+      toggleSave: (id) => this.setState(s => ({ savedSet: this.toggleIn(s.savedSet, id) })),
+      toggleCompare: (id) => this.setState(s => ({ compareSet: this.toggleIn(s.compareSet, id) })),
+      clearCompare: () => this.setState({ compareSet: [] }),
+
+      nav: ['Programs', 'Universities', 'Scholarships', 'Destinations', 'Guides'],
+      resultCount: '1,284 programs',
+      activeFilters: ["Master's", 'English', 'Netherlands', 'Scholarship available'],
+      filterGroups, toggles,
+
+      studyGoals: [
+        { title:'Boost my career', sub:"Industry-aligned master's degrees", count:'4,210 programs' },
+        { title:'Switch into tech', sub:'Conversion & computing degrees', count:'1,180 programs' },
+        { title:'Research & PhD track', sub:'Thesis-based, research-led programs', count:'2,640 programs' },
+        { title:'Study fully in English', sub:'No local language required', count:'9,300 programs' },
+        { title:'Low or no tuition', sub:'Public and state-funded options', count:'3,070 programs' },
+        { title:'Scholarship-funded', sub:'Programs with available aid', count:'2,450 programs' }
+      ],
+      destinations: [
+        { name:'Netherlands', code:'NL', programs:'1,920 programs', tuition:'avg €12,400 / yr', tag:'Amsterdam' },
+        { name:'Germany', code:'DE', programs:'2,540 programs', tuition:'avg €1,500 / yr', tag:'Munich' },
+        { name:'Sweden', code:'SE', programs:'880 programs', tuition:'avg €15,000 / yr', tag:'Stockholm' },
+        { name:'United Kingdom', code:'GB', programs:'3,110 programs', tuition:'avg £24,000 / yr', tag:'Edinburgh' }
+      ],
+      scholarships: [
+        { name:'DAAD Study Scholarship', provider:'Germany · Government', amount:'€992 / month', cover:'Living stipend + tuition', eligibility:"Master's · all subjects", deadline:'31 Oct 2026', checked:'16 Jun 2026' },
+        { name:'Holland Scholarship', provider:'Netherlands · Government', amount:'€5,000 one-time', cover:'First-year grant', eligibility:"Non-EEA · Bachelor's & Master's", deadline:'1 Feb 2027', checked:'14 Jun 2026' },
+        { name:'Erasmus Mundus Joint Masters', provider:'EU · Commission', amount:'Up to €1,400 / month', cover:'Tuition + travel + living', eligibility:"Master's · joint programs", deadline:'15 Jan 2027', checked:'19 Jun 2026' }
+      ],
+      guides: [
+        { cat:'Application', title:'How to write a study-abroad motivation letter', read:'8 min read' },
+        { cat:'Funding', title:'Finding scholarships as an international student', read:'11 min read' },
+        { cat:'Destinations', title:'Studying in the Netherlands: a 2026 guide', read:'14 min read' }
+      ],
+      footerCols: [
+        { title:'Explore', items:['Bachelor\u2019s programs','Master\u2019s programs','Universities','Scholarships','Destinations'] },
+        { title:'Resources', items:['Study-abroad guides','Fit Finder','Compare programs','Application timeline'] },
+        { title:'Company', items:['About DegreeWiki','How we verify data','Contact','For universities'] }
+      ],
+
+      focusRing: { borderColor:'#1d4ed8', boxShadow:'0 0 0 3px rgba(29,78,216,0.15)' },
+      primaryHover: { background:'#1e40af' },
+      tileHover: { transform:'translateY(-2px)', boxShadow:'0 12px 30px rgba(11,31,58,0.10)', borderColor:'#cbd5e1' },
+      navHover: { color:'#0b1f3a' },
+      footerHover: { color:'#fff' },
+      ghostHover: { borderColor:'#bcd0ff', background:'#f5f8ff' },
+      chipBlueHover: { background:'#dbe4ff' },
+      ctaWhiteHover: { transform:'translateY(-1px)' }
+    };
+  }
+}
+</script>
+</body>
+</html>

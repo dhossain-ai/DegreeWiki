@@ -1,8 +1,34 @@
 # DegreeWiki Current Status
 
-Last updated: 2026-06-21 (Phase 54A)
+Last updated: 2026-06-21 (Phase 55A)
 
 ## Current Phase
+
+Phase 55A — Design Reference Lock + public-ui-direction.md — complete (including
+amendment). Created `docs/design/public-ui-direction.md` locking the approved
+public UI direction. Phase 55A amendment: normalized the locked design reference
+files from the design zip into their canonical names:
+`docs/design/degreewiki-homepage-reference.html` (from `DegreeWiki.dc.html`) and
+`docs/design/degreewiki-program-card-reference.html` (from `ProgramCard.dc.html`).
+`support.js` retained (referenced by both HTML files). `.thumbnail` removed (not
+referenced). `public-ui-direction.md` updated to confirm both reference files are
+now present. No frontend implementation files changed. No dependencies, schema,
+or API changes. Phase 55B may now begin.
+
+Phase 55 — Public Design System Foundation — complete.
+Added a reusable public design system without changing product behavior. Tailwind v4
+@theme tokens (warm ivory canvas, white surfaces, deep navy ink, academic blue
+primary, green for verified/scholarship, amber for deadlines, soft slate edges/muted
+text) defined in src/styles/global.css plus a safe :focus-visible base style. Public
+visual background/shell moved to PublicLayout (bg-canvas text-ink); BaseLayout left
+unchanged so admin/auth backgrounds are unaffected. Created UI primitives
+(Container, Section, SectionHeader, Button, Badge, Card) and reusable public
+components (ProgramCard, DestinationCard, ScholarshipRow, GuideCard, SearchField,
+SearchChip, FitFinderMiniPanel). PublicNav and PublicFooter restyled to portal style
+via the primitives and tokens — same links, same auth logic. No homepage rewrite, no
+schema/RLS/AI/auth/admin changes, no new dependencies, no service-role usage in
+pages/components/layouts, no set:html/innerHTML. npm run build: PASS (Server built in
+4.31s, zero errors).
 
 Phase 54A — AI Summary Formatting + Async Result UX — complete.
 Rule-based Fit Finder matches now render immediately; the AI summary is generated
