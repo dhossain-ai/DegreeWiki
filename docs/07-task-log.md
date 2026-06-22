@@ -526,6 +526,47 @@ Deferred to Phase 60:
 - Cloudinary secret grep: zero matches in Phase 57C files.
 - config.ts/upload.ts import grep: zero matches in Phase 57C files.
 
+## 2026-06-22 - Phase 58D: Research Pack Import + Rich Program Field Mapping
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Accept nested source-backed AI research packs in mixed import batches.
+- Preserve rich program source data in staging raw_data.
+- Map safely supported rich program fields into existing production `programs` columns during reviewed create-new merge.
+
+Inspection findings:
+- `programs` already has rich columns for degree_award, primary_subject_id, study_mode, delivery_mode, language_of_instruction, duration_months, tuition amounts/currency/period/notes, application fee fields, official_url, application_url, admission_requirements, english_requirements, gpa_requirements, curriculum_summary, career_outcomes, content_status, verification_status, indexing_status, and quality scores.
+- `staging_programs.raw_data` already exists.
+- Program merge previously read only extracted staging columns, not raw_data.
+- `data_sources` can represent program source URLs, but insert is governed by existing RLS (`manage_data_sources` or super_admin).
+
+Implementation:
+- `src/lib/admin/importParse.ts`: added `parseResearchPackJson()` for `{ university, programs }`; retained flat-array parsing; normalized common degree aliases to seeded degree level codes.
+- `src/pages/admin/imports/[id].astro`: mixed bulk import now detects research-pack shape, stages the university first, resolves exact country name/ISO2 to country code when possible, stages each program with the new `staging_university_id`, and reuses existing review/quality-check flow.
+- `src/lib/admin/importMerge.ts`: program create-new merge now reads `raw_data` and maps supported rich fields to production; primary subject resolves only by exact case-insensitive subject name; verification remains `unverified`; source URLs are best-effort inserted into `data_sources` after production program creation.
+- `src/lib/admin/importTemplates.ts` and `src/lib/admin/importPrompts.ts`: added "Research Pack" template/prompt and corrected program degree-level examples to current seeded codes.
+- Batch JSON preview now recognizes research packs and shows `1 university, N programs` with sample program titles.
+
+Safety:
+- No schema changes and no new dependencies.
+- No direct production import; staging/review/approve/merge remains required.
+- No automatic `verified` status.
+- Flat JSON array imports remain supported.
+- Data-source insert failure does not expose raw provider errors and does not roll back the already-created draft program; admin can add sources manually.
+
+Validation:
+- `npm run build`: PASS.
+- Required service-role, XSS, and Cloudinary secret scans run after implementation.
+
+Known limitations:
+- Research packs are mixed-batch only.
+- Country name resolution requires an exact country name match; otherwise the staged university keeps a validation warning until corrected.
+- `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform notes remain in `raw_data`.
+- `primary_subject_id` is mapped only when exactly one existing subject name matches; no new subjects are created.
+- Source attachment depends on current user permissions and existing `data_sources` RLS.
+
 ## Current / Open Notes
 
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).

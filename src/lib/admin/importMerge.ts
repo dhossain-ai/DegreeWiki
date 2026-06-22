@@ -608,12 +608,206 @@ type StagedProgramRow = {
   id: string
   import_batch_id: string
   import_status: string
+  raw_data: Record<string, unknown>
   extracted_title: string | null
   extracted_degree_level_code: string | null
   extracted_language: string | null
   extracted_tuition_amount: number | null
   staging_university_id: string | null
   match_program_id: string | null
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function textField(raw: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = raw[key]
+    if (value === null || value === undefined) continue
+    const s = String(value).trim()
+    if (s) return s
+  }
+  return null
+}
+
+function numberField(raw: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = raw[key]
+    if (value === null || value === undefined || value === '') continue
+    const n = Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return null
+}
+
+function positiveIntegerField(raw: Record<string, unknown>, keys: string[]): number | null {
+  const n = numberField(raw, keys)
+  if (n === null || n < 1 || !Number.isInteger(n)) return null
+  return n
+}
+
+function normalizeEnum(value: string | null, allowed: readonly string[], aliases: Record<string, string> = {}): string | null {
+  if (!value) return null
+  const key = value.toLowerCase().replace(/[\s-]+/g, '_').trim()
+  const normalized = aliases[key] ?? key
+  return allowed.includes(normalized) ? normalized : null
+}
+
+function normalizeTuitionPeriod(value: string | null): string | null {
+  return normalizeEnum(value, ['per_year', 'per_semester', 'total', 'per_credit'], {
+    year: 'per_year',
+    yearly: 'per_year',
+    annual: 'per_year',
+    annually: 'per_year',
+    per_annum: 'per_year',
+    semester: 'per_semester',
+    credit: 'per_credit',
+  })
+}
+
+function buildEnglishRequirements(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const englishText = textField(raw, ['english_requirements_text', 'english_requirements'])
+  const ielts = numberField(raw, ['ielts_min_score'])
+  const toefl = numberField(raw, ['toefl_min_score'])
+
+  const requirements: Record<string, unknown> = {}
+  if (englishText) requirements.notes = englishText
+  if (ielts !== null) requirements.ielts = { min_overall: ielts }
+  if (toefl !== null) requirements.toefl = { min_overall: toefl }
+
+  return Object.keys(requirements).length > 0 ? requirements : null
+}
+
+async function buildRichProgramPayload(
+  supabase: SupabaseClient,
+  raw: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const payload: Record<string, unknown> = {}
+
+  const directTextFields: Array<[string, string[]]> = [
+    ['degree_award', ['degree_award']],
+    ['language_of_instruction', ['language_of_instruction', 'language']],
+    ['tuition_currency', ['tuition_currency']],
+    ['tuition_notes', ['tuition_notes']],
+    ['application_fee_currency', ['application_fee_currency']],
+    ['application_fee_notes', ['application_fee_notes']],
+    ['official_url', ['official_program_url', 'official_url']],
+    ['application_url', ['official_application_url', 'application_url']],
+    ['admission_requirements', ['admission_requirements_text', 'admission_requirements']],
+    ['gpa_requirements', ['gpa_requirements_text', 'gpa_requirements']],
+    ['curriculum_summary', ['curriculum_or_modules_text', 'curriculum_summary']],
+    ['career_outcomes', ['career_outcomes_text', 'career_outcomes']],
+  ]
+
+  for (const [column, keys] of directTextFields) {
+    const value = textField(raw, keys)
+    if (value) payload[column] = value
+  }
+
+  const studyMode = normalizeEnum(
+    textField(raw, ['study_mode']),
+    ['full_time', 'part_time', 'online', 'hybrid'],
+    { fulltime: 'full_time', full_time: 'full_time', parttime: 'part_time', part_time: 'part_time' }
+  )
+  if (studyMode) payload.study_mode = studyMode
+
+  const deliveryMode = normalizeEnum(
+    textField(raw, ['delivery_mode']),
+    ['on_campus', 'online', 'hybrid', 'distance'],
+    { campus: 'on_campus', in_person: 'on_campus', oncampus: 'on_campus' }
+  )
+  if (deliveryMode) payload.delivery_mode = deliveryMode
+
+  const durationMonths = positiveIntegerField(raw, ['duration_months'])
+  if (durationMonths !== null) payload.duration_months = durationMonths
+
+  const tuitionMin = numberField(raw, ['tuition_min_amount', 'tuition_amount'])
+  if (tuitionMin !== null) payload.tuition_min_amount = tuitionMin
+
+  const tuitionMax = numberField(raw, ['tuition_max_amount'])
+  if (tuitionMax !== null) payload.tuition_max_amount = tuitionMax
+
+  const tuitionPeriod = normalizeTuitionPeriod(textField(raw, ['tuition_period']))
+  if (tuitionPeriod) payload.tuition_period = tuitionPeriod
+
+  const applicationFee = numberField(raw, ['application_fee_amount'])
+  if (applicationFee !== null) payload.application_fee_amount = applicationFee
+
+  const englishRequirements = buildEnglishRequirements(raw)
+  if (englishRequirements) payload.english_requirements = englishRequirements
+
+  const subjectName = textField(raw, ['primary_subject', 'subject_area', 'subject'])
+  if (subjectName) {
+    const { data } = await supabase
+      .from('subjects')
+      .select('id, name')
+      .ilike('name', subjectName)
+      .limit(2)
+    const exactMatches = ((data ?? []) as { id: string; name: string }[])
+      .filter(s => s.name.toLowerCase() === subjectName.toLowerCase())
+    if (exactMatches.length === 1) {
+      payload.primary_subject_id = exactMatches[0].id
+    }
+  }
+
+  return payload
+}
+
+function validUrlOrNull(value: string | null): string | null {
+  if (!value) return null
+  try {
+    return new URL(value).toString()
+  } catch {
+    return null
+  }
+}
+
+function confidenceLevel(raw: Record<string, unknown>): string {
+  const value = textField(raw, ['source_confidence'])
+  return normalizeEnum(value, ['high', 'medium', 'low', 'unknown']) ?? 'unknown'
+}
+
+function collectProgramSourceRows(
+  productionId: string,
+  raw: Record<string, unknown>
+): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = []
+  const seen = new Set<string>()
+  const confidence = confidenceLevel(raw)
+
+  function addSource(urlValue: string | null, title: string, sourceType: string, isPrimary: boolean) {
+    const sourceUrl = validUrlOrNull(urlValue)
+    if (!sourceUrl || seen.has(sourceUrl)) return
+    seen.add(sourceUrl)
+    rows.push({
+      entity_type: 'program',
+      entity_id: productionId,
+      source_url: sourceUrl,
+      source_domain: new URL(sourceUrl).hostname,
+      source_title: title,
+      source_type: sourceType,
+      confidence_level: confidence,
+      source_status: 'active',
+      is_primary_source: isPrimary,
+      notes: 'Imported from staged research pack. Verify manually before marking the program verified.',
+    })
+  }
+
+  addSource(textField(raw, ['official_program_url', 'official_url']), 'Official program page', 'official_university', true)
+  addSource(textField(raw, ['official_application_url', 'application_url']), 'Official application page', 'official_university', false)
+  addSource(textField(raw, ['official_tuition_url']), 'Official tuition page', 'official_university', false)
+
+  const sourceUrls = raw.source_urls
+  if (Array.isArray(sourceUrls)) {
+    for (const value of sourceUrls) {
+      if (typeof value === 'string') {
+        addSource(value, 'Research source', 'third_party', rows.length === 0)
+      }
+    }
+  }
+
+  return rows
 }
 
 async function mergeProgram(
@@ -624,7 +818,7 @@ async function mergeProgram(
   // 1. Read staged row
   const { data: staged, error: fetchErr } = await supabase
     .from('staging_programs')
-    .select('id, import_batch_id, import_status, extracted_title, extracted_degree_level_code, extracted_language, extracted_tuition_amount, staging_university_id, match_program_id')
+    .select('id, import_batch_id, import_status, raw_data, extracted_title, extracted_degree_level_code, extracted_language, extracted_tuition_amount, staging_university_id, match_program_id')
     .eq('id', rowId)
     .eq('import_batch_id', batchId)
     .single()
@@ -748,10 +942,13 @@ async function mergeProgram(
     indexing_status: 'draft',
   }
 
-  if (row.extracted_language?.trim()) {
+  const rawData = isPlainObject(row.raw_data) ? row.raw_data : {}
+  Object.assign(insertPayload, await buildRichProgramPayload(supabase, rawData))
+
+  if (!insertPayload.language_of_instruction && row.extracted_language?.trim()) {
     insertPayload.language_of_instruction = row.extracted_language.trim()
   }
-  if (row.extracted_tuition_amount !== null && row.extracted_tuition_amount !== undefined) {
+  if (insertPayload.tuition_min_amount === undefined && row.extracted_tuition_amount !== null && row.extracted_tuition_amount !== undefined) {
     insertPayload.tuition_min_amount = row.extracted_tuition_amount
   }
 
@@ -769,6 +966,16 @@ async function mergeProgram(
   }
 
   const productionId = (inserted as { id: string }).id
+  let sourceWarning: string | undefined
+
+  const sourceRows = collectProgramSourceRows(productionId, rawData)
+  if (sourceRows.length > 0) {
+    const { error: sourceErr } = await supabase.from('data_sources').insert(sourceRows)
+    if (sourceErr) {
+      console.error('[importMerge] mergeProgram: data source insert failed after production insert:', sourceErr.code, sourceErr.message)
+      sourceWarning = 'Production program created, but source links could not be attached. Add them manually from the program edit page.'
+    }
+  }
 
   const { error: stagingUpdateErr } = await supabase
     .from('staging_programs')
@@ -785,5 +992,5 @@ async function mergeProgram(
     }
   }
 
-  return { ok: true, productionId }
+  return sourceWarning ? { ok: true, productionId, warning: sourceWarning } : { ok: true, productionId }
 }

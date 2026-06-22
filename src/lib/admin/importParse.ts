@@ -10,9 +10,43 @@ export type BulkParseResult =
   | { ok: false; error: string }
   | { ok: true; rows: BulkParsedRow[]; nonObjectCount: number }
 
+export type ResearchPackParseResult =
+  | { ok: false; error: string }
+  | {
+      ok: true
+      university: BulkParsedRow
+      programs: BulkParsedRow[]
+      nonObjectCount: number
+    }
+
 export const MAX_BULK_ROWS = 100
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const DEGREE_LEVEL_ALIASES: Record<string, string> = {
+  bsc: 'bachelor',
+  bs: 'bachelor',
+  ba: 'bachelor',
+  bachelor: 'bachelor',
+  bachelors: 'bachelor',
+  "bachelor's": 'bachelor',
+  undergraduate: 'bachelor',
+  msc: 'master',
+  ms: 'master',
+  ma: 'master',
+  mba: 'master',
+  llm: 'master',
+  master: 'master',
+  masters: 'master',
+  "master's": 'master',
+  graduate: 'master',
+  phd: 'phd',
+  doctorate: 'phd',
+  doctoral: 'phd',
+  foundation: 'foundation',
+  diploma: 'diploma',
+  certificate: 'certificate',
+  associate: 'associate',
+}
 
 function str(v: unknown): string | null {
   if (v === null || v === undefined) return null
@@ -26,16 +60,27 @@ function num(v: unknown): number | null {
   return isNaN(n) ? null : n
 }
 
+function degreeCode(v: unknown): string | null {
+  const s = str(v)
+  if (!s) return null
+  const key = s.toLowerCase().replace(/\./g, '').trim()
+  return DEGREE_LEVEL_ALIASES[key] ?? key
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function mapUniversity(item: Record<string, unknown>): BulkParsedRow {
+  const rawCountryCode = str(item.country_code)
+  const rawCountry = str(item.country)
+  const countryCode = rawCountryCode ?? (rawCountry && /^[a-z]{2}$/i.test(rawCountry) ? rawCountry : null)
+
   return {
     rawData: item,
     fields: {
       extracted_name: str(item.name),
-      extracted_country_code: str(item.country_code),
+      extracted_country_code: countryCode ? countryCode.toUpperCase() : null,
       extracted_official_url: str(item.official_url),
     },
     parseWarnings: [],
@@ -60,9 +105,9 @@ function mapProgram(item: Record<string, unknown>): BulkParsedRow {
     rawData: item,
     fields: {
       extracted_title: str(item.title),
-      extracted_degree_level_code: str(item.degree_level_code),
-      extracted_language: str(item.language),
-      extracted_tuition_amount: num(item.tuition_amount),
+      extracted_degree_level_code: degreeCode(item.degree_level_code ?? item.degree_level),
+      extracted_language: str(item.language ?? item.language_of_instruction),
+      extracted_tuition_amount: num(item.tuition_amount ?? item.tuition_min_amount),
       extracted_deadline: str(item.deadline),
       staging_university_id,
     },
@@ -151,4 +196,63 @@ export function parseBulkJson(
   }
 
   return { ok: true, rows, nonObjectCount }
+}
+
+export function parseResearchPackJson(input: string): ResearchPackParseResult {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return { ok: false, error: 'Input is empty. Paste a nested research pack object.' }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return { ok: false, error: 'Input is not valid JSON.' }
+  }
+
+  if (!isPlainObject(parsed)) {
+    return {
+      ok: false,
+      error: 'Research pack must be a JSON object with a university object and programs array.',
+    }
+  }
+
+  if (!isPlainObject(parsed.university)) {
+    return { ok: false, error: 'Research pack must include a university object.' }
+  }
+
+  if (!Array.isArray(parsed.programs)) {
+    return { ok: false, error: 'Research pack programs must be an array.' }
+  }
+
+  if (parsed.programs.length === 0) {
+    return { ok: false, error: 'Research pack must include at least one program.' }
+  }
+
+  const totalRows = 1 + parsed.programs.length
+  if (totalRows > MAX_BULK_ROWS) {
+    return {
+      ok: false,
+      error: `Maximum ${MAX_BULK_ROWS} rows per import. Research pack contains ${totalRows} rows.`,
+    }
+  }
+
+  const programs: BulkParsedRow[] = []
+  let nonObjectCount = 0
+
+  for (const item of parsed.programs) {
+    if (!isPlainObject(item)) {
+      nonObjectCount++
+      continue
+    }
+    programs.push(mapProgram(item))
+  }
+
+  return {
+    ok: true,
+    university: mapUniversity(parsed.university),
+    programs,
+    nonObjectCount,
+  }
 }

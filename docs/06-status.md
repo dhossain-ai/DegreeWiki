@@ -7,12 +7,12 @@ Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 58C - Import Templates + Preview + AI Research Workflow - complete.
-This phase makes the JSON-based import workflow significantly easier to use with AI-researched data. Added JSON templates (with field notes and .json download) and copyable AI/Perplexity research prompts for all 4 entity types, surfaced in a collapsible "Templates & AI Prompts" panel on the batch detail page. Bulk JSON import now shows a live client-side preview (valid/invalid status, item count, sample names) before submission. Manual program staging form now has a university dropdown/selector when staged universities are available in the batch. `set_match_scholarship_id` and `set_match_article_id` server actions added, unblocking the update-existing merge paths for those entity types. Quality checks now auto-run after every successful bulk import (non-fatal, includes quality result in the redirect banner). Import method guidance panel added above the import forms. No migrations, no new dependencies, no CSV/file-upload support.
+Phase 58D - Research Pack Import + Rich Program Field Mapping - complete.
+This phase lets mixed import batches accept a nested source-backed research pack shaped as `{ "university": {...}, "programs": [...] }`. The importer stages the university first, then automatically links all staged programs in that pack to the new staged university row. Flat JSON array imports for universities, programs, scholarships, and articles remain supported. Program merge now reads staged `raw_data` and maps supported rich fields into existing production `programs` columns while keeping records draft/unverified. Program source URLs are attached to `data_sources` when current RLS permissions allow; otherwise the program still merges and the admin can add sources manually from the edit page. No migrations, no new dependencies, no direct-to-production import, no automatic verified status.
 
 Current branch / git status note:
 - Branch: `main`
-- Working tree has uncommitted changes (Phase 58C).
+- Working tree has Phase 58D implementation changes pending review/commit.
 
 ## Current Product Summary
 
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 58D: Mixed-batch nested research pack import; staged university inserted first; staged programs auto-linked to that university; rich program `raw_data` mapped during create-new program merge; research pack template/prompt and preview added. No migrations, no new dependencies.
 - Phase 58C: Import templates + AI prompts + JSON preview + program university selector + set_match_scholarship_id + set_match_article_id + auto quality check on bulk import. No migrations, no new dependencies.
 - Phase 58B: Import pipeline UX improvements; batch list lifecycle labels, batch detail summary cards, lifecycle steps, guidance banner, always-visible review buttons, programs university column, friendly error labels, batch status transition to needs_review. No migrations.
 - Phase 57C: Public media rendering; article featured images, university/scholarship logos and covers, program/fit-finder university logos, og:image/twitter:image in layouts, country cover on homepage DestinationCard. No migrations. No admin changes.
@@ -61,11 +62,12 @@ Current branch / git status note:
 - Dashboard count cards are not fully permission-tailored yet.
 - Default site OG image not yet configured (no brand asset uploaded to Cloudinary yet).
 - Import CSV/file upload deferred to Phase 60.
-- Nested university+programs pack import not supported by current parser; each entity type must be imported separately.
+- Research pack import is supported only for mixed batches.
+- Fields without production columns, such as `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform `notes`, remain preserved in staging `raw_data`.
 
 ## Immediate Next Phases
 
-- Phase 60: CSV/file upload import pipeline (intentionally deferred from Phase 58C).
+- Phase 60: CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
 - Continue admin permission boundary hardening.
 - Add default site OG image (upload DegreeWiki brand asset to Cloudinary, wire PUBLIC_DEFAULT_OG_IMAGE_PUBLIC_ID).
 - Cloudinary hard-delete (destroy API) when needed.

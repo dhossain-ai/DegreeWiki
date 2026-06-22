@@ -5,7 +5,7 @@ import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
 import { applyReviewAction } from '../../../lib/admin/importReview'
 import { mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
-import { parseBulkJson } from '../../../lib/admin/importParse'
+import { parseBulkJson, parseResearchPackJson } from '../../../lib/admin/importParse'
 import { IMPORT_TEMPLATES, TEMPLATE_FIELD_NOTES, type EntityTemplateType } from '../../../lib/admin/importTemplates'
 import { AI_PROMPTS } from '../../../lib/admin/importPrompts'
 import {
@@ -113,6 +113,258 @@ let bulkImportError: string | null = null
 let qualityError: string | null = null
 const BATCH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+type BulkErrorEntry = {
+  import_batch_id: string
+  staging_table: string
+  staging_row_id: string
+  error_type: string
+  error_message: string
+}
+
+function stagedValidationValues(resolvedFields: Record<string, string | number | null>): Record<string, string> {
+  return {
+    extracted_name: String(resolvedFields.extracted_name ?? ''),
+    extracted_country_code: String(resolvedFields.extracted_country_code ?? ''),
+    extracted_official_url: String(resolvedFields.extracted_official_url ?? ''),
+    extracted_title: String(resolvedFields.extracted_title ?? ''),
+    extracted_degree_level_code: String(resolvedFields.extracted_degree_level_code ?? ''),
+    extracted_language: String(resolvedFields.extracted_language ?? ''),
+    extracted_tuition_amount: resolvedFields.extracted_tuition_amount != null
+      ? String(resolvedFields.extracted_tuition_amount) : '',
+    extracted_deadline: String(resolvedFields.extracted_deadline ?? ''),
+    extracted_amount: resolvedFields.extracted_amount != null
+      ? String(resolvedFields.extracted_amount) : '',
+    extracted_slug: String(resolvedFields.extracted_slug ?? ''),
+    extracted_category: String(resolvedFields.extracted_category ?? ''),
+    extracted_content: String(resolvedFields.extracted_content ?? ''),
+  }
+}
+
+async function resolveCountryCodeFromRaw(rawData: Record<string, unknown>): Promise<string | null> {
+  const rawCountry = rawData.country
+  if (rawCountry === null || rawCountry === undefined) return null
+  const countryText = String(rawCountry).trim()
+  if (!countryText) return null
+  if (/^[a-z]{2}$/i.test(countryText)) return countryText.toUpperCase()
+
+  const { data } = await supabase
+    .from('countries')
+    .select('iso2, name')
+    .ilike('name', countryText)
+    .limit(2)
+
+  const matches = ((data ?? []) as { iso2: string; name: string }[])
+    .filter(country => country.name.toLowerCase() === countryText.toLowerCase())
+  return matches.length === 1 ? matches[0].iso2.toUpperCase() : null
+}
+
+async function runAutomaticQualityChecks(batchId: string, batchType: string): Promise<number> {
+  const autoWarnings: QualityWarning[] = []
+
+  if (batchType === 'universities' || batchType === 'mixed') {
+    const { data: uniAutoRows } = await supabase
+      .from('staging_universities')
+      .select('id, extracted_name, extracted_official_url')
+      .eq('import_batch_id', batchId)
+      .limit(100)
+    const uar = (uniAutoRows ?? []) as { id: string; extracted_name: string | null; extracted_official_url: string | null }[]
+    autoWarnings.push(...detectUniSameBatchDuplicates(uar))
+    autoWarnings.push(...await detectUniProductionMatches(supabase, uar))
+  }
+  if (batchType === 'programs' || batchType === 'mixed') {
+    const { data: progAutoRows } = await supabase
+      .from('staging_programs')
+      .select('id, extracted_title, extracted_degree_level_code, staging_university_id')
+      .eq('import_batch_id', batchId)
+      .limit(100)
+    const par = (progAutoRows ?? []) as { id: string; extracted_title: string | null; extracted_degree_level_code: string | null; staging_university_id: string | null }[]
+    autoWarnings.push(...detectProgSameBatchDuplicates(par))
+    autoWarnings.push(...await detectProgProductionMatches(supabase, par))
+  }
+  if (batchType === 'scholarships' || batchType === 'mixed') {
+    const { data: scholAutoRows } = await supabase
+      .from('staging_scholarships')
+      .select('id, extracted_name')
+      .eq('import_batch_id', batchId)
+      .limit(100)
+    const sar = (scholAutoRows ?? []) as { id: string; extracted_name: string | null }[]
+    autoWarnings.push(...detectScholSameBatchDuplicates(sar))
+    autoWarnings.push(...await detectScholProductionMatches(supabase, sar))
+  }
+  if (batchType === 'articles' || batchType === 'mixed') {
+    const { data: artAutoRows } = await supabase
+      .from('staging_articles')
+      .select('id, extracted_title, extracted_slug')
+      .eq('import_batch_id', batchId)
+      .limit(100)
+    const aar = (artAutoRows ?? []) as { id: string; extracted_title: string | null; extracted_slug: string | null }[]
+    autoWarnings.push(...detectArtSameBatchDuplicates(aar))
+    autoWarnings.push(...await detectArtProductionMatches(supabase, aar))
+  }
+
+  await supabase
+    .from('staging_errors')
+    .delete()
+    .eq('import_batch_id', batchId)
+    .in('error_type', ['same_batch_duplicate', 'possible_production_match'])
+
+  if (autoWarnings.length > 0) {
+    await supabase.from('staging_errors').insert(
+      autoWarnings.map(w => ({
+        import_batch_id: batchId,
+        staging_table: w.stagingTable,
+        staging_row_id: w.rowId,
+        error_type: w.errorType,
+        error_message: w.errorMessage,
+      }))
+    )
+  }
+
+  return autoWarnings.length
+}
+
+async function runAutoQualityAfterImport(inserted: number): Promise<number> {
+  if (inserted <= 0) return -1
+  try {
+    return await runAutomaticQualityChecks(b.id, b.batch_type)
+  } catch (autoQErr) {
+    console.error('[bulk_import] auto quality check failed:', autoQErr instanceof Error ? autoQErr.message : String(autoQErr))
+    return -1
+  }
+}
+
+async function importResearchPack(jsonInput: string): Promise<
+  | { ok: true; inserted: number; warned: number; failed: number }
+  | { ok: false; error: string }
+> {
+  if (b.batch_type !== 'mixed') {
+    return { ok: false, error: 'Nested university + programs research packs are supported only in mixed batches.' }
+  }
+
+  const parseResult = parseResearchPackJson(jsonInput)
+  if (!parseResult.ok) return parseResult
+
+  const errorEntries: BulkErrorEntry[] = []
+  let inserted = 0
+  let warned = 0
+  let failed = parseResult.nonObjectCount
+
+  const universityFields = { ...parseResult.university.fields }
+  if (!universityFields.extracted_country_code) {
+    universityFields.extracted_country_code = await resolveCountryCodeFromRaw(parseResult.university.rawData)
+  }
+  const universityWarnings = [
+    ...parseResult.university.parseWarnings,
+    ...validateStagedRecord('universities', stagedValidationValues(universityFields)).warnings,
+  ]
+  const universityStatus = universityWarnings.length === 0 ? 'validated' : 'pending'
+
+  const { data: uniData, error: uniError } = await supabase
+    .from('staging_universities')
+    .insert({
+      import_batch_id: b.id,
+      raw_data: parseResult.university.rawData,
+      extracted_name: (universityFields.extracted_name as string | null) ?? null,
+      extracted_country_code: (universityFields.extracted_country_code as string | null) ?? null,
+      extracted_official_url: (universityFields.extracted_official_url as string | null) ?? null,
+      import_status: universityStatus,
+    })
+    .select('id')
+    .single()
+
+  if (uniError || !uniData) {
+    console.error('[bulk_import] research pack staging_universities insert failed:', uniError?.code)
+    return { ok: false, error: 'Failed to insert the staged university. Please try again.' }
+  }
+
+  const stagingUniversityId = (uniData as { id: string }).id
+  inserted++
+  if (universityWarnings.length > 0) {
+    warned++
+    for (const warning of universityWarnings) {
+      errorEntries.push({
+        import_batch_id: b.id,
+        staging_table: 'staging_universities',
+        staging_row_id: stagingUniversityId,
+        error_type: 'validation_warning',
+        error_message: warning,
+      })
+    }
+  }
+
+  for (const row of parseResult.programs) {
+    const resolvedFields = {
+      ...row.fields,
+      staging_university_id: stagingUniversityId,
+    }
+    const rowWarnings = [
+      ...row.parseWarnings,
+      ...validateStagedRecord('programs', stagedValidationValues(resolvedFields)).warnings,
+    ]
+    const importStatus = rowWarnings.length === 0 ? 'validated' : 'pending'
+
+    const { data, error } = await supabase
+      .from('staging_programs')
+      .insert({
+        import_batch_id: b.id,
+        raw_data: row.rawData,
+        extracted_title: (resolvedFields.extracted_title as string | null) ?? null,
+        extracted_degree_level_code: (resolvedFields.extracted_degree_level_code as string | null) ?? null,
+        extracted_language: (resolvedFields.extracted_language as string | null) ?? null,
+        extracted_tuition_amount: (resolvedFields.extracted_tuition_amount as number | null) ?? null,
+        extracted_deadline: (resolvedFields.extracted_deadline as string | null) ?? null,
+        staging_university_id: stagingUniversityId,
+        import_status: importStatus,
+      })
+      .select('id')
+      .single()
+
+    if (error || !data) {
+      console.error('[bulk_import] research pack staging_programs insert failed:', error?.code)
+      failed++
+      continue
+    }
+
+    const programId = (data as { id: string }).id
+    inserted++
+    if (rowWarnings.length > 0) {
+      warned++
+      for (const warning of rowWarnings) {
+        errorEntries.push({
+          import_batch_id: b.id,
+          staging_table: 'staging_programs',
+          staging_row_id: programId,
+          error_type: 'validation_warning',
+          error_message: warning,
+        })
+      }
+    }
+  }
+
+  if (errorEntries.length > 0) {
+    await supabase.from('staging_errors').insert(errorEntries)
+  }
+
+  const totalReceived = 1 + parseResult.programs.length + parseResult.nonObjectCount
+  const { error: countErr } = await supabase
+    .from('import_batches')
+    .update({
+      total_records: b.total_records + totalReceived,
+      processed_count: b.processed_count + inserted,
+      error_count: b.error_count + failed,
+    })
+    .eq('id', b.id)
+  if (countErr) {
+    console.error('[bulk_import] research pack batch count update failed:', countErr.code)
+  }
+
+  if (inserted > 0 && b.import_status === 'pending') {
+    await supabase.from('import_batches').update({ import_status: 'needs_review' }).eq('id', b.id)
+  }
+
+  return { ok: true, inserted, warned, failed }
+}
+
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
   const postAction = fd.get('_action')?.toString() ?? ''
@@ -161,14 +413,31 @@ if (Astro.request.method === 'POST') {
     }
   } else if (postAction === 'bulk_import') {
     const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+    const jsonInput = fd.get('bulk_json')?.toString() ?? ''
+    const researchPackProbe = parseResearchPackJson(jsonInput)
+    const shouldImportResearchPack = rawEntityType === 'research_pack' || researchPackProbe.ok
 
-    if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
+    if (shouldImportResearchPack) {
+      if (b.batch_type !== 'mixed') {
+        bulkImportError = 'Nested university + programs research packs are supported only in mixed batches.'
+      } else {
+        const researchPackResult = await importResearchPack(jsonInput)
+        if (!researchPackResult.ok) {
+          bulkImportError = researchPackResult.error
+        } else {
+          const autoQualityCount = await runAutoQualityAfterImport(researchPackResult.inserted)
+          const qualityQs = autoQualityCount >= 0 ? `&quality=${autoQualityCount}` : ''
+          return Astro.redirect(
+            `/admin/imports/${b.id}?imported=${researchPackResult.inserted}&warned=${researchPackResult.warned}&failed=${researchPackResult.failed}${qualityQs}`,
+          )
+        }
+      }
+    } else if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
       bulkImportError = 'Invalid entity type.'
     } else if (b.batch_type !== 'mixed' && b.batch_type !== rawEntityType) {
       bulkImportError = 'Entity type does not match this batch type.'
     } else {
       const entityType = rawEntityType as StagedEntityType
-      const jsonInput = fd.get('bulk_json')?.toString() ?? ''
 
       const parseResult = parseBulkJson(jsonInput, entityType)
 
@@ -1087,13 +1356,20 @@ const INPUT_CLS = 'block w-full rounded border border-gray-300 px-3 py-1.5 text-
 const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
 
 // Templates & prompts context — filtered to batch type
-const ENTITY_TEMPLATE_TYPES: readonly EntityTemplateType[] = ['universities', 'programs', 'scholarships', 'articles']
+const ENTITY_TEMPLATE_TYPES: readonly EntityTemplateType[] = ['universities', 'programs', 'scholarships', 'articles', 'research_pack']
 const templateEntityTypes: EntityTemplateType[] = ENTITY_TEMPLATE_TYPES.filter(
-  t => b.batch_type === 'mixed' || b.batch_type === t
+  t => (t === 'research_pack' ? b.batch_type === 'mixed' : b.batch_type === 'mixed' || b.batch_type === t)
 )
 const templateDownloadLinks: Partial<Record<EntityTemplateType, string>> = {}
 for (const t of templateEntityTypes) {
   templateDownloadLinks[t] = `data:application/json;charset=utf-8,${encodeURIComponent(IMPORT_TEMPLATES[t])}`
+}
+const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
+  universities: 'universities',
+  programs: 'programs',
+  scholarships: 'scholarships',
+  articles: 'articles',
+  research_pack: 'Research Pack',
 }
 ---
 <AdminLayout title={`Import Batch — DegreeWiki Admin`} activePath="/admin/imports" userEmail={user.email ?? ''}>
@@ -1295,7 +1571,7 @@ for (const t of templateEntityTypes) {
             <li>Or use <strong>Add Staged Record</strong> to add rows one at a time.</li>
           </ol>
           {b.batch_type === 'mixed' && (
-            <p class="mt-1.5 text-gray-500">For mixed batches: import universities first, then programs. Programs reference staged university UUIDs from this batch.</p>
+            <p class="mt-1.5 text-gray-500">For mixed batches: use the Research Pack tab for a nested university + programs pack, or keep using flat arrays. Research packs automatically link programs to the staged university.</p>
           )}
         </div>
 
@@ -1307,7 +1583,7 @@ for (const t of templateEntityTypes) {
                 data-tab={t}
                 class={`px-3 py-1.5 text-xs font-medium rounded-t border-b-2 transition-colors ${i === 0 ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
               >
-                {t}
+                {TEMPLATE_LABEL[t]}
               </button>
             ))}
           </div>
@@ -1318,7 +1594,7 @@ for (const t of templateEntityTypes) {
             <div class="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div class="flex items-center justify-between mb-1.5">
-                  <p class="text-xs font-semibold text-gray-600">JSON Template — {t}</p>
+                  <p class="text-xs font-semibold text-gray-600">JSON Template — {TEMPLATE_LABEL[t]}</p>
                   <div class="flex gap-3">
                     <button type="button" data-copy-from={`tpl-textarea-${t}`} class="text-xs text-indigo-600 hover:text-indigo-800 underline">Copy</button>
                     <a href={templateDownloadLinks[t]} download={`import-template-${t}.json`} class="text-xs text-gray-500 hover:text-gray-700 underline">Download .json</a>
@@ -1379,13 +1655,14 @@ for (const t of templateEntityTypes) {
               <option value="programs">Program</option>
               <option value="scholarships">Scholarship</option>
               <option value="articles">Article</option>
+              <option value="research_pack">Research Pack (nested university + programs)</option>
             </select>
           </div>
         ) : (
           <input type="hidden" name="entity_type" value={b.batch_type} />
         )}
         <div>
-          <label class={LABEL_CLS}>JSON Array <span class="text-red-500">*</span></label>
+          <label class={LABEL_CLS}>JSON {b.batch_type === 'mixed' ? 'Array or Research Pack' : 'Array'} <span class="text-red-500">*</span></label>
           <textarea
             id="bulk-json-input"
             name="bulk_json"
@@ -1401,7 +1678,7 @@ for (const t of templateEntityTypes) {
                 ? '[{\n  "name": "Global Excellence Award",\n  "amount": 5000,\n  "deadline": "2026-05-01"\n}]'
                 : b.batch_type === 'articles'
                 ? '[{\n  "title": "How to Apply",\n  "slug": "how-to-apply",\n  "content": "Article body..."\n}]'
-                : '[{ ... }, { ... }]'
+                : '{\n  "university": { ... },\n  "programs": [ ... ]\n}'
             }
           ></textarea>
           <div id="json-preview" style="display:none" class="mt-2 rounded-lg border p-3">
@@ -1415,11 +1692,11 @@ for (const t of templateEntityTypes) {
             {b.batch_type === 'programs' && ' Keys: title, degree_level_code, language, tuition_amount, deadline, staging_university_id.'}
             {b.batch_type === 'scholarships' && ' Keys: name, amount, deadline.'}
             {b.batch_type === 'articles' && ' Keys: title, slug, category, content.'}
-            {b.batch_type === 'mixed' && ' Include entity_type as a field in each object, or select the type above.'}
+            {b.batch_type === 'mixed' && ' Paste a flat array for the selected type, or paste a nested university + programs research pack.'}
           </p>
           {(b.batch_type === 'programs' || b.batch_type === 'mixed') && (
             <p class="mt-1 text-xs text-amber-700 font-medium">
-              Program rows: <span class="font-normal">staging_university_id cannot be set or changed via the UI after bulk import. Import universities first, copy each university's staging UUID from the Staged Universities table on this page, and include it in each program object before pasting. Programs imported without this field cannot be merged.</span>
+              Program rows: <span class="font-normal">flat program arrays still need staging_university_id at import time. Research packs do this automatically by staging the university first and linking each program to it.</span>
             </p>
           )}
         </div>
@@ -2260,11 +2537,39 @@ for (const t of templateEntityTypes) {
       }
 
       if (!Array.isArray(parsed)) {
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed) &&
+          parsed.university &&
+          typeof parsed.university === 'object' &&
+          !Array.isArray(parsed.university) &&
+          Array.isArray(parsed.programs)
+        ) {
+          var programObjects = parsed.programs.filter(function (x) {
+            return x !== null && typeof x === 'object' && !Array.isArray(x);
+          });
+          var programSamples = programObjects.slice(0, 3).map(function (item) {
+            return String(item.title || '—');
+          });
+          var universityName = String(parsed.university.name || '1 university');
+
+          box.style.borderColor = '#86efac';
+          box.style.backgroundColor = '#f0fdf4';
+          statusEl.textContent = 'Valid research pack — 1 university, ' + parsed.programs.length + (parsed.programs.length === 1 ? ' program' : ' programs');
+          statusEl.style.color = '#15803d';
+          detailEl.textContent = universityName + (programSamples.length > 0 ? ' · Programs: ' + programSamples.join(', ') + (parsed.programs.length > 3 ? '…' : '') : '');
+          detailEl.style.color = '#4b5563';
+          noteEl.textContent = 'Mixed batches stage the university first and automatically link each program to it.';
+          noteEl.style.color = '#9ca3af';
+          return;
+        }
+
         box.style.borderColor = '#fca5a5';
         box.style.backgroundColor = '#fef2f2';
-        statusEl.textContent = 'Not a JSON array';
+        statusEl.textContent = 'Not a supported JSON shape';
         statusEl.style.color = '#b91c1c';
-        detailEl.textContent = 'Input must be a JSON array: [{ ... }, { ... }]';
+        detailEl.textContent = 'Use a JSON array, or in mixed batches use { "university": { ... }, "programs": [ ... ] }.';
         detailEl.style.color = '#6b7280';
         noteEl.textContent = '';
         return;
