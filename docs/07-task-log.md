@@ -357,6 +357,92 @@ Deferred:
 - Galleries / entity_media SELECT.
 - Inline article body images / rich editor.
 
+## 2026-06-22 - Phase 58A: Import Pipeline UX Inspection
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Inspect the existing admin import pipeline at `/admin/imports/` and answer 14 specific questions about the implementation before beginning 58B UX improvements. No code changes.
+
+Core findings:
+- 4 entity types supported: universities, programs, scholarships, articles.
+- Batch status was never automatically set to `needs_review` — only `pending` after create and manually driven.
+- Staging errors table has 3 error_type values: `validation_warning`, `same_batch_duplicate`, `possible_production_match`.
+- Review action buttons (`<details>review…</details>`) were hidden behind a collapsible wrapper.
+- Programs table had no university column; the staging_university_id FK was not rendered.
+- All 6 junction tables (university/scholarship/program×country/subject) deferred and not wired into the import.
+- 50-row display limit per entity type may silently truncate large batches.
+- `import_batches.import_status` has a valid `needs_review` CHECK constraint value but no app code ever set it.
+
+No files modified.
+
+## 2026-06-22 - Phase 58B: Import Pipeline UX Implementation
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Implement import pipeline UX improvements based on Phase 58A findings. No schema changes, no new dependencies, no merge behavior changes.
+
+Files modified:
+- `src/pages/admin/imports.astro`: full rewrite.
+- `src/pages/admin/imports/[id].astro`: 13 targeted edits.
+- `docs/06-status.md`: updated phase.
+- `docs/07-task-log.md`: added Phase 58A and 58B entries.
+
+Import list page improvements (`imports.astro`):
+- Added `LIFECYCLE_LABEL` const mapping each batch status to a human-readable label.
+- Added local `BATCH_STATUS_BADGE` extending `IMPORT_STATUS_BADGE` with `needs_review: 'bg-amber-100 text-amber-700'`.
+- Added introductory paragraph explaining the import batch lifecycle.
+- Added helper text inside create batch form about batch type meanings.
+- `<details>` auto-opens on form errors via `hasFormError`.
+- Updated table columns: Type | Status | Lifecycle | Records staged | Errors | Created | (action).
+- Dates changed to `toLocaleString()`.
+- "View" link renamed to "Open".
+- Better empty state with dashed border.
+
+Batch detail page improvements (`[id].astro`):
+- Added `stagingUniNameMap` built from already-fetched staging universities — no extra query.
+- Added status count computation: awaitingReview (pending+validated), approved, rejected/skipped, merged.
+- Added quality issue and validation warning counts.
+- Added `qualityChecksRun` flag, `DISPLAY_LIMIT`, `mayBeTruncated`, and `nextStepMessage` guidance string.
+- Added local `BATCH_STATUS_BADGE` and `ERROR_TYPE_LABEL` consts.
+- 6-cell status summary grid (staged / awaiting / approved / rejected / merged / issues) with colored counts.
+- 4-step lifecycle progress bar (Import rows → Quality checks → Review rows → Merge) with per-step completion indicators.
+- "What to do next?" guidance banner showing computed next action.
+- Truncation warning banner when any entity type hits the display limit.
+- Review buttons now always visible — outer `<details>review…</details>` wrapper removed from all 4 entity sections.
+- Programs table: added University column showing staging university name via `stagingUniNameMap`.
+- Per-row status cell: added `warnings` and `quality` mini-badges for rows with issues.
+- Actions cell: error messages now use amber color for quality issues vs. orange for validation warnings.
+- Staging errors section: replaced plain table with friendlier "Issues (N)" section with friendly type labels, When timestamp, and debug info collapsed in `<details>raw</details>`.
+
+Batch status behavior fix:
+- `bulk_import` handler: sets `import_batches.import_status = 'needs_review'` when `inserted > 0` and current status is `pending`.
+- Manual form handler: sets `import_batches.import_status = 'needs_review'` when current status is `pending`.
+
+Validation:
+- npm run build: PASS.
+- service_role / createServiceClient grep: zero new matches in Phase 58B files.
+- set:html / innerHTML grep: zero new matches in Phase 58B files.
+- Cloudinary secret exposure grep: zero matches for PUBLIC_ exposure; all hits are in pre-existing server-only lib files.
+
+Deferred to 58C:
+- JSON template download button.
+- AI/Perplexity prompt copy block.
+- Bulk import preview before insert.
+- CSV and file upload support.
+- `set_match_scholarship_id` and `set_match_article_id` actions.
+- Programs university dropdown in manual add form.
+- Auto quality checks after import.
+
+Deferred to Phase 60:
+- Supabase Storage import file attachments.
+- Large batch processing and background workers.
+- Bulk merge and bulk approve.
+- CSV column mapping UI.
+
 Validation:
 - npm run build: PASS.
 - service_role grep: zero new matches in Phase 57C files.

@@ -54,7 +54,7 @@ if (Astro.request.method === 'POST') {
 
 const { data, error } = await supabase
   .from('import_batches')
-  .select('id, batch_type, import_status, total_records, processed_count, error_count, created_at')
+  .select('id, batch_type, import_status, total_records, processed_count, error_count, created_at, notes')
   .order('created_at', { ascending: false })
   .limit(100)
 
@@ -66,20 +66,48 @@ type ImportBatchRow = {
   processed_count: number
   error_count: number
   created_at: string
+  notes: string | null
 }
 const rows = (data ?? []) as ImportBatchRow[]
+
+// Human-readable lifecycle labels for batch-level import_status.
+// needs_review is set by the detail page after the first rows are staged.
+const LIFECYCLE_LABEL: Record<string, string> = {
+  pending: 'No rows yet',
+  needs_review: 'Awaiting review',
+  processing: 'Processing',
+  validated: 'Validated',
+  duplicate_detected: 'Duplicates detected',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  error: 'Error',
+}
+
+// needs_review badge is not in the shared map; handle it locally.
+const BATCH_STATUS_BADGE: Record<string, string> = {
+  ...IMPORT_STATUS_BADGE,
+  needs_review: 'bg-amber-100 text-amber-700',
+}
+
+const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
 ---
 <AdminLayout title="Imports — DegreeWiki Admin" activePath="/admin/imports" userEmail={user.email ?? ''}>
-  <div class="flex items-center justify-between mb-6">
+  <div class="flex items-center justify-between mb-2">
     <h1 class="text-xl font-bold text-gray-900">Import Batches</h1>
     <span class="text-sm text-gray-400">{rows.length} batch{rows.length !== 1 ? 'es' : ''}</span>
   </div>
+  <p class="text-sm text-gray-500 mb-6">
+    Import batches hold staged records before they go live. Create a batch, paste JSON or add records manually, run quality checks, review each row, then merge approved records into production.
+  </p>
 
-  <details class="mb-6 border border-gray-200 rounded-lg bg-white">
+  <details class="mb-6 border border-gray-200 rounded-lg bg-white" {...(hasFormError ? { open: true } : {})}>
     <summary class="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer select-none hover:bg-gray-50 rounded-lg">
       + Create Import Batch
     </summary>
     <div class="px-4 pb-4 pt-3 border-t border-gray-200">
+      <p class="text-xs text-gray-500 mb-3">
+        Choose the type of data you are importing. Use <strong>mixed</strong> when a single batch includes both universities and the programs that belong to them.
+      </p>
       {serverError && (
         <div class="mb-3 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
       )}
@@ -114,7 +142,10 @@ const rows = (data ?? []) as ImportBatchRow[]
   {error ? (
     <p class="text-sm text-red-600 py-4">Could not load data.</p>
   ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No import batches found.</p>
+    <div class="py-10 text-center text-sm text-gray-500 border border-dashed border-gray-200 rounded-lg">
+      <p class="font-medium text-gray-600 mb-1">No import batches yet.</p>
+      <p>Create a batch above to start importing data.</p>
+    </div>
   ) : (
     <div class="overflow-x-auto rounded-lg border border-gray-200">
       <table class="w-full text-sm text-left">
@@ -122,8 +153,8 @@ const rows = (data ?? []) as ImportBatchRow[]
           <tr>
             <th class="px-4 py-3">Type</th>
             <th class="px-4 py-3">Status</th>
-            <th class="px-4 py-3">Total</th>
-            <th class="px-4 py-3">Processed</th>
+            <th class="px-4 py-3">Lifecycle</th>
+            <th class="px-4 py-3">Records staged</th>
             <th class="px-4 py-3">Errors</th>
             <th class="px-4 py-3">Created</th>
             <th class="px-4 py-3"></th>
@@ -138,20 +169,26 @@ const rows = (data ?? []) as ImportBatchRow[]
                 </span>
               </td>
               <td class="px-4 py-3">
-                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${BATCH_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
                   {row.import_status}
                 </span>
               </td>
-              <td class="px-4 py-3 text-gray-700">{row.total_records}</td>
-              <td class="px-4 py-3 text-gray-700">{row.processed_count}</td>
+              <td class="px-4 py-3 text-sm text-gray-600">
+                {LIFECYCLE_LABEL[row.import_status] ?? row.import_status}
+              </td>
+              <td class="px-4 py-3 text-gray-700">
+                {row.processed_count > 0
+                  ? `${row.processed_count}${row.total_records > row.processed_count ? ` of ${row.total_records}` : ''}`
+                  : <span class="text-gray-400">—</span>}
+              </td>
               <td class="px-4 py-3">
                 <span class={row.error_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>
-                  {row.error_count}
+                  {row.error_count > 0 ? row.error_count : '—'}
                 </span>
               </td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleString()}</td>
               <td class="px-4 py-3">
-                <a href={`/admin/imports/${row.id}`} class="text-xs text-blue-600 hover:underline">View</a>
+                <a href={`/admin/imports/${row.id}`} class="text-xs text-blue-600 hover:underline">Open</a>
               </td>
             </tr>
           ))}

@@ -375,6 +375,11 @@ if (Astro.request.method === 'POST') {
           }
         }
 
+        // Mark batch as needs_review after first successful staged insert.
+        if (inserted > 0 && b.import_status === 'pending') {
+          await supabase.from('import_batches').update({ import_status: 'needs_review' }).eq('id', b.id)
+        }
+
         return Astro.redirect(
           `/admin/imports/${b.id}?imported=${inserted}&warned=${warned}&failed=${failed}`,
         )
@@ -630,6 +635,10 @@ if (Astro.request.method === 'POST') {
                 }))
               )
             }
+            // Mark batch as needs_review after first manual staged record.
+            if (b.import_status === 'pending') {
+              await supabase.from('import_batches').update({ import_status: 'needs_review' }).eq('id', b.id)
+            }
             return Astro.redirect(`/admin/imports/${b.id}`)
           }
         }
@@ -781,6 +790,13 @@ for (const e of stagingErrors) {
   }
 }
 
+// Map staging university id → name for programs table display (same-batch unis only).
+// For programs-only batches this map will be empty; rows show "Linked (other batch)".
+const stagingUniNameMap = new Map<string, string>()
+for (const u of stagingUniversities) {
+  stagingUniNameMap.set(u.id, u.extracted_name ?? '—')
+}
+
 // Batch-resolve program merge eligibility (avoid N+1)
 type ProgEligibility = { canMerge: true } | { canMerge: false; reason: string }
 const progEligibility = new Map<string, ProgEligibility>()
@@ -832,6 +848,59 @@ if (stagingPrograms.length > 0) {
 
 const totalStaged = stagingUniversities.length + stagingPrograms.length + stagingScholarships.length + stagingArticles.length
 
+// Status counts derived from already-fetched arrays — no extra queries.
+const allStagedStatuses = [
+  ...stagingUniversities.map(r => r.import_status),
+  ...stagingPrograms.map(r => r.import_status),
+  ...stagingScholarships.map(r => r.import_status),
+  ...stagingArticles.map(r => r.import_status),
+]
+const statusCounts = {
+  awaitingReview: allStagedStatuses.filter(s => s === 'pending' || s === 'validated').length,
+  approved: allStagedStatuses.filter(s => s === 'approved').length,
+  rejectedOrSkipped: allStagedStatuses.filter(s => s === 'rejected' || s === 'skipped').length,
+  merged: allStagedStatuses.filter(s => s === 'merged').length,
+}
+const qualityIssueCount = stagingErrors.filter(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match').length
+const validationWarningCount = stagingErrors.filter(e => e.error_type === 'validation_warning').length
+const qualityChecksRun = stagingErrors.some(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match')
+
+// Detect possible display truncation: each entity table is limited to 50 rows.
+const DISPLAY_LIMIT = 50
+const mayBeTruncated = (
+  (showUniversities && stagingUniversities.length === DISPLAY_LIMIT) ||
+  (showPrograms && stagingPrograms.length === DISPLAY_LIMIT) ||
+  (showScholarships && stagingScholarships.length === DISPLAY_LIMIT) ||
+  (showArticles && stagingArticles.length === DISPLAY_LIMIT)
+)
+
+// Guidance message for "what to do next" banner.
+let nextStepMessage = ''
+if (totalStaged === 0) {
+  nextStepMessage = 'Expand Bulk JSON Import below to paste data, or use Add Staged Record to add one row at a time.'
+} else if (!qualityChecksRun) {
+  nextStepMessage = `${totalStaged} row${totalStaged !== 1 ? 's' : ''} staged. Run quality checks to detect same-batch duplicates and possible existing production records.`
+} else if (statusCounts.awaitingReview > 0) {
+  nextStepMessage = `${statusCounts.awaitingReview} row${statusCounts.awaitingReview !== 1 ? 's' : ''} awaiting review. Approve, reject, or skip each staged row below.`
+} else if (statusCounts.approved > 0) {
+  nextStepMessage = `${statusCounts.approved} approved row${statusCounts.approved !== 1 ? 's' : ''} ready to merge. Use the Merge form on each approved row.`
+} else if (totalStaged > 0 && statusCounts.awaitingReview === 0 && statusCounts.approved === 0) {
+  nextStepMessage = 'All rows have been processed. This batch is complete.'
+}
+
+// needs_review badge supplement — not in the shared IMPORT_STATUS_BADGE map.
+const BATCH_STATUS_BADGE: Record<string, string> = {
+  ...IMPORT_STATUS_BADGE,
+  needs_review: 'bg-amber-100 text-amber-700',
+}
+
+// Friendly error type labels for the staging errors section.
+const ERROR_TYPE_LABEL: Record<string, string> = {
+  validation_warning: 'Validation warning',
+  same_batch_duplicate: 'Duplicate in this batch',
+  possible_production_match: 'Possible existing record',
+}
+
 const INPUT_CLS = 'block w-full rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
 const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
 ---
@@ -850,9 +919,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
     </div>
     <div class="px-4 py-3 flex items-center gap-3">
       <span class="text-sm font-medium text-gray-500 w-32">Status</span>
-      <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[b.import_status] ?? FALLBACK_BADGE}`}>
+      <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${BATCH_STATUS_BADGE[b.import_status] ?? FALLBACK_BADGE}`}>
         {b.import_status}
       </span>
+      {b.import_status === 'needs_review' && (
+        <span class="text-sm text-amber-700">— rows staged, awaiting review</span>
+      )}
     </div>
     <div class="px-4 py-3 flex items-center gap-3">
       <span class="text-sm font-medium text-gray-500 w-32">Records</span>
@@ -891,6 +963,72 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
       <span class="text-xs text-gray-400 font-mono">{b.id}</span>
     </div>
   </div>
+
+  <!-- Status summary cards -->
+  <div class="mb-4 grid grid-cols-3 sm:grid-cols-6 gap-2">
+    <div class="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-center">
+      <div class="text-xl font-bold text-gray-900">{totalStaged}</div>
+      <div class="text-xs text-gray-400 mt-0.5">Staged</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-center">
+      <div class={statusCounts.awaitingReview > 0 ? 'text-xl font-bold text-blue-700' : 'text-xl font-bold text-gray-300'}>
+        {statusCounts.awaitingReview}
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">Awaiting review</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-center">
+      <div class={statusCounts.approved > 0 ? 'text-xl font-bold text-green-700' : 'text-xl font-bold text-gray-300'}>
+        {statusCounts.approved}
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">Approved</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-center">
+      <div class={statusCounts.rejectedOrSkipped > 0 ? 'text-xl font-bold text-red-600' : 'text-xl font-bold text-gray-300'}>
+        {statusCounts.rejectedOrSkipped}
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">Rejected / Skipped</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-center">
+      <div class={statusCounts.merged > 0 ? 'text-xl font-bold text-emerald-700' : 'text-xl font-bold text-gray-300'}>
+        {statusCounts.merged}
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">Merged</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-center">
+      <div class={stagingErrors.length > 0 ? 'text-xl font-bold text-orange-600' : 'text-xl font-bold text-gray-300'}>
+        {stagingErrors.length}
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">Issues</div>
+    </div>
+  </div>
+
+  <!-- Lifecycle steps -->
+  <div class="mb-4 flex items-stretch rounded-lg border border-gray-200 bg-white overflow-hidden text-xs divide-x divide-gray-200">
+    {[
+      { step: 1, label: 'Import rows', done: totalStaged > 0 },
+      { step: 2, label: 'Quality checks', done: qualityChecksRun },
+      { step: 3, label: 'Review rows', done: totalStaged > 0 && statusCounts.awaitingReview === 0 },
+      { step: 4, label: 'Merge approved', done: statusCounts.merged > 0 && statusCounts.approved === 0 && totalStaged > 0 },
+    ].map(({ step, label, done }) => (
+      <div class={`flex-1 flex items-center gap-2 px-3 py-3 ${done ? 'bg-green-50' : ''}`}>
+        <span class={`flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${done ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
+          {step}
+        </span>
+        <span class={done ? 'font-medium text-green-800' : 'text-gray-500'}>{label}</span>
+        {done && <span class="ml-auto text-green-600 font-bold text-xs">✓</span>}
+      </div>
+    ))}
+  </div>
+
+  <!-- What to do next guidance banner -->
+  {nextStepMessage && (
+    <div class="mb-4 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+      <span class="text-blue-500 text-sm font-bold mt-0.5 shrink-0">→</span>
+      <div class="text-sm text-blue-800">
+        <span class="font-medium">Next: </span>{nextStepMessage}
+      </div>
+    </div>
+  )}
 
   {reviewError && (
     <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -1178,6 +1316,12 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
     <p class="text-sm text-gray-500 py-2">No staged records or errors for this batch yet.</p>
   ) : null}
 
+  {mayBeTruncated && (
+    <div class="mb-4 px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800">
+      Some rows may not be shown — the display limit is {DISPLAY_LIMIT} rows per entity type. If this batch has more rows than shown, open new batches for the remaining data or contact an admin.
+    </div>
+  )}
+
   {showUniversities && stagingUniversities.length > 0 && (
     <div class="mb-6">
       <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Universities ({stagingUniversities.length})</h2>
@@ -1208,34 +1352,42 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
                     {row.import_status}
                   </span>
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'validation_warning') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">warnings</span>
+                  )}
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">quality</span>
+                  )}
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
-                <td class="px-3 py-3 text-xs min-w-[190px]">
+                <td class="px-3 py-3 text-xs min-w-[200px]">
                   {(errsByRowId.get(row.id) ?? []).length > 0 && (
                     <div class="mb-1.5 space-y-0.5">
                       {(errsByRowId.get(row.id) ?? []).map(e => (
-                        <p class="text-orange-600">{e.error_message}</p>
+                        <p class={e.error_type === 'validation_warning' ? 'text-orange-600' : 'text-amber-700'}>{e.error_message}</p>
                       ))}
                     </div>
                   )}
                   {row.reviewed_at && (
                     <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
                   )}
-                  <details>
-                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
-                    <form method="POST" class="mt-2 space-y-1.5">
+                  {row.import_status !== 'merged' && (
+                    <form method="POST" class="space-y-1.5">
                       <input type="hidden" name="_action" value="review" />
                       <input type="hidden" name="entity_type" value="universities" />
                       <input type="hidden" name="row_id" value={row.id} />
-                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
                       <div class="flex flex-wrap gap-1">
                         <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
                       </div>
+                      <details class="mt-0.5">
+                        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">{row.review_notes ? 'Edit note…' : 'Add note…'}</summary>
+                        <textarea name="review_notes" rows={2} placeholder="Note…" class="mt-1 block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      </details>
                     </form>
-                  </details>
+                  )}
                   {row.import_status === 'approved' && !row.match_university_id && (
                     <div class="mt-2 border-t border-gray-100 pt-2 space-y-3">
                       <details>
@@ -1316,6 +1468,7 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
           <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
               <th class="px-4 py-3">Title</th>
+              <th class="px-4 py-3">University</th>
               <th class="px-4 py-3">Degree Level</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
@@ -1327,39 +1480,52 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
             {stagingPrograms.map(row => (
               <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
                 <td class="px-4 py-3 text-gray-700">{row.extracted_title ?? <span class="text-gray-400">—</span>}</td>
+                <td class="px-4 py-3 text-xs text-gray-500">
+                  {row.staging_university_id
+                    ? (stagingUniNameMap.get(row.staging_university_id) ?? <span class="text-gray-400">Linked (other batch)</span>)
+                    : <span class="text-gray-400">— not linked</span>}
+                </td>
                 <td class="px-4 py-3 text-xs text-gray-500">{row.extracted_degree_level_code ?? '—'}</td>
                 <td class="px-4 py-3">
                   <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
                     {row.import_status}
                   </span>
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'validation_warning') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">warnings</span>
+                  )}
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">quality</span>
+                  )}
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
-                <td class="px-3 py-3 text-xs min-w-[190px]">
+                <td class="px-3 py-3 text-xs min-w-[200px]">
                   {(errsByRowId.get(row.id) ?? []).length > 0 && (
                     <div class="mb-1.5 space-y-0.5">
                       {(errsByRowId.get(row.id) ?? []).map(e => (
-                        <p class="text-orange-600">{e.error_message}</p>
+                        <p class={e.error_type === 'validation_warning' ? 'text-orange-600' : 'text-amber-700'}>{e.error_message}</p>
                       ))}
                     </div>
                   )}
                   {row.reviewed_at && (
                     <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
                   )}
-                  <details>
-                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
-                    <form method="POST" class="mt-2 space-y-1.5">
+                  {row.import_status !== 'merged' && (
+                    <form method="POST" class="space-y-1.5">
                       <input type="hidden" name="_action" value="review" />
                       <input type="hidden" name="entity_type" value="programs" />
                       <input type="hidden" name="row_id" value={row.id} />
-                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
                       <div class="flex flex-wrap gap-1">
                         <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
                       </div>
+                      <details class="mt-0.5">
+                        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">{row.review_notes ? 'Edit note…' : 'Add note…'}</summary>
+                        <textarea name="review_notes" rows={2} placeholder="Note…" class="mt-1 block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      </details>
                     </form>
-                  </details>
+                  )}
                   {row.import_status === 'approved' && !row.match_program_id && (() => {
                     const elig = progEligibility.get(row.id)
                     if (!elig) return null
@@ -1429,34 +1595,42 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
                     {row.import_status}
                   </span>
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'validation_warning') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">warnings</span>
+                  )}
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">quality</span>
+                  )}
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
-                <td class="px-3 py-3 text-xs min-w-[190px]">
+                <td class="px-3 py-3 text-xs min-w-[200px]">
                   {(errsByRowId.get(row.id) ?? []).length > 0 && (
                     <div class="mb-1.5 space-y-0.5">
                       {(errsByRowId.get(row.id) ?? []).map(e => (
-                        <p class="text-orange-600">{e.error_message}</p>
+                        <p class={e.error_type === 'validation_warning' ? 'text-orange-600' : 'text-amber-700'}>{e.error_message}</p>
                       ))}
                     </div>
                   )}
                   {row.reviewed_at && (
                     <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
                   )}
-                  <details>
-                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
-                    <form method="POST" class="mt-2 space-y-1.5">
+                  {row.import_status !== 'merged' && (
+                    <form method="POST" class="space-y-1.5">
                       <input type="hidden" name="_action" value="review" />
                       <input type="hidden" name="entity_type" value="scholarships" />
                       <input type="hidden" name="row_id" value={row.id} />
-                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
                       <div class="flex flex-wrap gap-1">
                         <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
                       </div>
+                      <details class="mt-0.5">
+                        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">{row.review_notes ? 'Edit note…' : 'Add note…'}</summary>
+                        <textarea name="review_notes" rows={2} placeholder="Note…" class="mt-1 block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      </details>
                     </form>
-                  </details>
+                  )}
                   {row.import_status === 'approved' && !row.match_scholarship_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
                       <input type="hidden" name="_action" value="merge" />
@@ -1534,34 +1708,42 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${IMPORT_STATUS_BADGE[row.import_status] ?? FALLBACK_BADGE}`}>
                     {row.import_status}
                   </span>
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'validation_warning') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">warnings</span>
+                  )}
+                  {(errsByRowId.get(row.id) ?? []).some(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match') && (
+                    <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">quality</span>
+                  )}
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-500 max-w-[140px]">{row.review_notes ?? '—'}</td>
-                <td class="px-3 py-3 text-xs min-w-[190px]">
+                <td class="px-3 py-3 text-xs min-w-[200px]">
                   {(errsByRowId.get(row.id) ?? []).length > 0 && (
                     <div class="mb-1.5 space-y-0.5">
                       {(errsByRowId.get(row.id) ?? []).map(e => (
-                        <p class="text-orange-600">{e.error_message}</p>
+                        <p class={e.error_type === 'validation_warning' ? 'text-orange-600' : 'text-amber-700'}>{e.error_message}</p>
                       ))}
                     </div>
                   )}
                   {row.reviewed_at && (
                     <p class="text-gray-400 mb-1.5">Reviewed {new Date(row.reviewed_at).toLocaleString()}</p>
                   )}
-                  <details>
-                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800">review…</summary>
-                    <form method="POST" class="mt-2 space-y-1.5">
+                  {row.import_status !== 'merged' && (
+                    <form method="POST" class="space-y-1.5">
                       <input type="hidden" name="_action" value="review" />
                       <input type="hidden" name="entity_type" value="articles" />
                       <input type="hidden" name="row_id" value={row.id} />
-                      <textarea name="review_notes" rows={2} placeholder="Note…" class="block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
                       <div class="flex flex-wrap gap-1">
                         <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
                       </div>
+                      <details class="mt-0.5">
+                        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">{row.review_notes ? 'Edit note…' : 'Add note…'}</summary>
+                        <textarea name="review_notes" rows={2} placeholder="Note…" class="mt-1 block w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400">{row.review_notes ?? ''}</textarea>
+                      </details>
                     </form>
-                  </details>
+                  )}
                   {row.import_status === 'approved' && !row.match_article_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
                       <input type="hidden" name="_action" value="merge" />
@@ -1615,26 +1797,46 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
 
   {stagingErrors.length > 0 && (
     <div class="mb-6">
-      <h2 class="text-base font-semibold text-gray-800 mb-3">Staging Errors ({stagingErrors.length})</h2>
-      <div class="overflow-x-auto rounded-lg border border-red-200">
+      <div class="flex items-center gap-3 mb-3">
+        <h2 class="text-base font-semibold text-gray-800">
+          Issues ({stagingErrors.length})
+        </h2>
+        {validationWarningCount > 0 && (
+          <span class="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-0.5">
+            {validationWarningCount} validation warning{validationWarningCount !== 1 ? 's' : ''}
+          </span>
+        )}
+        {qualityIssueCount > 0 && (
+          <span class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+            {qualityIssueCount} quality issue{qualityIssueCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+      <div class="overflow-x-auto rounded-lg border border-orange-200">
         <table class="w-full text-sm text-left">
-          <thead class="bg-red-50 border-b border-red-200 text-xs text-gray-500 uppercase tracking-wide">
+          <thead class="bg-orange-50 border-b border-orange-200 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
-              <th class="px-4 py-3">Table</th>
-              <th class="px-4 py-3">Row ID</th>
-              <th class="px-4 py-3">Error Type</th>
+              <th class="px-4 py-3">Type</th>
               <th class="px-4 py-3">Message</th>
               <th class="px-4 py-3">When</th>
+              <th class="px-4 py-3">Debug</th>
             </tr>
           </thead>
           <tbody>
             {stagingErrors.map(row => (
-              <tr class="border-b border-red-100 hover:bg-red-50 align-top">
-                <td class="px-4 py-3 text-xs text-gray-600 font-mono">{row.staging_table}</td>
-                <td class="px-4 py-3 text-xs text-gray-400 font-mono">{row.staging_row_id ?? '—'}</td>
-                <td class="px-4 py-3 text-xs text-red-700 font-medium">{row.error_type}</td>
+              <tr class="border-b border-orange-100 hover:bg-orange-50 align-top">
+                <td class="px-4 py-3 text-xs font-medium text-orange-800 whitespace-nowrap">
+                  {ERROR_TYPE_LABEL[row.error_type] ?? row.error_type}
+                </td>
                 <td class="px-4 py-3 text-xs text-gray-700">{row.error_message}</td>
-                <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleString()}</td>
+                <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{new Date(row.created_at).toLocaleString()}</td>
+                <td class="px-4 py-3">
+                  <details class="text-xs">
+                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">raw</summary>
+                    <p class="mt-1 font-mono text-gray-400">{row.staging_table}</p>
+                    <p class="mt-0.5 font-mono text-gray-400 break-all">{row.staging_row_id ?? '—'}</p>
+                  </details>
+                </td>
               </tr>
             ))}
           </tbody>

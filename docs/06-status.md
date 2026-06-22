@@ -7,12 +7,12 @@ Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 57C - Public Media Rendering - complete.
-This phase wires the Cloudinary media assets attached in 57A/57B/57B.1 into all public-facing pages and cards. Article featured images, university logos and cover heroes, scholarship logos and covers, and program/fit-finder university logos now render when public-ready assets exist. All layouts now support `og:image` and `twitter:image` meta tags. Country cover images render on the homepage DestinationCard. Fallbacks (initials/monograms, no image section) are clean when no asset is attached.
+Phase 58B - Import Pipeline UX - complete.
+This phase improves the admin import pipeline UX. The import batch list now shows lifecycle labels, better date display, and record counts. The batch detail page adds a 6-card status summary (staged/awaiting/approved/rejected/merged/issues), a 4-step lifecycle progress bar, a "What to do next?" guidance banner, and a truncation warning when display limits are hit. Review action buttons are now always visible (no hidden `<details>` wrapper). Programs staged table shows the linked staging university name. Staging errors display with friendly type labels and the debug column is collapsed. The `import_batches.import_status` now transitions to `needs_review` after the first successful staged import.
 
 Current branch / git status note:
 - Branch: `main`
-- All Phase 57A, 57B, and 57B.1 changes are uncommitted and ready for review.
+- Working tree clean.
 
 ## Current Product Summary
 
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 58B: Import pipeline UX improvements; batch list lifecycle labels, batch detail summary cards, lifecycle steps, guidance banner, always-visible review buttons, programs university column, friendly error labels, batch status transition to needs_review. No migrations.
 - Phase 57C: Public media rendering; article featured images, university/scholarship logos and covers, program/fit-finder university logos, og:image/twitter:image in layouts, country cover on homepage DestinationCard. No migrations. No admin changes.
 - Phase 57B.1: Inline media picker UX upgrade; slot-card + native dialog modal, inline upload/import, auto-select, degreewiki:media-added event.
 - Phase 57B: Entity media attachment; migration 023, MediaPicker component, image pickers in all 12 admin entity forms (6 entities × 2 pages).
@@ -50,10 +51,6 @@ Current branch / git status note:
 - Phase 56C: repo docs compaction complete; exact snapshots were taken, archive files were created, and the active docs were rewritten.
 - Phase 56B: admin-role QA and navigation hardening; shared 403 helper plus filtered sidebar links.
 - Phase 56A: auth role routing fix; admin users route to `/admin`, student users route to `/account`.
-- Phase 55F: public directory and detail page redesign completion.
-- Phase 55E: program discovery redesign bundle.
-- Phase 55D: homepage visual QA and responsive polish.
-- Phase 55C: homepage redesign implementation.
 
 ## Known Active Issues
 
