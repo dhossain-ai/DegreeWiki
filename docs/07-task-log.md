@@ -428,16 +428,15 @@ Validation:
 - set:html / innerHTML grep: zero new matches in Phase 58B files.
 - Cloudinary secret exposure grep: zero matches for PUBLIC_ exposure; all hits are in pre-existing server-only lib files.
 
-Deferred to 58C:
-- JSON template download button.
-- AI/Perplexity prompt copy block.
+Deferred to Phase 58C (now complete — see below):
+- JSON template and download, AI/Perplexity prompt copy block.
 - Bulk import preview before insert.
-- CSV and file upload support.
 - `set_match_scholarship_id` and `set_match_article_id` actions.
 - Programs university dropdown in manual add form.
-- Auto quality checks after import.
+- Auto quality checks after bulk import.
 
 Deferred to Phase 60:
+- CSV and file upload support.
 - Supabase Storage import file attachments.
 - Large batch processing and background workers.
 - Bulk merge and bulk approve.
@@ -445,6 +444,83 @@ Deferred to Phase 60:
 
 Validation:
 - npm run build: PASS.
+
+## 2026-06-22 - Phase 58C: Import Templates + Preview + AI Research Workflow
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Make the JSON-based import workflow easier to use with AI/Perplexity-researched data, without adding file upload or CSV support.
+
+Files added:
+- `src/lib/admin/importTemplates.ts`: JSON template strings and field notes for all 4 entity types.
+- `src/lib/admin/importPrompts.ts`: copyable AI/Perplexity research prompt strings for all 4 entity types.
+
+Files modified:
+- `src/pages/admin/imports/[id].astro`: multiple targeted edits.
+- `docs/06-status.md`: updated phase.
+- `docs/07-task-log.md`: added Phase 58C entry.
+
+No changes to existing import library files (importParse.ts, importValidation.ts, importReview.ts, importMerge.ts, importQuality.ts). No schema changes. No new dependencies.
+
+Feature: JSON templates & AI prompts
+- New `src/lib/admin/importTemplates.ts` exports `IMPORT_TEMPLATES` and `TEMPLATE_FIELD_NOTES` for universities, programs, scholarships, articles.
+- New `src/lib/admin/importPrompts.ts` exports `AI_PROMPTS` with research prompts instructing AI to use official sources, return null for unknown fields, and emit valid JSON matching the template shape.
+- "Templates & AI Prompts" collapsible section added on the batch detail page, above the bulk import form.
+- For mixed batches, section shows 4 tabs (universities/programs/scholarships/articles); single-type batches show only the relevant tab.
+- Each tab shows: JSON template textarea (readonly) + Copy button + Download .json link; AI prompt textarea + Copy button; field notes list with required/optional markers.
+- Copy buttons use `navigator.clipboard.writeText()` with execCommand fallback — no innerHTML.
+- Download links use `data:application/json;charset=utf-8,...` data URIs rendered server-side — no new endpoints.
+
+Feature: JSON preview
+- Bulk JSON import textarea now has `id="bulk-json-input"`.
+- Preview `<div>` below textarea updated live on each keystroke via `is:inline` vanilla JS.
+- Valid state (green): shows item count + first 3 sample names + "Preview does not save data" note.
+- Invalid state (red): shows JSON parse error message.
+- Not-array state (red): explains expected array format.
+- No innerHTML, no external deps.
+
+Feature: program university selector
+- Manual Add Staged Record form: program fieldset now includes a "Staging University" field.
+- If staged universities exist in the batch: renders a `<select>` with options (name or UUID).
+- If no staged universities: renders a text `<input>` with guidance text.
+- Server handler reads `prog_staging_university_id`, validates UUID format + batch membership, inserts `staging_university_id` into staging_programs row.
+
+Feature: set_match_scholarship_id + set_match_article_id
+- New POST action handlers `set_match_scholarship_id` and `set_match_article_id` added, mirroring existing `set_match_university_id`.
+- Both validate: UUID format, batch membership, `approved` status, production record existence.
+- "Link to existing production scholarship/article" collapsible forms added on scholarship/article rows when approved and no match ID is set.
+- This unblocks the update-existing merge paths that were already implemented in importMerge.ts but unreachable.
+
+Feature: auto quality checks after bulk import
+- Quality checks now auto-run at the end of every successful `bulk_import` action (when `inserted > 0`).
+- Reuses all existing detect* functions from importQuality.ts — no logic rewritten.
+- Non-fatal: errors are logged to console; quality check failure does not block the import success redirect.
+- Auto quality count is appended to the redirect as `&quality=N`, which shows the existing quality banner.
+- Manual "Run quality checks" button remains available for re-runs.
+
+Feature: import method guidance
+- Workflow steps (Copy template → AI research → Paste JSON → Import) shown inside the templates panel.
+- Existing "What to do next?" guidance banner preserved.
+
+Architecture notes:
+- `BATCH_UUID_RE` const added at module scope in `[id].astro` (avoids repeating the regex in each handler).
+- Nested university+programs pack import NOT supported (parser does not support it); templates document current supported shape; nested-pack deferred to Phase 60.
+- Template/prompt section hidden for batch types that have no matching entity type (defensive, should not occur given BATCH_TYPES validation on creation).
+
+Validation:
+- npm run build: PASS.
+- service_role / createServiceClient grep: zero new matches.
+- set:html / innerHTML grep: zero new matches (preview uses textContent + style only).
+- Cloudinary secret exposure grep: zero new matches.
+
+Deferred to Phase 60:
+- CSV import and file upload.
+- Nested university+programs pack import.
+- Supabase Storage import file attachments.
+- Bulk merge / bulk approve.
+- Background processing for large batches.
 - service_role grep: zero new matches in Phase 57C files.
 - set:html/innerHTML grep: zero matches in Phase 57C files.
 - Cloudinary secret grep: zero matches in Phase 57C files.

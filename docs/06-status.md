@@ -7,12 +7,12 @@ Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 58B - Import Pipeline UX - complete.
-This phase improves the admin import pipeline UX. The import batch list now shows lifecycle labels, better date display, and record counts. The batch detail page adds a 6-card status summary (staged/awaiting/approved/rejected/merged/issues), a 4-step lifecycle progress bar, a "What to do next?" guidance banner, and a truncation warning when display limits are hit. Review action buttons are now always visible (no hidden `<details>` wrapper). Programs staged table shows the linked staging university name. Staging errors display with friendly type labels and the debug column is collapsed. The `import_batches.import_status` now transitions to `needs_review` after the first successful staged import.
+Phase 58C - Import Templates + Preview + AI Research Workflow - complete.
+This phase makes the JSON-based import workflow significantly easier to use with AI-researched data. Added JSON templates (with field notes and .json download) and copyable AI/Perplexity research prompts for all 4 entity types, surfaced in a collapsible "Templates & AI Prompts" panel on the batch detail page. Bulk JSON import now shows a live client-side preview (valid/invalid status, item count, sample names) before submission. Manual program staging form now has a university dropdown/selector when staged universities are available in the batch. `set_match_scholarship_id` and `set_match_article_id` server actions added, unblocking the update-existing merge paths for those entity types. Quality checks now auto-run after every successful bulk import (non-fatal, includes quality result in the redirect banner). Import method guidance panel added above the import forms. No migrations, no new dependencies, no CSV/file-upload support.
 
 Current branch / git status note:
 - Branch: `main`
-- Working tree clean.
+- Working tree has uncommitted changes (Phase 58C).
 
 ## Current Product Summary
 
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 58C: Import templates + AI prompts + JSON preview + program university selector + set_match_scholarship_id + set_match_article_id + auto quality check on bulk import. No migrations, no new dependencies.
 - Phase 58B: Import pipeline UX improvements; batch list lifecycle labels, batch detail summary cards, lifecycle steps, guidance banner, always-visible review buttons, programs university column, friendly error labels, batch status transition to needs_review. No migrations.
 - Phase 57C: Public media rendering; article featured images, university/scholarship logos and covers, program/fit-finder university logos, og:image/twitter:image in layouts, country cover on homepage DestinationCard. No migrations. No admin changes.
 - Phase 57B.1: Inline media picker UX upgrade; slot-card + native dialog modal, inline upload/import, auto-select, degreewiki:media-added event.
@@ -59,9 +60,12 @@ Current branch / git status note:
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
 - Default site OG image not yet configured (no brand asset uploaded to Cloudinary yet).
+- Import CSV/file upload deferred to Phase 60.
+- Nested university+programs pack import not supported by current parser; each entity type must be imported separately.
 
 ## Immediate Next Phases
 
+- Phase 60: CSV/file upload import pipeline (intentionally deferred from Phase 58C).
 - Continue admin permission boundary hardening.
 - Add default site OG image (upload DegreeWiki brand asset to Cloudinary, wire PUBLIC_DEFAULT_OG_IMAGE_PUBLIC_ID).
 - Cloudinary hard-delete (destroy API) when needed.

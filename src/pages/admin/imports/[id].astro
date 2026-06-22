@@ -6,6 +6,8 @@ import { parseRawData, validateStagedRecord, type StagedEntityType } from '../..
 import { applyReviewAction } from '../../../lib/admin/importReview'
 import { mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
 import { parseBulkJson } from '../../../lib/admin/importParse'
+import { IMPORT_TEMPLATES, TEMPLATE_FIELD_NOTES, type EntityTemplateType } from '../../../lib/admin/importTemplates'
+import { AI_PROMPTS } from '../../../lib/admin/importPrompts'
 import {
   detectUniSameBatchDuplicates,
   detectUniProductionMatches,
@@ -109,6 +111,7 @@ let mergeWarningPost: string | null = null
 let setMatchError: string | null = null
 let bulkImportError: string | null = null
 let qualityError: string | null = null
+const BATCH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
@@ -380,8 +383,80 @@ if (Astro.request.method === 'POST') {
           await supabase.from('import_batches').update({ import_status: 'needs_review' }).eq('id', b.id)
         }
 
+        // Auto-run quality checks after successful bulk import (non-fatal).
+        let autoQualityCount = -1
+        if (inserted > 0) {
+          try {
+            const bType = b.batch_type
+            const autoWarnings: QualityWarning[] = []
+
+            if (bType === 'universities' || bType === 'mixed') {
+              const { data: uniAutoRows } = await supabase
+                .from('staging_universities')
+                .select('id, extracted_name, extracted_official_url')
+                .eq('import_batch_id', b.id)
+                .limit(100)
+              const uar = (uniAutoRows ?? []) as { id: string; extracted_name: string | null; extracted_official_url: string | null }[]
+              autoWarnings.push(...detectUniSameBatchDuplicates(uar))
+              autoWarnings.push(...await detectUniProductionMatches(supabase, uar))
+            }
+            if (bType === 'programs' || bType === 'mixed') {
+              const { data: progAutoRows } = await supabase
+                .from('staging_programs')
+                .select('id, extracted_title, extracted_degree_level_code, staging_university_id')
+                .eq('import_batch_id', b.id)
+                .limit(100)
+              const par = (progAutoRows ?? []) as { id: string; extracted_title: string | null; extracted_degree_level_code: string | null; staging_university_id: string | null }[]
+              autoWarnings.push(...detectProgSameBatchDuplicates(par))
+              autoWarnings.push(...await detectProgProductionMatches(supabase, par))
+            }
+            if (bType === 'scholarships' || bType === 'mixed') {
+              const { data: scholAutoRows } = await supabase
+                .from('staging_scholarships')
+                .select('id, extracted_name')
+                .eq('import_batch_id', b.id)
+                .limit(100)
+              const sar = (scholAutoRows ?? []) as { id: string; extracted_name: string | null }[]
+              autoWarnings.push(...detectScholSameBatchDuplicates(sar))
+              autoWarnings.push(...await detectScholProductionMatches(supabase, sar))
+            }
+            if (bType === 'articles' || bType === 'mixed') {
+              const { data: artAutoRows } = await supabase
+                .from('staging_articles')
+                .select('id, extracted_title, extracted_slug')
+                .eq('import_batch_id', b.id)
+                .limit(100)
+              const aar = (artAutoRows ?? []) as { id: string; extracted_title: string | null; extracted_slug: string | null }[]
+              autoWarnings.push(...detectArtSameBatchDuplicates(aar))
+              autoWarnings.push(...await detectArtProductionMatches(supabase, aar))
+            }
+
+            await supabase
+              .from('staging_errors')
+              .delete()
+              .eq('import_batch_id', b.id)
+              .in('error_type', ['same_batch_duplicate', 'possible_production_match'])
+
+            if (autoWarnings.length > 0) {
+              await supabase.from('staging_errors').insert(
+                autoWarnings.map(w => ({
+                  import_batch_id: b.id,
+                  staging_table: w.stagingTable,
+                  staging_row_id: w.rowId,
+                  error_type: w.errorType,
+                  error_message: w.errorMessage,
+                }))
+              )
+            }
+            autoQualityCount = autoWarnings.length
+          } catch (autoQErr) {
+            console.error('[bulk_import] auto quality check failed:', autoQErr instanceof Error ? autoQErr.message : String(autoQErr))
+          }
+        }
+
+        const qualityQs = autoQualityCount >= 0 ? `&quality=${autoQualityCount}` : ''
         return Astro.redirect(
-          `/admin/imports/${b.id}?imported=${inserted}&warned=${warned}&failed=${failed}`,
+          `/admin/imports/${b.id}?imported=${inserted}&warned=${warned}&failed=${failed}${qualityQs}`,
         )
       }
     }
@@ -516,6 +591,96 @@ if (Astro.request.method === 'POST') {
         }
       }
     }
+  } else if (postAction === 'set_match_scholarship_id') {
+    const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
+    const rawProdId = fd.get('production_scholarship_id')?.toString().trim() ?? ''
+
+    if (!BATCH_UUID_RE.test(rawRowId)) {
+      setMatchError = 'Invalid staging row ID.'
+    } else if (!BATCH_UUID_RE.test(rawProdId)) {
+      setMatchError = 'Invalid production scholarship UUID. Enter a valid UUID.'
+    } else {
+      const { data: scholStagingRow, error: scholStagingErr } = await supabase
+        .from('staging_scholarships')
+        .select('id, import_status')
+        .eq('id', rawRowId)
+        .eq('import_batch_id', b.id)
+        .single()
+
+      if (scholStagingErr || !scholStagingRow) {
+        setMatchError = 'Staging scholarship row not found in this batch.'
+      } else if ((scholStagingRow as { import_status: string }).import_status !== 'approved') {
+        setMatchError = 'Only approved staging rows can be linked to a production scholarship.'
+      } else {
+        const { data: scholProdRow, error: scholProdErr } = await supabase
+          .from('scholarships')
+          .select('id')
+          .eq('id', rawProdId)
+          .single()
+
+        if (scholProdErr || !scholProdRow) {
+          setMatchError = 'Production scholarship not found. Confirm the UUID is correct.'
+        } else {
+          const { error: scholLinkErr } = await supabase
+            .from('staging_scholarships')
+            .update({ match_scholarship_id: rawProdId })
+            .eq('id', rawRowId)
+            .eq('import_batch_id', b.id)
+
+          if (scholLinkErr) {
+            console.error('[set_match_scholarship_id] update failed:', scholLinkErr.code)
+            setMatchError = 'Failed to link staging row to production scholarship. Please try again.'
+          } else {
+            return Astro.redirect(`/admin/imports/${b.id}`)
+          }
+        }
+      }
+    }
+  } else if (postAction === 'set_match_article_id') {
+    const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
+    const rawProdId = fd.get('production_article_id')?.toString().trim() ?? ''
+
+    if (!BATCH_UUID_RE.test(rawRowId)) {
+      setMatchError = 'Invalid staging row ID.'
+    } else if (!BATCH_UUID_RE.test(rawProdId)) {
+      setMatchError = 'Invalid production article UUID. Enter a valid UUID.'
+    } else {
+      const { data: artStagingRow, error: artStagingErr } = await supabase
+        .from('staging_articles')
+        .select('id, import_status')
+        .eq('id', rawRowId)
+        .eq('import_batch_id', b.id)
+        .single()
+
+      if (artStagingErr || !artStagingRow) {
+        setMatchError = 'Staging article row not found in this batch.'
+      } else if ((artStagingRow as { import_status: string }).import_status !== 'approved') {
+        setMatchError = 'Only approved staging rows can be linked to a production article.'
+      } else {
+        const { data: artProdRow, error: artProdErr } = await supabase
+          .from('articles')
+          .select('id')
+          .eq('id', rawProdId)
+          .single()
+
+        if (artProdErr || !artProdRow) {
+          setMatchError = 'Production article not found. Confirm the UUID is correct.'
+        } else {
+          const { error: artLinkErr } = await supabase
+            .from('staging_articles')
+            .update({ match_article_id: rawProdId })
+            .eq('id', rawRowId)
+            .eq('import_batch_id', b.id)
+
+          if (artLinkErr) {
+            console.error('[set_match_article_id] update failed:', artLinkErr.code)
+            setMatchError = 'Failed to link staging row to production article. Please try again.'
+          } else {
+            return Astro.redirect(`/admin/imports/${b.id}`)
+          }
+        }
+      }
+    }
   } else {
     const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
 
@@ -559,6 +724,22 @@ if (Astro.request.method === 'POST') {
           let insertedId: string | null = null
           let insertFailed = false
 
+          // Resolve staging_university_id for manual program form.
+          // Validates batch membership so orphan UUIDs are silently ignored.
+          let manualProgStagingUniId: string | null = null
+          if (entityType === 'programs') {
+            const rawSUId = fv('staging_university_id').trim()
+            if (rawSUId && BATCH_UUID_RE.test(rawSUId)) {
+              const { data: suRow } = await supabase
+                .from('staging_universities')
+                .select('id')
+                .eq('id', rawSUId)
+                .eq('import_batch_id', b.id)
+                .single()
+              if (suRow) manualProgStagingUniId = rawSUId
+            }
+          }
+
           if (entityType === 'universities') {
             const { data, error } = await supabase
               .from('staging_universities')
@@ -584,6 +765,7 @@ if (Astro.request.method === 'POST') {
                 extracted_language: nullIfEmpty(vals.extracted_language),
                 extracted_tuition_amount: numericOrNull(vals.extracted_tuition_amount),
                 extracted_deadline: nullIfEmpty(vals.extracted_deadline),
+                staging_university_id: manualProgStagingUniId,
                 import_status: importStatus,
               })
               .select('id')
@@ -903,6 +1085,16 @@ const ERROR_TYPE_LABEL: Record<string, string> = {
 
 const INPUT_CLS = 'block w-full rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
 const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
+
+// Templates & prompts context — filtered to batch type
+const ENTITY_TEMPLATE_TYPES: readonly EntityTemplateType[] = ['universities', 'programs', 'scholarships', 'articles']
+const templateEntityTypes: EntityTemplateType[] = ENTITY_TEMPLATE_TYPES.filter(
+  t => b.batch_type === 'mixed' || b.batch_type === t
+)
+const templateDownloadLinks: Partial<Record<EntityTemplateType, string>> = {}
+for (const t of templateEntityTypes) {
+  templateDownloadLinks[t] = `data:application/json;charset=utf-8,${encodeURIComponent(IMPORT_TEMPLATES[t])}`
+}
 ---
 <AdminLayout title={`Import Batch — DegreeWiki Admin`} activePath="/admin/imports" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
@@ -1085,6 +1277,90 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
     </div>
   )}
 
+  <!-- Templates & AI Prompts section -->
+  {templateEntityTypes.length > 0 && (
+    <details class="mb-4 rounded-lg border border-indigo-200 bg-white" id="tpl-section">
+      <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
+        <span class="text-indigo-400 font-mono text-base leading-none">{'{}'}</span>
+        Templates &amp; AI Prompts
+        <span class="ml-auto text-xs font-normal text-gray-400">JSON templates and copyable research prompts</span>
+      </summary>
+      <div class="border-t border-gray-100">
+        <div class="px-4 py-3 bg-gray-50 text-xs text-gray-600 border-b border-gray-100">
+          <strong class="text-gray-700">Import workflow:</strong>
+          <ol class="mt-1 ml-4 list-decimal space-y-0.5 text-gray-500">
+            <li>Copy the template below to understand the expected JSON shape.</li>
+            <li>Copy the AI prompt, paste into Perplexity / ChatGPT / Claude, list the items to research.</li>
+            <li>Paste the returned JSON into <strong>Bulk JSON Import</strong> below and click Import.</li>
+            <li>Or use <strong>Add Staged Record</strong> to add rows one at a time.</li>
+          </ol>
+          {b.batch_type === 'mixed' && (
+            <p class="mt-1.5 text-gray-500">For mixed batches: import universities first, then programs. Programs reference staged university UUIDs from this batch.</p>
+          )}
+        </div>
+
+        {templateEntityTypes.length > 1 && (
+          <div class="flex border-b border-gray-100 px-4 pt-2 gap-1" id="tpl-tabs">
+            {templateEntityTypes.map((t, i) => (
+              <button
+                type="button"
+                data-tab={t}
+                class={`px-3 py-1.5 text-xs font-medium rounded-t border-b-2 transition-colors ${i === 0 ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {templateEntityTypes.map((t, i) => (
+          <div data-panel={t} class={templateEntityTypes.length > 1 && i !== 0 ? 'hidden' : ''}>
+            <div class="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <p class="text-xs font-semibold text-gray-600">JSON Template — {t}</p>
+                  <div class="flex gap-3">
+                    <button type="button" data-copy-from={`tpl-textarea-${t}`} class="text-xs text-indigo-600 hover:text-indigo-800 underline">Copy</button>
+                    <a href={templateDownloadLinks[t]} download={`import-template-${t}.json`} class="text-xs text-gray-500 hover:text-gray-700 underline">Download .json</a>
+                  </div>
+                </div>
+                <textarea
+                  id={`tpl-textarea-${t}`}
+                  readonly
+                  rows={10}
+                  class="w-full block rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-mono text-gray-700 focus:outline-none resize-none"
+                >{IMPORT_TEMPLATES[t]}</textarea>
+                <div class="mt-2 space-y-1">
+                  {TEMPLATE_FIELD_NOTES[t].map(fn => (
+                    <p class="text-xs text-gray-500">
+                      <code class="text-gray-800 bg-gray-100 px-1 rounded">{fn.field}</code>
+                      {fn.required && <span class="text-red-500 ml-0.5">*</span>}
+                      {' — '}{fn.note}
+                    </p>
+                  ))}
+                  <p class="text-xs text-gray-400 pt-0.5">* required for merge</p>
+                </div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <p class="text-xs font-semibold text-gray-600">AI / Perplexity Research Prompt</p>
+                  <button type="button" data-copy-from={`ai-textarea-${t}`} class="text-xs text-indigo-600 hover:text-indigo-800 underline">Copy</button>
+                </div>
+                <textarea
+                  id={`ai-textarea-${t}`}
+                  readonly
+                  rows={14}
+                  class="w-full block rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-mono text-gray-600 focus:outline-none resize-y"
+                >{AI_PROMPTS[t]}</textarea>
+                <p class="mt-1 text-xs text-gray-400">Edit the list at the bottom of the prompt, then paste into your AI tool.</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  )}
+
   <!-- Bulk JSON Import form -->
   <details class="mb-4 rounded-lg border border-blue-200 bg-white" {...(bulkImportError !== null ? { open: true } : {})}>
     <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
@@ -1111,6 +1387,7 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
         <div>
           <label class={LABEL_CLS}>JSON Array <span class="text-red-500">*</span></label>
           <textarea
+            id="bulk-json-input"
             name="bulk_json"
             rows={10}
             required
@@ -1127,13 +1404,24 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                 : '[{ ... }, { ... }]'
             }
           ></textarea>
+          <div id="json-preview" style="display:none" class="mt-2 rounded-lg border p-3">
+            <p id="json-preview-status" class="text-xs font-semibold"></p>
+            <p id="json-preview-detail" class="mt-0.5 text-xs"></p>
+            <p id="json-preview-note" class="mt-1 text-xs italic"></p>
+          </div>
           <p class="mt-1 text-xs text-gray-400">
             Paste a JSON array of objects. Maximum 100 rows per paste.
             {b.batch_type === 'universities' && ' Keys: name, country_code, official_url.'}
             {b.batch_type === 'programs' && ' Keys: title, degree_level_code, language, tuition_amount, deadline, staging_university_id.'}
             {b.batch_type === 'scholarships' && ' Keys: name, amount, deadline.'}
             {b.batch_type === 'articles' && ' Keys: title, slug, category, content.'}
+            {b.batch_type === 'mixed' && ' Include entity_type as a field in each object, or select the type above.'}
           </p>
+          {(b.batch_type === 'programs' || b.batch_type === 'mixed') && (
+            <p class="mt-1 text-xs text-amber-700 font-medium">
+              Program rows: <span class="font-normal">staging_university_id cannot be set or changed via the UI after bulk import. Import universities first, copy each university's staging UUID from the Staged Universities table on this page, and include it in each program object before pasting. Programs imported without this field cannot be merged.</span>
+            </p>
+          )}
         </div>
         <div>
           <button
@@ -1227,6 +1515,22 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                   <label class={LABEL_CLS}>Deadline</label>
                   <input type="text" name="prog_extracted_deadline" class={INPUT_CLS} placeholder="2026-03-01" />
                 </div>
+              </div>
+              <div>
+                <label class={LABEL_CLS}>Staging University</label>
+                {stagingUniversities.length > 0 ? (
+                  <select name="prog_staging_university_id" class={INPUT_CLS}>
+                    <option value="">— none —</option>
+                    {stagingUniversities.map(u => (
+                      <option value={u.id}>{u.extracted_name ?? u.id}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div>
+                    <input type="text" name="prog_staging_university_id" class={INPUT_CLS} placeholder="Staging university UUID (optional)" />
+                    <p class="mt-1 text-xs text-gray-400">No staged universities in this batch yet. Import universities first, then add programs linking to them.</p>
+                  </div>
+                )}
               </div>
             </div>
           </fieldset>
@@ -1632,20 +1936,39 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                     </form>
                   )}
                   {row.import_status === 'approved' && !row.match_scholarship_id && (
-                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
-                      <input type="hidden" name="_action" value="merge" />
-                      <input type="hidden" name="entity_type" value="scholarships" />
-                      <input type="hidden" name="row_id" value={row.id} />
-                      <input type="hidden" name="merge_action" value="create_new" />
-                      <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
-                      <label class="flex items-start gap-1.5 text-gray-600">
-                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
-                        <span>I confirm this creates a production record.</span>
-                      </label>
-                      <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                        Merge to Production
-                      </button>
-                    </form>
+                    <div class="mt-2 border-t border-gray-100 pt-2 space-y-3">
+                      <details>
+                        <summary class="cursor-pointer text-blue-600 hover:text-blue-800 text-xs">Link to existing production scholarship…</summary>
+                        <form method="POST" class="mt-2 space-y-1.5">
+                          <input type="hidden" name="_action" value="set_match_scholarship_id" />
+                          <input type="hidden" name="row_id" value={row.id} />
+                          <p class="text-gray-600 text-xs">Paste the production scholarship UUID to enable update-existing merge. No production write occurs until you use Merge.</p>
+                          <input
+                            type="text"
+                            name="production_scholarship_id"
+                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                            required
+                            class="block w-full rounded border border-gray-200 px-2 py-1 text-xs font-mono text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400"
+                          />
+                          <button type="submit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">Link</button>
+                        </form>
+                      </details>
+                      <form method="POST" class="space-y-1.5">
+                        <input type="hidden" name="_action" value="merge" />
+                        <input type="hidden" name="entity_type" value="scholarships" />
+                        <input type="hidden" name="row_id" value={row.id} />
+                        <input type="hidden" name="merge_action" value="create_new" />
+                        <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
+                        <label class="flex items-start gap-1.5 text-gray-600">
+                          <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                          <span>I confirm this creates a production record.</span>
+                        </label>
+                        <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                          Merge to Production
+                        </button>
+                      </form>
+                    </div>
                   )}
                   {row.import_status === 'approved' && row.match_scholarship_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
@@ -1745,20 +2068,39 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
                     </form>
                   )}
                   {row.import_status === 'approved' && !row.match_article_id && (
-                    <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
-                      <input type="hidden" name="_action" value="merge" />
-                      <input type="hidden" name="entity_type" value="articles" />
-                      <input type="hidden" name="row_id" value={row.id} />
-                      <input type="hidden" name="merge_action" value="create_new" />
-                      <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
-                      <label class="flex items-start gap-1.5 text-gray-600">
-                        <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
-                        <span>I confirm this creates a production record.</span>
-                      </label>
-                      <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                        Merge to Production
-                      </button>
-                    </form>
+                    <div class="mt-2 border-t border-gray-100 pt-2 space-y-3">
+                      <details>
+                        <summary class="cursor-pointer text-blue-600 hover:text-blue-800 text-xs">Link to existing production article…</summary>
+                        <form method="POST" class="mt-2 space-y-1.5">
+                          <input type="hidden" name="_action" value="set_match_article_id" />
+                          <input type="hidden" name="row_id" value={row.id} />
+                          <p class="text-gray-600 text-xs">Paste the production article UUID to enable update-existing merge. No production write occurs until you use Merge.</p>
+                          <input
+                            type="text"
+                            name="production_article_id"
+                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                            required
+                            class="block w-full rounded border border-gray-200 px-2 py-1 text-xs font-mono text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400"
+                          />
+                          <button type="submit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">Link</button>
+                        </form>
+                      </details>
+                      <form method="POST" class="space-y-1.5">
+                        <input type="hidden" name="_action" value="merge" />
+                        <input type="hidden" name="entity_type" value="articles" />
+                        <input type="hidden" name="row_id" value={row.id} />
+                        <input type="hidden" name="merge_action" value="create_new" />
+                        <p class="text-amber-700 font-medium">This will create a new draft production record.</p>
+                        <label class="flex items-start gap-1.5 text-gray-600">
+                          <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                          <span>I confirm this creates a production record.</span>
+                        </label>
+                        <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                          Merge to Production
+                        </button>
+                      </form>
+                    </div>
                   )}
                   {row.import_status === 'approved' && row.match_article_id && (
                     <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
@@ -1844,4 +2186,109 @@ const LABEL_CLS = 'block text-xs font-medium text-gray-600 mb-1'
       </div>
     </div>
   )}
+
+  <script is:inline>
+(function () {
+  // Tab switching for templates section
+  var tabContainer = document.getElementById('tpl-tabs');
+  if (tabContainer) {
+    var tabs = tabContainer.querySelectorAll('[data-tab]');
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        var target = tab.getAttribute('data-tab');
+        tabs.forEach(function (t) {
+          var active = t.getAttribute('data-tab') === target;
+          t.classList.toggle('border-indigo-500', active);
+          t.classList.toggle('text-indigo-700', active);
+          t.classList.toggle('bg-indigo-50', active);
+          t.classList.toggle('border-transparent', !active);
+          t.classList.toggle('text-gray-500', !active);
+        });
+        document.querySelectorAll('[data-panel]').forEach(function (panel) {
+          panel.classList.toggle('hidden', panel.getAttribute('data-panel') !== target);
+        });
+      });
+    });
+  }
+
+  // Copy-to-clipboard for templates and prompts
+  document.querySelectorAll('[data-copy-from]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var srcId = btn.getAttribute('data-copy-from');
+      var src = document.getElementById(srcId);
+      if (!src) return;
+      var text = src.value !== undefined ? src.value : (src.textContent || '');
+      navigator.clipboard.writeText(text).then(function () {
+        var orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = orig; }, 1800);
+      }).catch(function () {
+        if (src.select) {
+          src.select();
+          try { document.execCommand('copy'); } catch (_) {}
+          var orig2 = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function () { btn.textContent = orig2; }, 1800);
+        }
+      });
+    });
+  });
+
+  // JSON preview for bulk import textarea
+  var ta = document.getElementById('bulk-json-input');
+  var box = document.getElementById('json-preview');
+  var statusEl = document.getElementById('json-preview-status');
+  var detailEl = document.getElementById('json-preview-detail');
+  var noteEl = document.getElementById('json-preview-note');
+
+  if (ta && box && statusEl && detailEl && noteEl) {
+    ta.addEventListener('input', function () {
+      var val = ta.value.trim();
+      if (!val) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+
+      var parsed;
+      try { parsed = JSON.parse(val); } catch (e) {
+        box.style.borderColor = '#fca5a5';
+        box.style.backgroundColor = '#fef2f2';
+        statusEl.textContent = 'Invalid JSON';
+        statusEl.style.color = '#b91c1c';
+        detailEl.textContent = String(e && e.message ? e.message : 'Check for missing commas, brackets, or quotes.');
+        detailEl.style.color = '#6b7280';
+        noteEl.textContent = '';
+        return;
+      }
+
+      if (!Array.isArray(parsed)) {
+        box.style.borderColor = '#fca5a5';
+        box.style.backgroundColor = '#fef2f2';
+        statusEl.textContent = 'Not a JSON array';
+        statusEl.style.color = '#b91c1c';
+        detailEl.textContent = 'Input must be a JSON array: [{ ... }, { ... }]';
+        detailEl.style.color = '#6b7280';
+        noteEl.textContent = '';
+        return;
+      }
+
+      var count = parsed.length;
+      var objects = parsed.filter(function (x) {
+        return x !== null && typeof x === 'object' && !Array.isArray(x);
+      });
+      var samples = objects.slice(0, 3).map(function (item) {
+        return String(item.name || item.title || item.slug || '—');
+      });
+      var skipped = count - objects.length;
+
+      box.style.borderColor = '#86efac';
+      box.style.backgroundColor = '#f0fdf4';
+      statusEl.textContent = 'Valid JSON — ' + count + (count === 1 ? ' item' : ' items') + (skipped > 0 ? ' (' + skipped + ' non-object skipped)' : '');
+      statusEl.style.color = '#15803d';
+      detailEl.textContent = samples.length > 0 ? 'Sample: ' + samples.join(', ') + (count > 3 ? '…' : '') : '';
+      detailEl.style.color = '#4b5563';
+      noteEl.textContent = 'Preview does not save data. Final validation happens after import.';
+      noteEl.style.color = '#9ca3af';
+    });
+  }
+})();
+  </script>
 </AdminLayout>
