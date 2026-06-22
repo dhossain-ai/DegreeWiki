@@ -567,6 +567,49 @@ Known limitations:
 - `primary_subject_id` is mapped only when exactly one existing subject name matches; no new subjects are created.
 - Source attachment depends on current user permissions and existing `data_sources` RLS.
 
+## 2026-06-22 - Phase 58E: Direct Draft Research Pack Import
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Add a local-only workflow that imports a cleaned or raw nested research-pack JSON file directly into production tables as draft/unverified content only, with safe duplicate matching and a markdown report.
+
+Core findings:
+- There was no existing `scripts/` import runner, so a standalone Node script was the safest pattern.
+- Direct production writes require the Supabase service role; an anon/RLS admin session would not be a good fit for a local direct-import tool.
+- `universities` supports the draft fields needed for a direct import, and `programs` already has the rich content columns that Phase 58D mapped from staging.
+- `data_sources` can preserve source URLs for both universities and programs.
+
+Implementation:
+- Added `scripts/import-research-pack.mjs`.
+- Added `npm run import:research-pack`.
+- Reads the clean research pack if present, otherwise falls back to the raw JSON after validating the JSON shape.
+- Matches universities by exact normalized name and/or official URL.
+- Matches programs by normalized title + university_id + degree level.
+- Creates draft/unverified production records only.
+- Existing draft/unverified matches receive empty-field-only patches; existing published/verified matches are skipped.
+- Source URLs are preserved in `data_sources`.
+- Writes `data/reports/mru-lithuania-2026.import-report.md`.
+- Generates a sibling `.clean.json` copy when the raw file is used directly.
+
+Safety:
+- No staging tables are used by this script.
+- No delete, publish, or verified status changes are performed.
+- No app page/component uses the service role; the script is local-only.
+- Missing `PUBLIC_SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` causes a fast failure before any write.
+
+Validation:
+- `npm run build`: PASS.
+- `Get-ChildItem src/pages,src/lib,src/layouts,src/components,scripts -Recurse -File | Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE|createServiceClient"`: existing AI server-only hits plus the new local import script only.
+- `Get-ChildItem src/pages,src/lib,src/layouts,src/components,scripts -Recurse -File | Select-String -Pattern "set:html|innerHTML"`: existing fit-finder comment only.
+- `Get-ChildItem src/pages,src/lib,src/layouts,src/components,scripts -Recurse -File | Select-String -Pattern "CLOUDINARY_API_SECRET|PUBLIC_CLOUDINARY_API_SECRET|PUBLIC_CLOUDINARY_API_KEY"`: existing server-only Cloudinary config/comments only.
+- `npm run import:research-pack -- data/raw/mru-lithuania-2026.research-pack.json --dry-run`: failed closed because `PUBLIC_SUPABASE_URL` is not set in this workspace.
+
+Known limitations:
+- The script still depends on local Supabase credentials to actually run.
+- Program rows that cannot resolve degree level or required university context are skipped with a report entry instead of being forced through.
+
 ## Current / Open Notes
 
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).
