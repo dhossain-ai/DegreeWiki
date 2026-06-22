@@ -2,7 +2,7 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import MediaPicker from '../../../components/admin/MediaPicker.astro'
-import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
+import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../../../lib/admin/media'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -39,19 +39,13 @@ type Values = {
   og_image_id: string
 }
 
-const [{ data: existing, error: loadError }, { data: mediaAssetsData }] = await Promise.all([
+const [{ data: existing, error: loadError }, mediaAssets] = await Promise.all([
   supabase
     .from('countries')
     .select('id, name, slug, iso2, iso3, continent, overview, content_status, verification_status, is_origin_enabled, is_destination_enabled, cover_image_id, og_image_id')
     .eq('id', id)
     .single(),
-  supabase
-    .from('media_assets')
-    .select('id, cloudinary_public_id, display_name, alt_text, folder')
-    .is('deleted_at', null)
-    .eq('is_reusable', true)
-    .eq('upload_status', 'ready')
-    .order('display_name', { ascending: true }),
+  loadReusableReadyMediaAssets(supabase),
 ])
 
 if (loadError || !existing) {
@@ -75,8 +69,6 @@ type CountryRecord = {
 }
 
 const record = existing as CountryRecord
-const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
-const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 let values: Values = {
   name: record.name,
@@ -127,6 +119,7 @@ if (Astro.request.method === 'POST') {
   if (statusErr) e.content_status = statusErr
   const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
   if (verErr) e.verification_status = verErr
+  const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.cover_image_id, values.og_image_id])
   if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
     e.cover_image_id = 'Selected cover image is not valid.'
   }
@@ -267,6 +260,7 @@ if (Astro.request.method === 'POST') {
           currentId={values.cover_image_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="countries"
         />
         {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
       </div>
@@ -277,6 +271,9 @@ if (Astro.request.method === 'POST') {
           currentId={values.og_image_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="countries"
+          copyFromField="cover_image_id"
+          copyFromLabel="Cover Image"
         />
         {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
       </div>

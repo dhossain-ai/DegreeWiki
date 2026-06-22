@@ -188,7 +188,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
       upload_status:            'ready',
       created_by_user_id:       user.id,
     })
-    .select('id')
+    .select('id, cloudinary_public_id, display_name, alt_text, folder')
     .single()
 
   if (insertError || !newAsset) {
@@ -196,5 +196,12 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     return jsonResponse(500, { ok: false, error: 'save_failed' })
   }
 
-  return jsonResponse(200, { ok: true, id: newAsset.id })
+  return jsonResponse(200, {
+    ok: true,
+    id:                   newAsset.id,
+    cloudinary_public_id: newAsset.cloudinary_public_id,
+    display_name:         newAsset.display_name,
+    alt_text:             newAsset.alt_text,
+    folder:               newAsset.folder,
+  })
 }

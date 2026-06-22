@@ -2,7 +2,7 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import MediaPicker from '../../../components/admin/MediaPicker.astro'
-import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
+import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../../../lib/admin/media'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -33,7 +33,7 @@ const PROVIDER_TYPE_OPTIONS     = ['government', 'university', 'private_foundati
 const FUNDING_TYPE_OPTIONS      = ['full_tuition', 'partial_tuition', 'living_stipend', 'travel', 'research', 'full_funding', 'other'] as const
 const APPLICATION_TYPE_OPTIONS  = ['direct', 'university_portal', 'nomination', 'embassy', 'other'] as const
 
-const [{ data: existing, error: loadError }, { data: mediaAssetsData }] = await Promise.all([
+const [{ data: existing, error: loadError }, mediaAssets] = await Promise.all([
   supabase
     .from('scholarships')
     .select(`
@@ -45,13 +45,7 @@ const [{ data: existing, error: loadError }, { data: mediaAssetsData }] = await 
     `)
     .eq('id', id)
     .single(),
-  supabase
-    .from('media_assets')
-    .select('id, cloudinary_public_id, display_name, alt_text, folder')
-    .is('deleted_at', null)
-    .eq('is_reusable', true)
-    .eq('upload_status', 'ready')
-    .order('display_name', { ascending: true }),
+  loadReusableReadyMediaAssets(supabase),
 ])
 
 if (loadError || !existing) {
@@ -70,8 +64,6 @@ type ScholarshipRecord = {
   logo_id: string | null; cover_image_id: string | null; og_image_id: string | null
 }
 const record = existing as ScholarshipRecord
-const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
-const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 type DataSourceRow = {
   id: string
@@ -226,6 +218,7 @@ if (Astro.request.method === 'POST') {
     const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
     if (verErr) e.verification_status = verErr
 
+    const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.logo_id, values.cover_image_id, values.og_image_id])
     if (values.logo_id && !validMediaIds.has(values.logo_id)) {
       e.logo_id = 'Selected logo is not valid.'
     }
@@ -469,17 +462,20 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <MediaPicker fieldName="logo_id" label="Logo"
-            currentId={values.logo_id || null} assets={mediaAssets} cloudName={cloudName} />
+            currentId={values.logo_id || null} assets={mediaAssets} cloudName={cloudName}
+            defaultSubfolder="scholarships" />
           {errors.logo_id && <p class={errorClass}>{errors.logo_id}</p>}
         </div>
         <div>
           <MediaPicker fieldName="cover_image_id" label="Cover Image"
-            currentId={values.cover_image_id || null} assets={mediaAssets} cloudName={cloudName} />
+            currentId={values.cover_image_id || null} assets={mediaAssets} cloudName={cloudName}
+            defaultSubfolder="scholarships" />
           {errors.cover_image_id && <p class={errorClass}>{errors.cover_image_id}</p>}
         </div>
         <div>
           <MediaPicker fieldName="og_image_id" label="OG Image"
-            currentId={values.og_image_id || null} assets={mediaAssets} cloudName={cloudName} />
+            currentId={values.og_image_id || null} assets={mediaAssets} cloudName={cloudName}
+            defaultSubfolder="scholarships" copyFromField="cover_image_id" copyFromLabel="Cover Image" />
           {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
         </div>
       </div>

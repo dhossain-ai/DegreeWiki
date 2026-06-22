@@ -7,13 +7,13 @@ Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 57B - Entity Media Attachment - complete.
-This phase added 7 missing image FK columns (migration 023), the MediaPicker admin component, and wired image pickers into all 12 entity admin forms (countries, cities, universities, scholarships, articles, subjects — both new and edit).
+Phase 57B.1 - Inline Media Picker UX Upgrade - complete.
+This phase replaced the plain dropdown MediaPicker with a full inline slot-card + native `<dialog>` modal. Admins can choose from a visual library grid, upload directly via the 3-step sign→Cloudinary→complete flow, or import from URL — all without leaving the entity form. Validation uses a single batch `.in('id', unique)` DB call on POST (via `validateReusableReadyMediaIds`). New assets broadcast via `degreewiki:media-added` so all pickers on the page stay in sync.
 Public entity page image rendering is deferred to Phase 57C.
 
 Current branch / git status note:
 - Branch: `main`
-- All Phase 57A and 57B changes are uncommitted and ready for review.
+- All Phase 57A, 57B, and 57B.1 changes are uncommitted and ready for review.
 
 ## Current Product Summary
 

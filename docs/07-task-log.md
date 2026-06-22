@@ -264,9 +264,49 @@ Deferred to Phase 57C:
 - Cloudinary hard-delete (destroy API).
 - Public entity_media SELECT (gallery support).
 
+## 2026-06-22 - Phase 57B.1: Inline Media Picker UX Upgrade
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Replace the plain dropdown MediaPicker with a full inline slot-card + native `<dialog>` modal so admins can select, upload, or import images without navigating away from the entity form.
+
+Files created:
+- src/lib/cloudinary/folders.ts: ALLOWED_SUBFOLDERS constant extracted from config.ts. Safe to import in Astro frontmatter (no secrets). config.ts re-exports from here.
+- src/lib/admin/media.ts: loadReusableReadyMediaAssets() (GET helper) and validateReusableReadyMediaIds() (batch UUID check via single .in('id', unique) Supabase query on POST).
+
+Files modified:
+- src/lib/cloudinary/config.ts: removed inline ALLOWED_SUBFOLDERS; now re-exports from folders.ts.
+- src/pages/api/admin/media/complete-upload.ts: expanded .select() and JSON response to include cloudinary_public_id, display_name, alt_text, folder.
+- src/pages/api/admin/media/import-url.ts: same expansion as complete-upload.ts.
+- src/components/admin/MediaPicker.astro: fully rewritten. Props: fieldName, label, currentId, assets, cloudName, defaultSubfolder, copyFromField, copyFromLabel. Structure: slot card (160×120 preview, action buttons), hidden input (data-field), native <dialog> with Library / Upload / Import tabs. JS: root-scoped querySelectorAll, applySelection, clearSelection, prependAssetCard (createElement only), broadcastNewAsset (degreewiki:media-added CustomEvent). 403 → friendly message. No innerHTML/set:html/eval.
+- All 12 entity admin forms (new + [id] for countries, cities, universities, scholarships, articles, subjects):
+  - Removed MediaAssetOption import; replaced per-form DB query with loadReusableReadyMediaAssets(supabase).
+  - Replaced Set.has() validation with validateReusableReadyMediaIds() in POST block.
+  - Added defaultSubfolder to all MediaPicker calls; added copyFromField/copyFromLabel on OG image pickers (cover→OG for universities/scholarships/subjects/countries/cities; featured→OG for articles).
+
+Security:
+- CLOUDINARY_API_SECRET stays server-only; never returned to browser.
+- No innerHTML/set:html/eval in MediaPicker script.
+- 403 from upload/import endpoints → "You do not have permission to upload/import media." (no raw error echoed).
+- UUID batch validation on POST; new inline-uploaded IDs accepted (live DB round-trip rather than stale in-memory set).
+- ALLOWED_SUBFOLDERS in folders.ts (no secrets); MediaPicker imports folders.ts, never config.ts.
+
+Validation:
+- npm run build: PASS.
+- service_role grep: zero new matches. Pre-existing hits in src/lib/ai/ are unrelated.
+- set:html / innerHTML grep: one pre-existing comment in fit-finder/result.astro; no new matches.
+- Cloudinary secret grep: hits only in config.ts (legitimate server-side reads) and a comment in sign-upload.ts; no PUBLIC_CLOUDINARY_API_SECRET/KEY leak.
+
+Deferred to Phase 57C:
+- Rendering entity images on public pages.
+- Cloudinary hard-delete (destroy API).
+- Public entity_media SELECT (gallery support).
+
 ## Current / Open Notes
 
-- Phase 57A and 57B changes are uncommitted and ready for review.
+- Phase 57A, 57B, and 57B.1 changes are uncommitted and ready for review.
 - Entity image rendering on public pages deferred to Phase 57C.
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).
 - If a future task needs older history, open the smallest relevant archive file instead of rereading the full snapshots.

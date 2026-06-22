@@ -2,7 +2,7 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import MediaPicker from '../../../components/admin/MediaPicker.astro'
-import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
+import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../../../lib/admin/media'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -22,20 +22,14 @@ const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
 
-const [{ data: existing, error: loadError }, { data: subjectsData }, { data: mediaAssetsData }] = await Promise.all([
+const [{ data: existing, error: loadError }, { data: subjectsData }, mediaAssets] = await Promise.all([
   supabase
     .from('subjects')
     .select('id, name, slug, parent_subject_id, display_order, content_status, cover_image_id, og_image_id')
     .eq('id', id)
     .single(),
   supabase.from('subjects').select('id, name').neq('id', id).order('name', { ascending: true }),
-  supabase
-    .from('media_assets')
-    .select('id, cloudinary_public_id, display_name, alt_text, folder')
-    .is('deleted_at', null)
-    .eq('is_reusable', true)
-    .eq('upload_status', 'ready')
-    .order('display_name', { ascending: true }),
+  loadReusableReadyMediaAssets(supabase),
 ])
 
 if (loadError || !existing) {
@@ -56,8 +50,6 @@ type SubjectOption = { id: string; name: string }
 
 const record = existing as SubjectRecord
 const subjectOptions = (subjectsData ?? []) as SubjectOption[]
-const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
-const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 type Values = {
   name: string
@@ -109,6 +101,7 @@ if (Astro.request.method === 'POST') {
   if (values.parent_subject_id && values.parent_subject_id === id) {
     e.parent_subject_id = 'A subject cannot be its own parent.'
   }
+  const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.cover_image_id, values.og_image_id])
   if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
     e.cover_image_id = 'Selected cover image is not valid.'
   }
@@ -208,6 +201,7 @@ if (Astro.request.method === 'POST') {
           currentId={values.cover_image_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="subjects"
         />
         {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
       </div>
@@ -218,6 +212,9 @@ if (Astro.request.method === 'POST') {
           currentId={values.og_image_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="subjects"
+          copyFromField="cover_image_id"
+          copyFromLabel="Cover Image"
         />
         {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
       </div>

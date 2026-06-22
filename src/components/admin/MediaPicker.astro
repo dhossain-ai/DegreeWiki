@@ -1,7 +1,10 @@
 ---
-// Admin-only component. Safe to import in admin pages.
-// Imports only url.ts (public-safe). Does NOT import config.ts or upload.ts.
+// Admin-only component. Safe to use in admin pages.
+// Imports only url.ts and folders.ts (no secrets).
+// config.ts and upload.ts must NOT be imported here.
+
 import { cloudinaryUrl } from '../../lib/cloudinary/url'
+import { ALLOWED_SUBFOLDERS } from '../../lib/cloudinary/folders'
 
 export interface MediaAssetOption {
   id: string
@@ -17,93 +20,815 @@ interface Props {
   currentId: string | null
   assets: MediaAssetOption[]
   cloudName: string
+  defaultSubfolder?: string
+  copyFromField?: string
+  copyFromLabel?: string
 }
 
-const { fieldName, label, currentId, assets, cloudName } = Astro.props
+const {
+  fieldName,
+  label,
+  currentId,
+  assets,
+  cloudName,
+  defaultSubfolder = 'general',
+  copyFromField = '',
+  copyFromLabel = '',
+} = Astro.props
 
-// fieldName is used as UID — each picker on a page has a unique fieldName.
-const uid = fieldName
-
-function thumb(asset: MediaAssetOption): string {
+function assetThumbUrl(asset: MediaAssetOption): string {
   if (!asset.cloudinary_public_id || !cloudName) return ''
-  return cloudinaryUrl(cloudName, asset.cloudinary_public_id, { width: 80, height: 80, crop: 'fill' })
+  return cloudinaryUrl(cloudName, asset.cloudinary_public_id, { width: 120, height: 90, crop: 'fill' })
+}
+
+function slotThumbUrl(asset: MediaAssetOption): string {
+  if (!asset.cloudinary_public_id || !cloudName) return ''
+  return cloudinaryUrl(cloudName, asset.cloudinary_public_id, { width: 160, height: 120, crop: 'fill' })
 }
 
 function assetLabel(asset: MediaAssetOption): string {
-  const name = asset.display_name ?? asset.alt_text ?? asset.cloudinary_public_id ?? 'Untitled'
-  return asset.folder ? `[${asset.folder}] ${name}` : name
+  return asset.display_name ?? asset.alt_text ?? asset.cloudinary_public_id ?? 'Untitled'
 }
 
 const selected = assets.find(a => a.id === currentId) ?? null
-const initialThumb = selected ? thumb(selected) : ''
 ---
 
-<div class="space-y-2">
-  <label for={`picker_${uid}`} class="block text-sm font-medium text-gray-700">{label}</label>
+<div
+  class="media-picker-root"
+  data-media-picker
+  data-uid={fieldName}
+  data-cloud-name={cloudName}
+  data-default-subfolder={defaultSubfolder}
+  data-copy-from-field={copyFromField}
+  data-copy-from-label={copyFromLabel}
+  data-selected-id={selected?.id ?? ''}
+  data-selected-public-id={selected?.cloudinary_public_id ?? ''}
+  data-selected-thumb={selected ? slotThumbUrl(selected) : ''}
+  data-selected-name={selected ? assetLabel(selected) : ''}
+  data-selected-folder={selected?.folder ?? ''}
+>
+  <p class="block text-sm font-medium text-gray-700 mb-2">{label}</p>
 
-  <select
-    id={`picker_${uid}`}
-    name={fieldName}
-    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-    data-picker-uid={uid}
-  >
-    <option value="" data-thumb="">— none —</option>
-    {assets.map(asset => (
-      <option
-        value={asset.id}
-        selected={asset.id === currentId}
-        data-thumb={thumb(asset)}
+  <!-- Slot card -->
+  <div class="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-3">
+    <!-- Preview area -->
+    <div class="flex items-start gap-3">
+      <div
+        class="flex-shrink-0 w-40 h-30 rounded border border-gray-200 bg-white overflow-hidden flex items-center justify-center"
+        style="height: 7.5rem;"
+        data-preview-wrap
       >
-        {assetLabel(asset)}
-      </option>
-    ))}
-  </select>
+        {selected && selected.cloudinary_public_id ? (
+          <img
+            src={slotThumbUrl(selected)}
+            alt={selected.alt_text ?? label}
+            width="160"
+            height="120"
+            loading="lazy"
+            class="object-cover w-full h-full"
+            data-preview-img
+          />
+        ) : (
+          <span class="text-xs text-gray-400 select-none" data-preview-empty>No image</span>
+        )}
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm text-gray-700 truncate" data-slot-name>
+          {selected ? assetLabel(selected) : ''}
+        </p>
+        {selected?.folder && (
+          <p class="text-xs text-gray-400 truncate" data-slot-folder>{selected.folder}</p>
+        )}
+        {!selected && (
+          <p class="text-xs text-gray-400" data-slot-empty-hint>No image selected</p>
+        )}
+      </div>
+    </div>
 
-  <div
-    id={`thumb_wrap_${uid}`}
-    class="h-20 w-20 rounded border border-gray-200 bg-gray-50 overflow-hidden"
-    style={initialThumb ? '' : 'display:none'}
-  >
-    <img
-      id={`thumb_img_${uid}`}
-      src={initialThumb || ''}
-      alt={selected?.alt_text ?? label}
-      width="80"
-      height="80"
-      loading="lazy"
-      class="object-cover w-full h-full"
-    />
+    <!-- Action buttons -->
+    <div class="flex flex-wrap gap-2">
+      <button type="button" data-open="library"
+        class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-gray-700">
+        Choose from library
+      </button>
+      <button type="button" data-open="upload"
+        class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-gray-700">
+        Upload new
+      </button>
+      <button type="button" data-open="import"
+        class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-gray-700">
+        Import URL
+      </button>
+      <button type="button" data-remove
+        class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-red-600"
+        style={!selected ? 'display:none' : ''}>
+        Remove
+      </button>
+      {copyFromField && (
+        <button type="button" data-copy-from
+          class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-blue-600">
+          Use same as {copyFromLabel || copyFromField}
+        </button>
+      )}
+    </div>
   </div>
 
-  <p class="text-xs text-gray-400">
-    <a href="/admin/media/new" target="_blank" rel="noopener" class="text-blue-600 hover:underline">
-      Upload a new image
-    </a>
-    {assets.length === 0 && <span> — no reusable assets in library yet</span>}
-  </p>
+  <!-- Hidden form field -->
+  <input type="hidden" name={fieldName} value={selected?.id ?? ''} data-field />
+
+  <!-- Dialog -->
+  <dialog
+    data-dialog
+    class="rounded-xl shadow-2xl border border-gray-200 p-0 w-full max-w-2xl backdrop:bg-black/40"
+    style="max-height: 85vh;"
+  >
+    <!-- Dialog header -->
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+      <span class="font-semibold text-gray-900 text-sm">Select Image — {label}</span>
+      <button type="button" data-dialog-close
+        class="text-gray-400 hover:text-gray-600 text-xl leading-none font-bold">×</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex border-b border-gray-200 px-5 gap-0">
+      {(['library', 'upload', 'import'] as const).map(tab => (
+        <button
+          type="button"
+          data-tab-btn={tab}
+          class={`px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors ${tab === 'library' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          {tab === 'library' ? 'Library' : tab === 'upload' ? 'Upload new' : 'Import URL'}
+        </button>
+      ))}
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="overflow-y-auto" style="max-height: calc(85vh - 8rem);">
+
+      <!-- Library panel -->
+      <div data-panel="library" class="p-4 space-y-3">
+        <input
+          type="text"
+          placeholder="Filter by name…"
+          data-filter-input
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {assets.length === 0 ? (
+          <p class="text-sm text-gray-400 text-center py-8">No reusable assets in library yet. Upload or import an image first.</p>
+        ) : (
+          <div
+            data-asset-grid
+            class="grid grid-cols-3 gap-3"
+            style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));"
+          >
+            {assets.map(asset => (
+              <button
+                type="button"
+                data-asset-card
+                data-asset-id={asset.id}
+                data-asset-public-id={asset.cloudinary_public_id ?? ''}
+                data-asset-thumb={assetThumbUrl(asset)}
+                data-asset-name={assetLabel(asset)}
+                data-asset-folder={asset.folder ?? ''}
+                data-asset-alt={asset.alt_text ?? ''}
+                class="group text-left rounded-lg border border-gray-200 overflow-hidden hover:border-blue-400 hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <div class="w-full bg-gray-100 overflow-hidden" style="height: 90px;">
+                  {asset.cloudinary_public_id ? (
+                    <img
+                      src={assetThumbUrl(asset)}
+                      alt={asset.alt_text ?? asset.display_name ?? ''}
+                      width="140"
+                      height="90"
+                      loading="lazy"
+                      class="object-cover w-full h-full group-hover:scale-105 transition-transform"
+                    />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-gray-300 text-xs">No preview</div>
+                  )}
+                </div>
+                <div class="p-1.5">
+                  <p class="text-xs text-gray-700 truncate leading-tight">{assetLabel(asset)}</p>
+                  {asset.folder && <p class="text-xs text-gray-400 truncate">{asset.folder}</p>}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <!-- Upload panel -->
+      <div data-panel="upload" hidden class="p-4 space-y-4 max-w-md">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Folder</label>
+          <select data-upload-subfolder
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            {ALLOWED_SUBFOLDERS.map(f => (
+              <option value={f} selected={f === defaultSubfolder}>{f}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Image file *</label>
+          <input type="file" data-upload-file accept="image/*"
+            class="w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+          <p class="mt-1 text-xs text-gray-400">Accepted: jpg, jpeg, png, webp, gif, svg, avif</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Display name</label>
+          <input type="text" data-upload-name placeholder="Friendly name (optional)"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Alt text</label>
+          <input type="text" data-upload-alt placeholder="Describe the image (optional)"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div data-upload-status hidden
+          class="px-3 py-2 rounded text-xs"></div>
+        <div class="flex gap-2">
+          <button type="button" data-upload-submit
+            class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+            Upload
+          </button>
+          <button type="button" data-panel-cancel
+            class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">
+            Cancel
+          </button>
+        </div>
+        <p class="text-xs text-gray-400">
+          Full metadata (credit, license, copyright) can be edited in the
+          <a href="/admin/media" target="_blank" rel="noopener" class="text-blue-500 hover:underline">media library</a>.
+        </p>
+      </div>
+
+      <!-- Import URL panel -->
+      <div data-panel="import" hidden class="p-4 space-y-4 max-w-md">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Folder</label>
+          <select data-import-subfolder
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            {ALLOWED_SUBFOLDERS.map(f => (
+              <option value={f} selected={f === defaultSubfolder}>{f}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Image URL *</label>
+          <input type="url" data-import-url placeholder="https://example.com/image.jpg"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <p class="mt-1 text-xs text-gray-400">Must be a public HTTPS URL.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Display name</label>
+          <input type="text" data-import-name placeholder="Friendly name (optional)"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Alt text</label>
+          <input type="text" data-import-alt placeholder="Describe the image (optional)"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div data-import-status hidden
+          class="px-3 py-2 rounded text-xs"></div>
+        <div class="flex gap-2">
+          <button type="button" data-import-submit
+            class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+            Import
+          </button>
+          <button type="button" data-panel-cancel
+            class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">
+            Cancel
+          </button>
+        </div>
+        <p class="text-xs text-gray-400">
+          Full metadata can be edited in the
+          <a href="/admin/media" target="_blank" rel="noopener" class="text-blue-500 hover:underline">media library</a>.
+        </p>
+      </div>
+
+    </div><!-- /scrollable body -->
+  </dialog>
 </div>
 
 <script>
-  // Updates thumbnail preview when picker selection changes.
-  // Reads data-thumb from the selected <option>. No innerHTML used.
-  document.querySelectorAll<HTMLSelectElement>('select[data-picker-uid]').forEach(select => {
-    const uid  = select.dataset.pickerUid!
-    const wrap = document.getElementById(`thumb_wrap_${uid}`)
-    const img  = document.getElementById(`thumb_img_${uid}`) as HTMLImageElement | null
+// Initializes all [data-media-picker] roots on the page.
+// One script block — Astro deduplicates; this runs once per page load.
 
-    function update() {
-      const opt   = select.options[select.selectedIndex]
-      const thumb = opt?.dataset.thumb ?? ''
-      if (!wrap || !img) return
-      if (thumb) {
-        img.src            = thumb
-        wrap.style.display = ''
-      } else {
-        img.src            = ''
-        wrap.style.display = 'none'
+interface AssetData {
+  id: string
+  publicId: string
+  thumb: string
+  name: string
+  folder: string
+  altText: string
+}
+
+function buildThumbUrl(cloudName: string, publicId: string): string {
+  if (!cloudName || !publicId) return ''
+  return `https://res.cloudinary.com/${cloudName}/image/upload/f_auto,q_auto,w_120,h_90,c_fill/${publicId}`
+}
+
+function buildSlotThumbUrl(cloudName: string, publicId: string): string {
+  if (!cloudName || !publicId) return ''
+  return `https://res.cloudinary.com/${cloudName}/image/upload/f_auto,q_auto,w_160,h_120,c_fill/${publicId}`
+}
+
+function setStatus(
+  el: HTMLElement,
+  type: 'info' | 'error' | 'success',
+  msg: string,
+) {
+  el.textContent = msg
+  el.hidden = false
+  el.className = `px-3 py-2 rounded text-xs ${
+    type === 'error'
+      ? 'bg-red-50 text-red-700 border border-red-200'
+      : type === 'success'
+      ? 'bg-green-50 text-green-700 border border-green-200'
+      : 'bg-blue-50 text-blue-700 border border-blue-200'
+  }`
+}
+
+function clearStatus(el: HTMLElement) {
+  el.hidden = true
+  el.textContent = ''
+}
+
+// Broadcast a new asset to all pickers on the page.
+function broadcastNewAsset(asset: AssetData) {
+  document.dispatchEvent(
+    new CustomEvent('degreewiki:media-added', { detail: asset }),
+  )
+}
+
+document.querySelectorAll<HTMLElement>('[data-media-picker]').forEach(root => {
+  const cloudName       = root.dataset.cloudName ?? ''
+  const copyFromField   = root.dataset.copyFromField ?? ''
+  const copyFromLabel   = root.dataset.copyFromLabel ?? ''
+  const defaultSubfolder = root.dataset.defaultSubfolder ?? 'general'
+
+  const dialog       = root.querySelector<HTMLDialogElement>('[data-dialog]')!
+  const field        = root.querySelector<HTMLInputElement>('[data-field]')!
+  const previewWrap  = root.querySelector<HTMLElement>('[data-preview-wrap]')!
+  const slotNameEl   = root.querySelector<HTMLElement>('[data-slot-name]')!
+  const removeBtn    = root.querySelector<HTMLButtonElement>('[data-remove]')!
+  const assetGrid    = root.querySelector<HTMLElement>('[data-asset-grid]')
+
+  // ── Slot update ────────────────────────────────────────────────────────────
+
+  function applySelection(asset: AssetData) {
+    field.value = asset.id
+
+    // Update root data attributes so copy-from logic can read them
+    root.dataset.selectedId       = asset.id
+    root.dataset.selectedPublicId = asset.publicId
+    root.dataset.selectedThumb    = buildSlotThumbUrl(cloudName, asset.publicId)
+    root.dataset.selectedName     = asset.name
+    root.dataset.selectedFolder   = asset.folder
+
+    // Update preview
+    let img = previewWrap.querySelector<HTMLImageElement>('img[data-preview-img]')
+    if (!img) {
+      // Remove empty-state placeholder if present
+      const empty = previewWrap.querySelector('[data-preview-empty]')
+      if (empty) empty.remove()
+      img = document.createElement('img')
+      img.dataset.previewImg = ''
+      img.width  = 160
+      img.height = 120
+      img.loading = 'lazy'
+      img.className = 'object-cover w-full h-full'
+      previewWrap.appendChild(img)
+    }
+    img.src = buildSlotThumbUrl(cloudName, asset.publicId)
+    img.alt = asset.altText || asset.name
+
+    // Update slot text
+    slotNameEl.textContent = asset.name
+
+    let folderEl = root.querySelector<HTMLElement>('[data-slot-folder]')
+    if (asset.folder) {
+      if (!folderEl) {
+        folderEl = document.createElement('p')
+        folderEl.dataset.slotFolder = ''
+        folderEl.className = 'text-xs text-gray-400 truncate'
+        slotNameEl.insertAdjacentElement('afterend', folderEl)
       }
+      folderEl.textContent = asset.folder
+    } else {
+      folderEl?.remove()
     }
 
-    select.addEventListener('change', update)
+    // Remove empty hint if present
+    root.querySelector('[data-slot-empty-hint]')?.remove()
+
+    // Show remove button
+    removeBtn.style.display = ''
+  }
+
+  function clearSelection() {
+    field.value = ''
+    root.dataset.selectedId       = ''
+    root.dataset.selectedPublicId = ''
+    root.dataset.selectedThumb    = ''
+    root.dataset.selectedName     = ''
+    root.dataset.selectedFolder   = ''
+
+    // Clear preview
+    const img = previewWrap.querySelector<HTMLImageElement>('img[data-preview-img]')
+    if (img) img.remove()
+    if (!previewWrap.querySelector('[data-preview-empty]')) {
+      const span = document.createElement('span')
+      span.dataset.previewEmpty = ''
+      span.className = 'text-xs text-gray-400 select-none'
+      span.textContent = 'No image'
+      previewWrap.appendChild(span)
+    }
+
+    slotNameEl.textContent = ''
+    root.querySelector('[data-slot-folder]')?.remove()
+
+    if (!root.querySelector('[data-slot-empty-hint]')) {
+      const hint = document.createElement('p')
+      hint.dataset.slotEmptyHint = ''
+      hint.className = 'text-xs text-gray-400'
+      hint.textContent = 'No image selected'
+      slotNameEl.insertAdjacentElement('afterend', hint)
+    }
+
+    removeBtn.style.display = 'none'
+  }
+
+  // ── Asset grid — add card for newly uploaded/imported asset ────────────────
+
+  function prependAssetCard(asset: AssetData) {
+    if (!assetGrid) return
+    // Don't add if already present
+    if (assetGrid.querySelector(`[data-asset-id="${asset.id}"]`)) return
+
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.dataset.assetCard   = ''
+    btn.dataset.assetId     = asset.id
+    btn.dataset.assetPublicId = asset.publicId
+    btn.dataset.assetThumb  = asset.thumb
+    btn.dataset.assetName   = asset.name
+    btn.dataset.assetFolder = asset.folder
+    btn.dataset.assetAlt    = asset.altText
+    btn.className = 'group text-left rounded-lg border border-gray-200 overflow-hidden hover:border-blue-400 hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+    const imgWrap = document.createElement('div')
+    imgWrap.className = 'w-full bg-gray-100 overflow-hidden'
+    imgWrap.style.height = '90px'
+
+    if (asset.publicId) {
+      const img = document.createElement('img')
+      img.src    = asset.thumb
+      img.alt    = asset.altText || asset.name
+      img.width  = 140
+      img.height = 90
+      img.loading = 'lazy'
+      img.className = 'object-cover w-full h-full group-hover:scale-105 transition-transform'
+      imgWrap.appendChild(img)
+    }
+
+    const info = document.createElement('div')
+    info.className = 'p-1.5'
+
+    const nameEl = document.createElement('p')
+    nameEl.className = 'text-xs text-gray-700 truncate leading-tight'
+    nameEl.textContent = asset.name
+
+    info.appendChild(nameEl)
+
+    if (asset.folder) {
+      const folderEl = document.createElement('p')
+      folderEl.className = 'text-xs text-gray-400 truncate'
+      folderEl.textContent = asset.folder
+      info.appendChild(folderEl)
+    }
+
+    btn.appendChild(imgWrap)
+    btn.appendChild(info)
+
+    // Attach click handler
+    btn.addEventListener('click', () => {
+      applySelection(asset)
+      dialog.close()
+    })
+
+    assetGrid.prepend(btn)
+  }
+
+  // ── Dialog open/close ──────────────────────────────────────────────────────
+
+  function openDialog(tab: 'library' | 'upload' | 'import') {
+    switchTab(tab)
+    dialog.showModal()
+  }
+
+  root.querySelector('[data-dialog-close]')?.addEventListener('click', () => dialog.close())
+
+  // Close on backdrop click
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) dialog.close()
   })
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+
+  function switchTab(tab: string) {
+    root.querySelectorAll<HTMLElement>('[data-panel]').forEach(panel => {
+      panel.hidden = panel.dataset.panel !== tab
+    })
+    root.querySelectorAll<HTMLElement>('[data-tab-btn]').forEach(btn => {
+      const active = btn.dataset.tabBtn === tab
+      btn.className = `px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+        active
+          ? 'border-blue-600 text-blue-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700'
+      }`
+    })
+  }
+
+  root.querySelectorAll<HTMLElement>('[data-tab-btn]').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn!))
+  })
+
+  // ── Open buttons ───────────────────────────────────────────────────────────
+
+  root.querySelectorAll<HTMLElement>('[data-open]').forEach(btn => {
+    btn.addEventListener('click', () =>
+      openDialog(btn.dataset.open as 'library' | 'upload' | 'import'),
+    )
+  })
+
+  // ── Panel cancel buttons ───────────────────────────────────────────────────
+
+  root.querySelectorAll<HTMLElement>('[data-panel-cancel]').forEach(btn => {
+    btn.addEventListener('click', () => switchTab('library'))
+  })
+
+  // ── Library grid click ─────────────────────────────────────────────────────
+
+  root.querySelectorAll<HTMLElement>('[data-asset-card]').forEach(card => {
+    card.addEventListener('click', () => {
+      const asset: AssetData = {
+        id:       card.dataset.assetId!,
+        publicId: card.dataset.assetPublicId ?? '',
+        thumb:    card.dataset.assetThumb ?? '',
+        name:     card.dataset.assetName ?? '',
+        folder:   card.dataset.assetFolder ?? '',
+        altText:  card.dataset.assetAlt ?? '',
+      }
+      applySelection(asset)
+      dialog.close()
+    })
+  })
+
+  // ── Library filter ─────────────────────────────────────────────────────────
+
+  root.querySelector<HTMLInputElement>('[data-filter-input]')?.addEventListener('input', (e) => {
+    const q = (e.target as HTMLInputElement).value.toLowerCase().trim()
+    root.querySelectorAll<HTMLElement>('[data-asset-card]').forEach(card => {
+      const name = (card.dataset.assetName ?? '').toLowerCase()
+      const folder = (card.dataset.assetFolder ?? '').toLowerCase()
+      card.hidden = q !== '' && !name.includes(q) && !folder.includes(q)
+    })
+  })
+
+  // ── Remove button ──────────────────────────────────────────────────────────
+
+  removeBtn.addEventListener('click', () => clearSelection())
+
+  // ── Copy-from button ───────────────────────────────────────────────────────
+
+  if (copyFromField) {
+    root.querySelector('[data-copy-from]')?.addEventListener('click', () => {
+      const sourceRoot = document.querySelector<HTMLElement>(
+        `[data-media-picker][data-uid="${copyFromField}"]`,
+      )
+      if (!sourceRoot) return
+
+      const sourceId       = sourceRoot.dataset.selectedId ?? ''
+      const sourcePublicId = sourceRoot.dataset.selectedPublicId ?? ''
+      const sourceName     = sourceRoot.dataset.selectedName ?? ''
+      const sourceFolder   = sourceRoot.dataset.selectedFolder ?? ''
+      const sourceAlt      = sourceRoot.querySelector<HTMLImageElement>('img[data-preview-img]')?.alt ?? ''
+
+      if (!sourceId) {
+        // Source picker has nothing selected — silently skip
+        return
+      }
+
+      applySelection({
+        id:       sourceId,
+        publicId: sourcePublicId,
+        thumb:    buildThumbUrl(cloudName, sourcePublicId),
+        name:     sourceName,
+        folder:   sourceFolder,
+        altText:  sourceAlt,
+      })
+    })
+  }
+
+  // ── Upload flow ────────────────────────────────────────────────────────────
+
+  const uploadStatusEl  = root.querySelector<HTMLElement>('[data-upload-status]')!
+  const uploadSubmitBtn = root.querySelector<HTMLButtonElement>('[data-upload-submit]')!
+  const uploadFileInput = root.querySelector<HTMLInputElement>('[data-upload-file]')!
+  const uploadNameInput = root.querySelector<HTMLInputElement>('[data-upload-name]')!
+  const uploadAltInput  = root.querySelector<HTMLInputElement>('[data-upload-alt]')!
+  const uploadFolderSel = root.querySelector<HTMLSelectElement>('[data-upload-subfolder]')!
+
+  uploadSubmitBtn.addEventListener('click', async () => {
+    clearStatus(uploadStatusEl)
+    const file = uploadFileInput.files?.[0]
+    if (!file) {
+      setStatus(uploadStatusEl, 'error', 'Please select a file.')
+      return
+    }
+
+    const subfolder = uploadFolderSel.value
+    const displayName = uploadNameInput.value.trim()
+    const altText     = uploadAltInput.value.trim()
+
+    uploadSubmitBtn.disabled = true
+
+    // Step 1 — sign
+    setStatus(uploadStatusEl, 'info', 'Preparing upload…')
+    let signData: Record<string, unknown>
+    try {
+      const r = await fetch('/api/admin/media/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subfolder, timestamp: Math.floor(Date.now() / 1000) }),
+      })
+      signData = await r.json() as Record<string, unknown>
+      if (!signData['ok']) throw new Error(String(signData['error'] ?? 'sign_failed'))
+    } catch {
+      setStatus(uploadStatusEl, 'error', 'Could not prepare the upload. Please try again.')
+      uploadSubmitBtn.disabled = false
+      return
+    }
+
+    // Step 2 — upload to Cloudinary
+    setStatus(uploadStatusEl, 'info', 'Uploading to Cloudinary…')
+    let cloudData: Record<string, unknown>
+    try {
+      const form = new FormData()
+      form.append('file',            file)
+      form.append('api_key',         String(signData['api_key']))
+      form.append('timestamp',       String(signData['timestamp']))
+      form.append('signature',       String(signData['signature']))
+      form.append('folder',          String(signData['folder']))
+      form.append('allowed_formats', String(signData['allowed_formats']))
+
+      const r = await fetch(
+        `https://api.cloudinary.com/v1_1/${signData['cloud_name']}/image/upload`,
+        { method: 'POST', body: form },
+      )
+      cloudData = await r.json() as Record<string, unknown>
+      if (!r.ok) throw new Error('upload_failed')
+    } catch {
+      setStatus(uploadStatusEl, 'error', 'Upload to Cloudinary failed. Check the file type and try again.')
+      uploadSubmitBtn.disabled = false
+      return
+    }
+
+    // Step 3 — save to DB
+    setStatus(uploadStatusEl, 'info', 'Saving to media library…')
+    try {
+      const r = await fetch('/api/admin/media/complete-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...cloudData,
+          display_name: displayName || null,
+          alt_text:     altText || null,
+          is_public:    true,
+          is_reusable:  true,
+        }),
+      })
+      const data = await r.json() as Record<string, unknown>
+
+      if (!data['ok']) {
+        if (r.status === 403) {
+          setStatus(uploadStatusEl, 'error', 'You do not have permission to upload media.')
+        } else {
+          setStatus(uploadStatusEl, 'error', 'Upload succeeded but could not save to database. Please try again.')
+        }
+        uploadSubmitBtn.disabled = false
+        return
+      }
+
+      const newAsset: AssetData = {
+        id:       String(data['id']),
+        publicId: String(data['cloudinary_public_id'] ?? ''),
+        thumb:    buildThumbUrl(cloudName, String(data['cloudinary_public_id'] ?? '')),
+        name:     String(data['display_name'] ?? data['cloudinary_public_id'] ?? 'Untitled'),
+        folder:   String(data['folder'] ?? ''),
+        altText:  String(data['alt_text'] ?? ''),
+      }
+
+      // Auto-select and add to grid
+      applySelection(newAsset)
+      prependAssetCard(newAsset)
+      broadcastNewAsset(newAsset)
+
+      // Reset upload form
+      uploadFileInput.value = ''
+      uploadNameInput.value = ''
+      uploadAltInput.value  = ''
+      clearStatus(uploadStatusEl)
+      dialog.close()
+    } catch {
+      setStatus(uploadStatusEl, 'error', 'Unexpected error. Please try again.')
+    }
+
+    uploadSubmitBtn.disabled = false
+  })
+
+  // ── Import URL flow ────────────────────────────────────────────────────────
+
+  const importStatusEl  = root.querySelector<HTMLElement>('[data-import-status]')!
+  const importSubmitBtn = root.querySelector<HTMLButtonElement>('[data-import-submit]')!
+  const importUrlInput  = root.querySelector<HTMLInputElement>('[data-import-url]')!
+  const importNameInput = root.querySelector<HTMLInputElement>('[data-import-name]')!
+  const importAltInput  = root.querySelector<HTMLInputElement>('[data-import-alt]')!
+  const importFolderSel = root.querySelector<HTMLSelectElement>('[data-import-subfolder]')!
+
+  importSubmitBtn.addEventListener('click', async () => {
+    clearStatus(importStatusEl)
+    const sourceUrl = importUrlInput.value.trim()
+    if (!sourceUrl) {
+      setStatus(importStatusEl, 'error', 'Please enter a URL.')
+      return
+    }
+
+    const subfolder   = importFolderSel.value
+    const displayName = importNameInput.value.trim()
+    const altText     = importAltInput.value.trim()
+
+    importSubmitBtn.disabled = true
+    setStatus(importStatusEl, 'info', 'Importing from URL…')
+
+    try {
+      const r = await fetch('/api/admin/media/import-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_url:   sourceUrl,
+          subfolder,
+          display_name: displayName || null,
+          alt_text:     altText || null,
+          is_public:    true,
+          is_reusable:  true,
+        }),
+      })
+      const data = await r.json() as Record<string, unknown>
+
+      if (!data['ok']) {
+        if (r.status === 403) {
+          setStatus(importStatusEl, 'error', 'You do not have permission to import media.')
+        } else {
+          setStatus(importStatusEl, 'error', 'Import failed. Check the URL is a public HTTPS image and try again.')
+        }
+        importSubmitBtn.disabled = false
+        return
+      }
+
+      const newAsset: AssetData = {
+        id:       String(data['id']),
+        publicId: String(data['cloudinary_public_id'] ?? ''),
+        thumb:    buildThumbUrl(cloudName, String(data['cloudinary_public_id'] ?? '')),
+        name:     String(data['display_name'] ?? data['cloudinary_public_id'] ?? 'Untitled'),
+        folder:   String(data['folder'] ?? ''),
+        altText:  String(data['alt_text'] ?? ''),
+      }
+
+      applySelection(newAsset)
+      prependAssetCard(newAsset)
+      broadcastNewAsset(newAsset)
+
+      // Reset import form
+      importUrlInput.value  = ''
+      importNameInput.value = ''
+      importAltInput.value  = ''
+      clearStatus(importStatusEl)
+      dialog.close()
+    } catch {
+      setStatus(importStatusEl, 'error', 'Unexpected error. Please try again.')
+    }
+
+    importSubmitBtn.disabled = false
+  })
+
+  // ── Listen for assets added by other pickers on the page ──────────────────
+
+  document.addEventListener('degreewiki:media-added', (e: Event) => {
+    const asset = (e as CustomEvent<AssetData>).detail
+    prependAssetCard(asset)
+  })
+})
 </script>

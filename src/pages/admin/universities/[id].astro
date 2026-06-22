@@ -2,7 +2,7 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import MediaPicker from '../../../components/admin/MediaPicker.astro'
-import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
+import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../../../lib/admin/media'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -30,7 +30,7 @@ const [
   { data: existing, error: loadError },
   { data: countriesData },
   { data: citiesData },
-  { data: mediaAssetsData },
+  mediaAssets,
 ] = await Promise.all([
   supabase
     .from('universities')
@@ -39,13 +39,7 @@ const [
     .single(),
   supabase.from('countries').select('id, name').order('name', { ascending: true }),
   supabase.from('cities').select('id, name, country_id').order('name', { ascending: true }),
-  supabase
-    .from('media_assets')
-    .select('id, cloudinary_public_id, display_name, alt_text, folder')
-    .is('deleted_at', null)
-    .eq('is_reusable', true)
-    .eq('upload_status', 'ready')
-    .order('display_name', { ascending: true }),
+  loadReusableReadyMediaAssets(supabase),
 ])
 
 if (loadError || !existing) {
@@ -81,8 +75,6 @@ type CityOption = { id: string; name: string; country_id: string }
 const record = existing as UniversityRecord
 const countries = (countriesData ?? []) as CountryOption[]
 const cities = (citiesData ?? []) as CityOption[]
-const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
-const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 const { data: sourcesData } = await supabase
   .from('data_sources')
@@ -172,6 +164,7 @@ if (Astro.request.method === 'POST') {
     if (statusErr) e.content_status = statusErr
     const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
     if (verErr) e.verification_status = verErr
+    const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.logo_id, values.cover_image_id, values.og_image_id])
     if (values.logo_id && !validMediaIds.has(values.logo_id)) {
       e.logo_id = 'Selected logo is not valid.'
     }
@@ -307,6 +300,7 @@ if (Astro.request.method === 'POST') {
           currentId={values.logo_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="universities"
         />
         {errors.logo_id && <p class="mt-1 text-xs text-red-600">{errors.logo_id}</p>}
       </div>
@@ -317,6 +311,7 @@ if (Astro.request.method === 'POST') {
           currentId={values.cover_image_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="universities"
         />
         {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
       </div>
@@ -327,6 +322,9 @@ if (Astro.request.method === 'POST') {
           currentId={values.og_image_id || null}
           assets={mediaAssets}
           cloudName={cloudName}
+          defaultSubfolder="universities"
+          copyFromField="cover_image_id"
+          copyFromLabel="Cover Image"
         />
         {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
       </div>

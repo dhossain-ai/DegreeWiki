@@ -2,7 +2,7 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import MediaPicker from '../../../components/admin/MediaPicker.astro'
-import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
+import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../../../lib/admin/media'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -23,22 +23,14 @@ const CONTENT_STATUS_OPTIONS   = ['draft', 'in_review', 'published', 'unpublishe
 const VERIFICATION_OPTIONS     = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
 const INDEXING_STATUS_OPTIONS  = ['draft', 'index', 'noindex'] as const
 
-const [{ data: categoriesData }, { data: mediaAssetsData }] = await Promise.all([
+const [{ data: categoriesData }, mediaAssets] = await Promise.all([
   supabase.from('article_categories').select('id, name').order('display_order'),
-  supabase
-    .from('media_assets')
-    .select('id, cloudinary_public_id, display_name, alt_text, folder')
-    .is('deleted_at', null)
-    .eq('is_reusable', true)
-    .eq('upload_status', 'ready')
-    .order('display_name', { ascending: true }),
+  loadReusableReadyMediaAssets(supabase),
 ])
 
 type CategoryRow = { id: string; name: string }
 const categories = (categoriesData ?? []) as CategoryRow[]
 const validCategoryIds = new Set(categories.map(c => c.id))
-const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
-const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 type Values = {
   title: string
@@ -100,6 +92,7 @@ if (Astro.request.method === 'POST') {
   if (values.article_category_id && !validCategoryIds.has(values.article_category_id)) {
     e.article_category_id = 'Selected category is not valid.'
   }
+  const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.featured_image_id, values.og_image_id])
   if (values.featured_image_id && !validMediaIds.has(values.featured_image_id)) {
     e.featured_image_id = 'Selected featured image is not valid.'
   }
@@ -221,12 +214,14 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <MediaPicker fieldName="featured_image_id" label="Featured Image"
-            currentId={null} assets={mediaAssets} cloudName={cloudName} />
+            currentId={null} assets={mediaAssets} cloudName={cloudName}
+            defaultSubfolder="articles" />
           {errors.featured_image_id && <p class={errorClass}>{errors.featured_image_id}</p>}
         </div>
         <div>
           <MediaPicker fieldName="og_image_id" label="OG Image"
-            currentId={null} assets={mediaAssets} cloudName={cloudName} />
+            currentId={null} assets={mediaAssets} cloudName={cloudName}
+            defaultSubfolder="articles" copyFromField="featured_image_id" copyFromLabel="Featured Image" />
           {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
         </div>
       </div>

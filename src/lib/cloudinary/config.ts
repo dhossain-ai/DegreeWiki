@@ -2,6 +2,9 @@
 // or any file that may be bundled for the client.
 // It reads CLOUDINARY_API_SECRET which must never reach the browser.
 
+export type { AllowedSubfolder } from './folders'
+export { ALLOWED_SUBFOLDERS, isAllowedSubfolder } from './folders'
+
 export type SignatureAlgorithm = 'sha256' | 'sha1'
 
 export interface CloudinaryConfig {
@@ -34,20 +37,4 @@ export function getCloudinaryConfig(): CloudinaryConfig {
     uploadFolder,
     signatureAlgorithm: rawAlgorithm as SignatureAlgorithm,
   }
-}
-
-export const ALLOWED_SUBFOLDERS = [
-  'general',
-  'universities',
-  'countries',
-  'cities',
-  'subjects',
-  'scholarships',
-  'articles',
-] as const
-
-export type AllowedSubfolder = (typeof ALLOWED_SUBFOLDERS)[number]
-
-export function isAllowedSubfolder(value: unknown): value is AllowedSubfolder {
-  return typeof value === 'string' && (ALLOWED_SUBFOLDERS as readonly string[]).includes(value)
 }
