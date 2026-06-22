@@ -7,13 +7,13 @@ Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 57A - Cloudinary / Media Asset Foundation - complete.
-This phase added the admin media library, signed direct upload, URL import, MediaImage component, and the 022 migration extending media_assets/entity_media.
-Entity image attachment (country/university/scholarship/article forms and public page rendering) is deferred to Phase 57B.
+Phase 57B - Entity Media Attachment - complete.
+This phase added 7 missing image FK columns (migration 023), the MediaPicker admin component, and wired image pickers into all 12 entity admin forms (countries, cities, universities, scholarships, articles, subjects — both new and edit).
+Public entity page image rendering is deferred to Phase 57C.
 
 Current branch / git status note:
 - Branch: `main`
-- Worktree was clean before Phase 57A. All Phase 57A changes are uncommitted and ready for review.
+- All Phase 57A and 57B changes are uncommitted and ready for review.
 
 ## Current Product Summary
 
@@ -39,10 +39,12 @@ Current branch / git status note:
 - Cloudinary stores and delivers media assets. Supabase stores metadata. Secrets stay server-only.
 - Upload flow: server-signed direct browser → Cloudinary upload; server verifies response signature before DB insert.
 - URL import: server calls Cloudinary upload API with SSRF-guarded remote URL.
-- Entity image attachment (FK columns → form pickers → public rendering) is deferred to Phase 57B.
+- Entity image FKs now exist on all 6 admin entity tables. MediaPicker component used in all 12 admin forms.
+- Public entity page image rendering is deferred to Phase 57C.
 
 ## Last Completed Phases
 
+- Phase 57B: Entity media attachment; migration 023, MediaPicker component, image pickers in all 12 admin entity forms (6 entities × 2 pages).
 - Phase 57A: Cloudinary/media asset foundation; migration 022, admin media library, signed upload, URL import, MediaImage component.
 - Phase 56C: repo docs compaction complete; exact snapshots were taken, archive files were created, and the active docs were rewritten.
 - Phase 56B: admin-role QA and navigation hardening; shared 403 helper plus filtered sidebar links.
@@ -54,14 +56,14 @@ Current branch / git status note:
 
 ## Known Active Issues
 
-- Entity image slots (cover_image_id for cities/subjects, logo_id/cover_image_id for scholarships) are not yet in the schema — deferred to Phase 57B.
-- Admin entity forms (countries, universities, articles, etc.) do not yet have image pickers — deferred to Phase 57B.
+- Public entity pages do not yet render entity images (cover/featured/og) — deferred to Phase 57C.
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
+- Cloudinary hard-delete (destroy API) not yet implemented.
 
 ## Immediate Next Phases
 
-- Phase 57B: entity image attachment — add missing FK columns, MediaPicker component, image slots in admin forms, image rendering on public entity pages.
+- Phase 57C: render entity images on public pages (countries, cities, universities, scholarships, articles, subjects).
 - Continue admin permission boundary hardening.
 
 ## Archive Map

@@ -1,6 +1,8 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import MediaPicker from '../../../components/admin/MediaPicker.astro'
+import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -15,16 +17,25 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
 
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
 
-// Load existing subjects for the parent dropdown
-const { data: subjectsData } = await supabase
-  .from('subjects')
-  .select('id, name')
-  .order('name', { ascending: true })
+const [{ data: subjectsData }, { data: mediaAssetsData }] = await Promise.all([
+  supabase.from('subjects').select('id, name').order('name', { ascending: true }),
+  supabase
+    .from('media_assets')
+    .select('id, cloudinary_public_id, display_name, alt_text, folder')
+    .is('deleted_at', null)
+    .eq('is_reusable', true)
+    .eq('upload_status', 'ready')
+    .order('display_name', { ascending: true }),
+])
 
 type SubjectOption = { id: string; name: string }
 const subjectOptions = (subjectsData ?? []) as SubjectOption[]
+const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
+const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 type Values = {
   name: string
@@ -32,20 +43,27 @@ type Values = {
   parent_subject_id: string
   display_order: string
   content_status: string
+  cover_image_id: string
+  og_image_id: string
 }
 
-let values: Values = { name: '', slug: '', parent_subject_id: '', display_order: '0', content_status: 'draft' }
+let values: Values = {
+  name: '', slug: '', parent_subject_id: '', display_order: '0', content_status: 'draft',
+  cover_image_id: '', og_image_id: '',
+}
 let errors: FormErrors = {}
 let serverError = ''
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
   values = {
-    name: String(form.get('name') ?? '').trim(),
-    slug: String(form.get('slug') ?? '').trim(),
+    name:              String(form.get('name') ?? '').trim(),
+    slug:              String(form.get('slug') ?? '').trim(),
     parent_subject_id: String(form.get('parent_subject_id') ?? '').trim(),
-    display_order: String(form.get('display_order') ?? '0').trim(),
-    content_status: String(form.get('content_status') ?? 'draft').trim(),
+    display_order:     String(form.get('display_order') ?? '0').trim(),
+    content_status:    String(form.get('content_status') ?? 'draft').trim(),
+    cover_image_id:    String(form.get('cover_image_id') ?? '').trim(),
+    og_image_id:       String(form.get('og_image_id') ?? '').trim(),
   }
 
   if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -61,16 +79,24 @@ if (Astro.request.method === 'POST') {
   if (!Number.isInteger(orderNum) || orderNum < 0) {
     e.display_order = 'Display order must be a non-negative integer.'
   }
+  if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
+    e.cover_image_id = 'Selected cover image is not valid.'
+  }
+  if (values.og_image_id && !validMediaIds.has(values.og_image_id)) {
+    e.og_image_id = 'Selected OG image is not valid.'
+  }
 
   errors = e
 
   if (Object.keys(errors).length === 0) {
     const { error } = await supabase.from('subjects').insert({
-      name: values.name,
-      slug: values.slug,
+      name:              values.name,
+      slug:              values.slug,
       parent_subject_id: values.parent_subject_id || null,
-      display_order: orderNum,
-      content_status: values.content_status,
+      display_order:     orderNum,
+      content_status:    values.content_status,
+      cover_image_id:    values.cover_image_id || null,
+      og_image_id:       values.og_image_id || null,
     })
 
     if (error) {
@@ -139,6 +165,30 @@ if (Astro.request.method === 'POST') {
       </select>
       {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
     </div>
+
+    <fieldset class="border border-gray-200 rounded-md p-4 space-y-4">
+      <legend class="text-sm font-medium text-gray-700 px-1">Images</legend>
+      <div>
+        <MediaPicker
+          fieldName="cover_image_id"
+          label="Cover Image"
+          currentId={null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
+      </div>
+      <div>
+        <MediaPicker
+          fieldName="og_image_id"
+          label="OG Image"
+          currentId={null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
+      </div>
+    </fieldset>
 
     <div class="flex gap-3 pt-2">
       <button type="submit"

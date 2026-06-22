@@ -1,6 +1,8 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import MediaPicker from '../../../components/admin/MediaPicker.astro'
+import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -17,20 +19,29 @@ const { user: _user, supabase } = guard
 const { id } = Astro.params
 if (!id) return new Response('Not found.', { status: 404 })
 
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
 const CONTENT_STATUS_OPTIONS   = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
 const VERIFICATION_OPTIONS     = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
 const INDEXING_STATUS_OPTIONS  = ['draft', 'index', 'noindex'] as const
 
-const [articleResult, categoriesResult] = await Promise.all([
+const [articleResult, categoriesResult, { data: mediaAssetsData }] = await Promise.all([
   supabase
     .from('articles')
-    .select('id, title, slug, summary, content, article_category_id, content_status, verification_status, indexing_status, published_at')
+    .select('id, title, slug, summary, content, article_category_id, content_status, verification_status, indexing_status, published_at, featured_image_id, og_image_id')
     .eq('id', id)
     .single(),
   supabase
     .from('article_categories')
     .select('id, name')
     .order('display_order'),
+  supabase
+    .from('media_assets')
+    .select('id, cloudinary_public_id, display_name, alt_text, folder')
+    .is('deleted_at', null)
+    .eq('is_reusable', true)
+    .eq('upload_status', 'ready')
+    .order('display_name', { ascending: true }),
 ])
 
 if (articleResult.error || !articleResult.data) {
@@ -48,12 +59,16 @@ type ArticleRecord = {
   verification_status: string
   indexing_status: string
   published_at: string | null
+  featured_image_id: string | null
+  og_image_id: string | null
 }
 type CategoryRow = { id: string; name: string }
 
 const record = articleResult.data as ArticleRecord
 const categories = (categoriesResult.data ?? []) as CategoryRow[]
 const validCategoryIds = new Set(categories.map(c => c.id))
+const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
+const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 type Values = {
   title: string
@@ -64,6 +79,8 @@ type Values = {
   content: string
   indexing_status: string
   verification_status: string
+  featured_image_id: string
+  og_image_id: string
 }
 
 let values: Values = {
@@ -75,6 +92,8 @@ let values: Values = {
   content: record.content ?? '',
   indexing_status: record.indexing_status,
   verification_status: record.verification_status,
+  featured_image_id: record.featured_image_id ?? '',
+  og_image_id: record.og_image_id ?? '',
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -92,6 +111,8 @@ if (Astro.request.method === 'POST') {
     content: g('content'),
     indexing_status: g('indexing_status') || 'draft',
     verification_status: g('verification_status') || 'unverified',
+    featured_image_id: g('featured_image_id'),
+    og_image_id: g('og_image_id'),
   }
 
   if (!values.slug && values.title) values.slug = toSlug(values.title)
@@ -116,6 +137,12 @@ if (Astro.request.method === 'POST') {
   if (values.article_category_id && !validCategoryIds.has(values.article_category_id)) {
     e.article_category_id = 'Selected category is not valid.'
   }
+  if (values.featured_image_id && !validMediaIds.has(values.featured_image_id)) {
+    e.featured_image_id = 'Selected featured image is not valid.'
+  }
+  if (values.og_image_id && !validMediaIds.has(values.og_image_id)) {
+    e.og_image_id = 'Selected OG image is not valid.'
+  }
 
   errors = e
 
@@ -133,6 +160,8 @@ if (Astro.request.method === 'POST') {
         content: values.content || null,
         indexing_status: values.indexing_status,
         verification_status: values.verification_status,
+        featured_image_id: values.featured_image_id || null,
+        og_image_id: values.og_image_id || null,
         ...(isFirstPublish ? { published_at: new Date().toISOString() } : {}),
       })
       .eq('id', id)
@@ -171,18 +200,14 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <label for="title" class={labelClass}>Title *</label>
-          <input type="text" id="title" name="title" value={values.title}
-            class={inputClass} />
+          <input type="text" id="title" name="title" value={values.title} class={inputClass} />
           {errors.title && <p class={errorClass}>{errors.title}</p>}
         </div>
-
         <div>
           <label for="slug" class={labelClass}>Slug *</label>
-          <input type="text" id="slug" name="slug" value={values.slug}
-            class={inputClass + ' font-mono'} />
+          <input type="text" id="slug" name="slug" value={values.slug} class={inputClass + ' font-mono'} />
           {errors.slug && <p class={errorClass}>{errors.slug}</p>}
         </div>
-
         <div>
           <label for="content_status" class={labelClass}>Status *</label>
           <select id="content_status" name="content_status" class={selectClass}>
@@ -216,15 +241,29 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <label for="summary" class={labelClass}>Summary</label>
-          <textarea id="summary" name="summary" rows={3}
-            class={inputClass}>{values.summary}</textarea>
+          <textarea id="summary" name="summary" rows={3} class={inputClass}>{values.summary}</textarea>
         </div>
-
         <div>
           <label for="content" class={labelClass}>Body</label>
           <p class="text-xs text-gray-400 mb-1">Plain text. Rich text editor not available in this phase.</p>
-          <textarea id="content" name="content" rows={12}
-            class={inputClass}>{values.content}</textarea>
+          <textarea id="content" name="content" rows={12} class={inputClass}>{values.content}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Images -->
+    <div>
+      <h2 class={sectionHeadClass}>Images</h2>
+      <div class="space-y-4">
+        <div>
+          <MediaPicker fieldName="featured_image_id" label="Featured Image"
+            currentId={values.featured_image_id || null} assets={mediaAssets} cloudName={cloudName} />
+          {errors.featured_image_id && <p class={errorClass}>{errors.featured_image_id}</p>}
+        </div>
+        <div>
+          <MediaPicker fieldName="og_image_id" label="OG Image"
+            currentId={values.og_image_id || null} assets={mediaAssets} cloudName={cloudName} />
+          {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
         </div>
       </div>
     </div>

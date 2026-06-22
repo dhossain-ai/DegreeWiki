@@ -1,6 +1,8 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import MediaPicker from '../../../components/admin/MediaPicker.astro'
+import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -19,6 +21,8 @@ const { user, supabase } = guard
 const { id } = Astro.params
 if (!id) return new Response('Not found.', { status: 404 })
 
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
 const CONTENT_STATUS_OPTIONS    = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
 const VERIFICATION_OPTIONS      = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
 const SOURCE_TYPE_OPTIONS       = ['official_university', 'government', 'third_party', 'aggregator', 'user_submitted'] as const
@@ -29,16 +33,26 @@ const PROVIDER_TYPE_OPTIONS     = ['government', 'university', 'private_foundati
 const FUNDING_TYPE_OPTIONS      = ['full_tuition', 'partial_tuition', 'living_stipend', 'travel', 'research', 'full_funding', 'other'] as const
 const APPLICATION_TYPE_OPTIONS  = ['direct', 'university_portal', 'nomination', 'embassy', 'other'] as const
 
-const { data: existing, error: loadError } = await supabase
-  .from('scholarships')
-  .select(`
-    id, name, slug, scholarship_type, provider_name, provider_type, funding_type,
-    application_type, amount_min, amount_max, currency, coverage_notes,
-    deadline, deadline_text, official_url, application_url, provider_url,
-    overview, eligibility_summary, content_status, verification_status
-  `)
-  .eq('id', id)
-  .single()
+const [{ data: existing, error: loadError }, { data: mediaAssetsData }] = await Promise.all([
+  supabase
+    .from('scholarships')
+    .select(`
+      id, name, slug, scholarship_type, provider_name, provider_type, funding_type,
+      application_type, amount_min, amount_max, currency, coverage_notes,
+      deadline, deadline_text, official_url, application_url, provider_url,
+      overview, eligibility_summary, content_status, verification_status,
+      logo_id, cover_image_id, og_image_id
+    `)
+    .eq('id', id)
+    .single(),
+  supabase
+    .from('media_assets')
+    .select('id, cloudinary_public_id, display_name, alt_text, folder')
+    .is('deleted_at', null)
+    .eq('is_reusable', true)
+    .eq('upload_status', 'ready')
+    .order('display_name', { ascending: true }),
+])
 
 if (loadError || !existing) {
   return new Response('Scholarship not found.', { status: 404 })
@@ -53,8 +67,11 @@ type ScholarshipRecord = {
   official_url: string | null; application_url: string | null; provider_url: string | null
   overview: string | null; eligibility_summary: string | null
   content_status: string; verification_status: string
+  logo_id: string | null; cover_image_id: string | null; og_image_id: string | null
 }
 const record = existing as ScholarshipRecord
+const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
+const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 type DataSourceRow = {
   id: string
@@ -82,6 +99,7 @@ type Values = {
   official_url: string; application_url: string; provider_url: string
   overview: string; eligibility_summary: string
   verification_status: string
+  logo_id: string; cover_image_id: string; og_image_id: string
 }
 
 let values: Values = {
@@ -105,6 +123,9 @@ let values: Values = {
   overview: record.overview ?? '',
   eligibility_summary: record.eligibility_summary ?? '',
   verification_status: record.verification_status,
+  logo_id: record.logo_id ?? '',
+  cover_image_id: record.cover_image_id ?? '',
+  og_image_id: record.og_image_id ?? '',
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -132,116 +153,130 @@ if (Astro.request.method === 'POST') {
       else { return Astro.redirect(Astro.url.pathname) }
     }
   } else {
-  const g = (key: string) => String(form.get(key) ?? '').trim()
+    const g = (key: string) => String(form.get(key) ?? '').trim()
 
-  values = {
-    name: g('name'), slug: g('slug'), content_status: g('content_status') || 'draft',
-    scholarship_type: g('scholarship_type'), provider_name: g('provider_name'),
-    provider_type: g('provider_type'), funding_type: g('funding_type'),
-    application_type: g('application_type'),
-    amount_min: g('amount_min'), amount_max: g('amount_max'),
-    currency: g('currency'), coverage_notes: g('coverage_notes'),
-    deadline: g('deadline'), deadline_text: g('deadline_text'),
-    official_url: g('official_url'), application_url: g('application_url'),
-    provider_url: g('provider_url'),
-    overview: g('overview'), eligibility_summary: g('eligibility_summary'),
-    verification_status: g('verification_status') || 'unverified',
-  }
+    values = {
+      name: g('name'), slug: g('slug'), content_status: g('content_status') || 'draft',
+      scholarship_type: g('scholarship_type'), provider_name: g('provider_name'),
+      provider_type: g('provider_type'), funding_type: g('funding_type'),
+      application_type: g('application_type'),
+      amount_min: g('amount_min'), amount_max: g('amount_max'),
+      currency: g('currency'), coverage_notes: g('coverage_notes'),
+      deadline: g('deadline'), deadline_text: g('deadline_text'),
+      official_url: g('official_url'), application_url: g('application_url'),
+      provider_url: g('provider_url'),
+      overview: g('overview'), eligibility_summary: g('eligibility_summary'),
+      verification_status: g('verification_status') || 'unverified',
+      logo_id: g('logo_id'), cover_image_id: g('cover_image_id'), og_image_id: g('og_image_id'),
+    }
 
-  if (!values.slug && values.name) values.slug = toSlug(values.name)
+    if (!values.slug && values.name) values.slug = toSlug(values.name)
 
-  const e: FormErrors = {}
+    const e: FormErrors = {}
 
-  const nameErr = validateRequired(values.name, 'Name')
-  if (nameErr) e.name = nameErr
+    const nameErr = validateRequired(values.name, 'Name')
+    if (nameErr) e.name = nameErr
 
-  const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
-  if (slugErr) e.slug = slugErr
+    const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
+    if (slugErr) e.slug = slugErr
 
-  const typeErr = validateRequired(values.scholarship_type, 'Scholarship Type')
-    ?? validateIn(values.scholarship_type, SCHOLARSHIP_TYPE_OPTIONS, 'Scholarship Type')
-  if (typeErr) e.scholarship_type = typeErr
+    const typeErr = validateRequired(values.scholarship_type, 'Scholarship Type')
+      ?? validateIn(values.scholarship_type, SCHOLARSHIP_TYPE_OPTIONS, 'Scholarship Type')
+    if (typeErr) e.scholarship_type = typeErr
 
-  if (values.provider_type) {
-    const err = validateIn(values.provider_type, PROVIDER_TYPE_OPTIONS, 'Provider Type')
-    if (err) e.provider_type = err
-  }
-  if (values.funding_type) {
-    const err = validateIn(values.funding_type, FUNDING_TYPE_OPTIONS, 'Funding Type')
-    if (err) e.funding_type = err
-  }
-  if (values.application_type) {
-    const err = validateIn(values.application_type, APPLICATION_TYPE_OPTIONS, 'Application Type')
-    if (err) e.application_type = err
-  }
+    if (values.provider_type) {
+      const err = validateIn(values.provider_type, PROVIDER_TYPE_OPTIONS, 'Provider Type')
+      if (err) e.provider_type = err
+    }
+    if (values.funding_type) {
+      const err = validateIn(values.funding_type, FUNDING_TYPE_OPTIONS, 'Funding Type')
+      if (err) e.funding_type = err
+    }
+    if (values.application_type) {
+      const err = validateIn(values.application_type, APPLICATION_TYPE_OPTIONS, 'Application Type')
+      if (err) e.application_type = err
+    }
 
-  const minErr = validateNumeric(values.amount_min, 'Minimum Amount', { min: 0 })
-  if (minErr) e.amount_min = minErr
-  const maxErr = validateNumeric(values.amount_max, 'Maximum Amount', { min: 0 })
-  if (maxErr) e.amount_max = maxErr
-  if (!e.amount_min && !e.amount_max && values.amount_min && values.amount_max) {
-    if (Number(values.amount_max) < Number(values.amount_min)) {
-      e.amount_max = 'Maximum amount must be greater than or equal to minimum amount.'
+    const minErr = validateNumeric(values.amount_min, 'Minimum Amount', { min: 0 })
+    if (minErr) e.amount_min = minErr
+    const maxErr = validateNumeric(values.amount_max, 'Maximum Amount', { min: 0 })
+    if (maxErr) e.amount_max = maxErr
+    if (!e.amount_min && !e.amount_max && values.amount_min && values.amount_max) {
+      if (Number(values.amount_max) < Number(values.amount_min)) {
+        e.amount_max = 'Maximum amount must be greater than or equal to minimum amount.'
+      }
+    }
+
+    if (values.deadline) {
+      if (isNaN(new Date(values.deadline).getTime())) {
+        e.deadline = 'Deadline must be a valid date.'
+      }
+    }
+
+    const offErr = validateUrl(values.official_url, 'Official URL')
+    if (offErr) e.official_url = offErr
+    const appUrlErr = validateUrl(values.application_url, 'Application URL')
+    if (appUrlErr) e.application_url = appUrlErr
+    const provUrlErr = validateUrl(values.provider_url, 'Provider URL')
+    if (provUrlErr) e.provider_url = provUrlErr
+
+    const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
+    if (statusErr) e.content_status = statusErr
+
+    const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
+    if (verErr) e.verification_status = verErr
+
+    if (values.logo_id && !validMediaIds.has(values.logo_id)) {
+      e.logo_id = 'Selected logo is not valid.'
+    }
+    if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
+      e.cover_image_id = 'Selected cover image is not valid.'
+    }
+    if (values.og_image_id && !validMediaIds.has(values.og_image_id)) {
+      e.og_image_id = 'Selected OG image is not valid.'
+    }
+
+    errors = e
+
+    if (Object.keys(errors).length === 0) {
+      const { error } = await supabase
+        .from('scholarships')
+        .update({
+          name: values.name,
+          slug: values.slug,
+          scholarship_type: values.scholarship_type,
+          provider_name: values.provider_name || null,
+          provider_type: values.provider_type || null,
+          funding_type: values.funding_type || null,
+          application_type: values.application_type || null,
+          amount_min: values.amount_min ? parseFloat(values.amount_min) : null,
+          amount_max: values.amount_max ? parseFloat(values.amount_max) : null,
+          currency: values.currency || null,
+          coverage_notes: values.coverage_notes || null,
+          deadline: values.deadline || null,
+          deadline_text: values.deadline_text || null,
+          official_url: values.official_url || null,
+          application_url: values.application_url || null,
+          provider_url: values.provider_url || null,
+          overview: values.overview || null,
+          eligibility_summary: values.eligibility_summary || null,
+          content_status: values.content_status,
+          verification_status: values.verification_status,
+          logo_id: values.logo_id || null,
+          cover_image_id: values.cover_image_id || null,
+          og_image_id: values.og_image_id || null,
+        })
+        .eq('id', id)
+
+      if (error) {
+        serverError = error.code === '23505'
+          ? 'A scholarship with this slug already exists.'
+          : 'Could not save. Please try again.'
+      } else {
+        return Astro.redirect('/admin/scholarships')
+      }
     }
   }
-
-  if (values.deadline) {
-    if (isNaN(new Date(values.deadline).getTime())) {
-      e.deadline = 'Deadline must be a valid date.'
-    }
-  }
-
-  const offErr = validateUrl(values.official_url, 'Official URL')
-  if (offErr) e.official_url = offErr
-  const appUrlErr = validateUrl(values.application_url, 'Application URL')
-  if (appUrlErr) e.application_url = appUrlErr
-  const provUrlErr = validateUrl(values.provider_url, 'Provider URL')
-  if (provUrlErr) e.provider_url = provUrlErr
-
-  const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
-  if (statusErr) e.content_status = statusErr
-
-  const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
-  if (verErr) e.verification_status = verErr
-
-  errors = e
-
-  if (Object.keys(errors).length === 0) {
-    const { error } = await supabase
-      .from('scholarships')
-      .update({
-        name: values.name,
-        slug: values.slug,
-        scholarship_type: values.scholarship_type,
-        provider_name: values.provider_name || null,
-        provider_type: values.provider_type || null,
-        funding_type: values.funding_type || null,
-        application_type: values.application_type || null,
-        amount_min: values.amount_min ? parseFloat(values.amount_min) : null,
-        amount_max: values.amount_max ? parseFloat(values.amount_max) : null,
-        currency: values.currency || null,
-        coverage_notes: values.coverage_notes || null,
-        deadline: values.deadline || null,
-        deadline_text: values.deadline_text || null,
-        official_url: values.official_url || null,
-        application_url: values.application_url || null,
-        provider_url: values.provider_url || null,
-        overview: values.overview || null,
-        eligibility_summary: values.eligibility_summary || null,
-        content_status: values.content_status,
-        verification_status: values.verification_status,
-      })
-      .eq('id', id)
-
-    if (error) {
-      serverError = error.code === '23505'
-        ? 'A scholarship with this slug already exists.'
-        : 'Could not save. Please try again.'
-    } else {
-      return Astro.redirect('/admin/scholarships')
-    }
-  }
-  } // end else (entity edit)
 }
 
 const inputClass = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -268,18 +303,14 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <label for="name" class={labelClass}>Name *</label>
-          <input type="text" id="name" name="name" value={values.name}
-            class={inputClass} />
+          <input type="text" id="name" name="name" value={values.name} class={inputClass} />
           {errors.name && <p class={errorClass}>{errors.name}</p>}
         </div>
-
         <div>
           <label for="slug" class={labelClass}>Slug *</label>
-          <input type="text" id="slug" name="slug" value={values.slug}
-            class={inputClass + ' font-mono'} />
+          <input type="text" id="slug" name="slug" value={values.slug} class={inputClass + ' font-mono'} />
           {errors.slug && <p class={errorClass}>{errors.slug}</p>}
         </div>
-
         <div>
           <label for="content_status" class={labelClass}>Status *</label>
           <select id="content_status" name="content_status" class={selectClass}>
@@ -306,13 +337,10 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
           </select>
           {errors.scholarship_type && <p class={errorClass}>{errors.scholarship_type}</p>}
         </div>
-
         <div>
           <label for="provider_name" class={labelClass}>Provider Name</label>
-          <input type="text" id="provider_name" name="provider_name" value={values.provider_name}
-            class={inputClass} />
+          <input type="text" id="provider_name" name="provider_name" value={values.provider_name} class={inputClass} />
         </div>
-
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="provider_type" class={labelClass}>Provider Type</label>
@@ -335,7 +363,6 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
             {errors.application_type && <p class={errorClass}>{errors.application_type}</p>}
           </div>
         </div>
-
         <div>
           <label for="funding_type" class={labelClass}>Funding Type</label>
           <select id="funding_type" name="funding_type" class={selectClass}>
@@ -357,29 +384,24 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
           <div>
             <label for="amount_min" class={labelClass}>Min Amount</label>
             <input type="number" id="amount_min" name="amount_min"
-              value={values.amount_min} min="0" step="any" placeholder="0"
-              class={inputClass} />
+              value={values.amount_min} min="0" step="any" placeholder="0" class={inputClass} />
             {errors.amount_min && <p class={errorClass}>{errors.amount_min}</p>}
           </div>
           <div>
             <label for="amount_max" class={labelClass}>Max Amount</label>
             <input type="number" id="amount_max" name="amount_max"
-              value={values.amount_max} min="0" step="any" placeholder="0"
-              class={inputClass} />
+              value={values.amount_max} min="0" step="any" placeholder="0" class={inputClass} />
             {errors.amount_max && <p class={errorClass}>{errors.amount_max}</p>}
           </div>
           <div>
             <label for="currency" class={labelClass}>Currency</label>
             <input type="text" id="currency" name="currency" value={values.currency}
-              placeholder="EUR, USD, GBP"
-              class={inputClass + ' font-mono'} />
+              placeholder="EUR, USD, GBP" class={inputClass + ' font-mono'} />
           </div>
         </div>
-
         <div>
           <label for="coverage_notes" class={labelClass}>Coverage Notes</label>
-          <textarea id="coverage_notes" name="coverage_notes" rows={3}
-            class={inputClass}>{values.coverage_notes}</textarea>
+          <textarea id="coverage_notes" name="coverage_notes" rows={3} class={inputClass}>{values.coverage_notes}</textarea>
         </div>
       </div>
     </div>
@@ -390,16 +412,13 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <label for="deadline" class={labelClass}>Deadline Date</label>
-          <input type="date" id="deadline" name="deadline" value={values.deadline}
-            class={inputClass} />
+          <input type="date" id="deadline" name="deadline" value={values.deadline} class={inputClass} />
           {errors.deadline && <p class={errorClass}>{errors.deadline}</p>}
         </div>
-
         <div>
           <label for="deadline_text" class={labelClass}>Deadline Note</label>
           <input type="text" id="deadline_text" name="deadline_text" value={values.deadline_text}
-            placeholder="e.g. Rolling deadline, check provider website"
-            class={inputClass} />
+            placeholder="e.g. Rolling deadline, check provider website" class={inputClass} />
         </div>
       </div>
     </div>
@@ -411,24 +430,19 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
         <div>
           <label for="official_url" class={labelClass}>Official URL</label>
           <input type="url" id="official_url" name="official_url" value={values.official_url}
-            placeholder="https://..."
-            class={inputClass} />
+            placeholder="https://..." class={inputClass} />
           {errors.official_url && <p class={errorClass}>{errors.official_url}</p>}
         </div>
-
         <div>
           <label for="application_url" class={labelClass}>Application URL</label>
           <input type="url" id="application_url" name="application_url" value={values.application_url}
-            placeholder="https://..."
-            class={inputClass} />
+            placeholder="https://..." class={inputClass} />
           {errors.application_url && <p class={errorClass}>{errors.application_url}</p>}
         </div>
-
         <div>
           <label for="provider_url" class={labelClass}>Provider URL</label>
           <input type="url" id="provider_url" name="provider_url" value={values.provider_url}
-            placeholder="https://..."
-            class={inputClass} />
+            placeholder="https://..." class={inputClass} />
           {errors.provider_url && <p class={errorClass}>{errors.provider_url}</p>}
         </div>
       </div>
@@ -440,14 +454,33 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
       <div class="space-y-4">
         <div>
           <label for="overview" class={labelClass}>Overview</label>
-          <textarea id="overview" name="overview" rows={5}
-            class={inputClass}>{values.overview}</textarea>
+          <textarea id="overview" name="overview" rows={5} class={inputClass}>{values.overview}</textarea>
         </div>
-
         <div>
           <label for="eligibility_summary" class={labelClass}>Eligibility Summary</label>
-          <textarea id="eligibility_summary" name="eligibility_summary" rows={4}
-            class={inputClass}>{values.eligibility_summary}</textarea>
+          <textarea id="eligibility_summary" name="eligibility_summary" rows={4} class={inputClass}>{values.eligibility_summary}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Images -->
+    <div>
+      <h2 class={sectionHeadClass}>Images</h2>
+      <div class="space-y-4">
+        <div>
+          <MediaPicker fieldName="logo_id" label="Logo"
+            currentId={values.logo_id || null} assets={mediaAssets} cloudName={cloudName} />
+          {errors.logo_id && <p class={errorClass}>{errors.logo_id}</p>}
+        </div>
+        <div>
+          <MediaPicker fieldName="cover_image_id" label="Cover Image"
+            currentId={values.cover_image_id || null} assets={mediaAssets} cloudName={cloudName} />
+          {errors.cover_image_id && <p class={errorClass}>{errors.cover_image_id}</p>}
+        </div>
+        <div>
+          <MediaPicker fieldName="og_image_id" label="OG Image"
+            currentId={values.og_image_id || null} assets={mediaAssets} cloudName={cloudName} />
+          {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
         </div>
       </div>
     </div>

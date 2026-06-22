@@ -1,6 +1,8 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import MediaPicker from '../../../components/admin/MediaPicker.astro'
+import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -17,6 +19,8 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 const { user, supabase } = guard
 const { id } = Astro.params
 
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
 const VERIFICATION_OPTIONS   = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
 
@@ -31,14 +35,24 @@ type Values = {
   verification_status: string
   is_origin_enabled: boolean
   is_destination_enabled: boolean
+  cover_image_id: string
+  og_image_id: string
 }
 
-// Load existing record
-const { data: existing, error: loadError } = await supabase
-  .from('countries')
-  .select('id, name, slug, iso2, iso3, continent, overview, content_status, verification_status, is_origin_enabled, is_destination_enabled')
-  .eq('id', id)
-  .single()
+const [{ data: existing, error: loadError }, { data: mediaAssetsData }] = await Promise.all([
+  supabase
+    .from('countries')
+    .select('id, name, slug, iso2, iso3, continent, overview, content_status, verification_status, is_origin_enabled, is_destination_enabled, cover_image_id, og_image_id')
+    .eq('id', id)
+    .single(),
+  supabase
+    .from('media_assets')
+    .select('id, cloudinary_public_id, display_name, alt_text, folder')
+    .is('deleted_at', null)
+    .eq('is_reusable', true)
+    .eq('upload_status', 'ready')
+    .order('display_name', { ascending: true }),
+])
 
 if (loadError || !existing) {
   return new Response('Country not found.', { status: 404 })
@@ -56,8 +70,13 @@ type CountryRecord = {
   verification_status: string
   is_origin_enabled: boolean
   is_destination_enabled: boolean
+  cover_image_id: string | null
+  og_image_id: string | null
 }
+
 const record = existing as CountryRecord
+const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
+const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 let values: Values = {
   name: record.name,
@@ -70,6 +89,8 @@ let values: Values = {
   verification_status: record.verification_status,
   is_origin_enabled: record.is_origin_enabled,
   is_destination_enabled: record.is_destination_enabled,
+  cover_image_id: record.cover_image_id ?? '',
+  og_image_id: record.og_image_id ?? '',
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -77,16 +98,18 @@ let serverError = ''
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
   values = {
-    name: String(form.get('name') ?? '').trim(),
-    slug: String(form.get('slug') ?? '').trim(),
-    iso2: String(form.get('iso2') ?? '').trim().toUpperCase(),
-    iso3: String(form.get('iso3') ?? '').trim().toUpperCase(),
-    continent: String(form.get('continent') ?? '').trim(),
-    overview: String(form.get('overview') ?? '').trim(),
-    content_status: String(form.get('content_status') ?? 'draft').trim(),
-    verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
-    is_origin_enabled: form.get('is_origin_enabled') === 'on',
+    name:                 String(form.get('name') ?? '').trim(),
+    slug:                 String(form.get('slug') ?? '').trim(),
+    iso2:                 String(form.get('iso2') ?? '').trim().toUpperCase(),
+    iso3:                 String(form.get('iso3') ?? '').trim().toUpperCase(),
+    continent:            String(form.get('continent') ?? '').trim(),
+    overview:             String(form.get('overview') ?? '').trim(),
+    content_status:       String(form.get('content_status') ?? 'draft').trim(),
+    verification_status:  String(form.get('verification_status') ?? 'unverified').trim(),
+    is_origin_enabled:    form.get('is_origin_enabled') === 'on',
     is_destination_enabled: form.get('is_destination_enabled') === 'on',
+    cover_image_id:       String(form.get('cover_image_id') ?? '').trim(),
+    og_image_id:          String(form.get('og_image_id') ?? '').trim(),
   }
 
   if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -104,6 +127,12 @@ if (Astro.request.method === 'POST') {
   if (statusErr) e.content_status = statusErr
   const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
   if (verErr) e.verification_status = verErr
+  if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
+    e.cover_image_id = 'Selected cover image is not valid.'
+  }
+  if (values.og_image_id && !validMediaIds.has(values.og_image_id)) {
+    e.og_image_id = 'Selected OG image is not valid.'
+  }
 
   errors = e
 
@@ -111,16 +140,18 @@ if (Astro.request.method === 'POST') {
     const { error } = await supabase
       .from('countries')
       .update({
-        name: values.name,
-        slug: values.slug,
-        iso2: values.iso2,
-        iso3: values.iso3,
-        continent: values.continent || null,
-        overview: values.overview || null,
-        content_status: values.content_status,
-        verification_status: values.verification_status,
-        is_origin_enabled: values.is_origin_enabled,
+        name:                  values.name,
+        slug:                  values.slug,
+        iso2:                  values.iso2,
+        iso3:                  values.iso3,
+        continent:             values.continent || null,
+        overview:              values.overview || null,
+        content_status:        values.content_status,
+        verification_status:   values.verification_status,
+        is_origin_enabled:     values.is_origin_enabled,
         is_destination_enabled: values.is_destination_enabled,
+        cover_image_id:        values.cover_image_id || null,
+        og_image_id:           values.og_image_id || null,
       })
       .eq('id', id)
 
@@ -226,6 +257,30 @@ if (Astro.request.method === 'POST') {
       </select>
       {errors.verification_status && <p class="mt-1 text-xs text-red-600">{errors.verification_status}</p>}
     </div>
+
+    <fieldset class="border border-gray-200 rounded-md p-4 space-y-4">
+      <legend class="text-sm font-medium text-gray-700 px-1">Images</legend>
+      <div>
+        <MediaPicker
+          fieldName="cover_image_id"
+          label="Cover Image"
+          currentId={values.cover_image_id || null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
+      </div>
+      <div>
+        <MediaPicker
+          fieldName="og_image_id"
+          label="OG Image"
+          currentId={values.og_image_id || null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
+      </div>
+    </fieldset>
 
     <div class="flex gap-3 pt-2">
       <button type="submit"

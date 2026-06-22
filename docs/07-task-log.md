@@ -213,9 +213,60 @@ Deferred to Phase 57B:
 - Cloudinary hard-delete (destroy API).
 - Public entity_media SELECT (gallery support).
 
+## 2026-06-22 - Phase 57B: Entity Media Attachment
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Add the 7 missing image FK columns to the schema.
+- Create MediaPicker admin component for inline image selection.
+- Wire image pickers into all 6 entity admin forms (both new and edit pages).
+
+Schema changes:
+- supabase/migrations/023_entity_image_fk_columns.sql:
+  - countries: added cover_image_id (og_image_id already existed).
+  - cities: added cover_image_id, og_image_id (neither existed).
+  - subjects: added cover_image_id, og_image_id (neither existed).
+  - scholarships: added logo_id, cover_image_id (og_image_id already existed).
+  - All 7 new columns: uuid REFERENCES public.media_assets(id) ON DELETE SET NULL. Indexed.
+
+Library changes:
+- src/lib/cloudinary/config.ts: added 'cities' and 'subjects' to ALLOWED_SUBFOLDERS.
+
+Component created:
+- src/components/admin/MediaPicker.astro: select + thumbnail preview. data-thumb on each <option>; inline script reads selectedOption.dataset.thumb, updates img.src; no innerHTML/set:html; imports only url.ts (no secrets). Exports MediaAssetOption interface.
+
+Admin forms updated (both new.astro and [id].astro for each):
+- countries: cover_image_id, og_image_id.
+- cities: cover_image_id, og_image_id.
+- universities: logo_id, cover_image_id, og_image_id (pre-existing columns, now surfaced in forms).
+- scholarships: logo_id, cover_image_id, og_image_id (logo_id/cover_image_id new; og_image_id pre-existing).
+- articles: featured_image_id, og_image_id (pre-existing columns, now surfaced in forms).
+- subjects: cover_image_id, og_image_id.
+- Image sections placed: after Content, before Publishing/Verification (articles/scholarships); bottom fieldset (countries/cities/subjects); bottom fieldset (universities).
+
+Security:
+- UUID whitelist validation on every submitted image FK before DB write.
+- No service role in any form page.
+- No innerHTML or set:html anywhere.
+- No Cloudinary secrets exposed to browser.
+- cloudName from PUBLIC_ env var only.
+
+Validation:
+- npm run build: PASS.
+- service_role grep: zero new matches in Phase 57B files.
+- set:html / innerHTML grep: zero matches in Phase 57B files.
+- Cloudinary secret exposure grep: zero matches.
+
+Deferred to Phase 57C:
+- Rendering entity images on public pages.
+- Cloudinary hard-delete (destroy API).
+- Public entity_media SELECT (gallery support).
+
 ## Current / Open Notes
 
-- Phase 57A changes are uncommitted and ready for review before commit.
-- Entity image attachment to public pages deferred to Phase 57B.
+- Phase 57A and 57B changes are uncommitted and ready for review.
+- Entity image rendering on public pages deferred to Phase 57C.
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).
 - If a future task needs older history, open the smallest relevant archive file instead of rereading the full snapshots.

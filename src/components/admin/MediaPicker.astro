@@ -1,0 +1,109 @@
+---
+// Admin-only component. Safe to import in admin pages.
+// Imports only url.ts (public-safe). Does NOT import config.ts or upload.ts.
+import { cloudinaryUrl } from '../../lib/cloudinary/url'
+
+export interface MediaAssetOption {
+  id: string
+  cloudinary_public_id: string | null
+  display_name: string | null
+  alt_text: string | null
+  folder: string | null
+}
+
+interface Props {
+  fieldName: string
+  label: string
+  currentId: string | null
+  assets: MediaAssetOption[]
+  cloudName: string
+}
+
+const { fieldName, label, currentId, assets, cloudName } = Astro.props
+
+// fieldName is used as UID — each picker on a page has a unique fieldName.
+const uid = fieldName
+
+function thumb(asset: MediaAssetOption): string {
+  if (!asset.cloudinary_public_id || !cloudName) return ''
+  return cloudinaryUrl(cloudName, asset.cloudinary_public_id, { width: 80, height: 80, crop: 'fill' })
+}
+
+function assetLabel(asset: MediaAssetOption): string {
+  const name = asset.display_name ?? asset.alt_text ?? asset.cloudinary_public_id ?? 'Untitled'
+  return asset.folder ? `[${asset.folder}] ${name}` : name
+}
+
+const selected = assets.find(a => a.id === currentId) ?? null
+const initialThumb = selected ? thumb(selected) : ''
+---
+
+<div class="space-y-2">
+  <label for={`picker_${uid}`} class="block text-sm font-medium text-gray-700">{label}</label>
+
+  <select
+    id={`picker_${uid}`}
+    name={fieldName}
+    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+    data-picker-uid={uid}
+  >
+    <option value="" data-thumb="">— none —</option>
+    {assets.map(asset => (
+      <option
+        value={asset.id}
+        selected={asset.id === currentId}
+        data-thumb={thumb(asset)}
+      >
+        {assetLabel(asset)}
+      </option>
+    ))}
+  </select>
+
+  <div
+    id={`thumb_wrap_${uid}`}
+    class="h-20 w-20 rounded border border-gray-200 bg-gray-50 overflow-hidden"
+    style={initialThumb ? '' : 'display:none'}
+  >
+    <img
+      id={`thumb_img_${uid}`}
+      src={initialThumb || ''}
+      alt={selected?.alt_text ?? label}
+      width="80"
+      height="80"
+      loading="lazy"
+      class="object-cover w-full h-full"
+    />
+  </div>
+
+  <p class="text-xs text-gray-400">
+    <a href="/admin/media/new" target="_blank" rel="noopener" class="text-blue-600 hover:underline">
+      Upload a new image
+    </a>
+    {assets.length === 0 && <span> — no reusable assets in library yet</span>}
+  </p>
+</div>
+
+<script>
+  // Updates thumbnail preview when picker selection changes.
+  // Reads data-thumb from the selected <option>. No innerHTML used.
+  document.querySelectorAll<HTMLSelectElement>('select[data-picker-uid]').forEach(select => {
+    const uid  = select.dataset.pickerUid!
+    const wrap = document.getElementById(`thumb_wrap_${uid}`)
+    const img  = document.getElementById(`thumb_img_${uid}`) as HTMLImageElement | null
+
+    function update() {
+      const opt   = select.options[select.selectedIndex]
+      const thumb = opt?.dataset.thumb ?? ''
+      if (!wrap || !img) return
+      if (thumb) {
+        img.src            = thumb
+        wrap.style.display = ''
+      } else {
+        img.src            = ''
+        wrap.style.display = 'none'
+      }
+    }
+
+    select.addEventListener('change', update)
+  })
+</script>

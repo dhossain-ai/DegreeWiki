@@ -40,6 +40,8 @@ export const ALLOWED_SUBFOLDERS = [
   'general',
   'universities',
   'countries',
+  'cities',
+  'subjects',
   'scholarships',
   'articles',
 ] as const

@@ -1,6 +1,8 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import MediaPicker from '../../../components/admin/MediaPicker.astro'
+import type { MediaAssetOption } from '../../../components/admin/MediaPicker.astro'
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
@@ -16,18 +18,35 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 const { user, supabase } = guard
 const { id } = Astro.params
 
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
 const VERIFICATION_OPTIONS   = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
 const SOURCE_TYPE_OPTIONS    = ['official_university', 'government', 'third_party', 'aggregator', 'user_submitted'] as const
 const CONFIDENCE_OPTIONS     = ['high', 'medium', 'low', 'unknown'] as const
 const SOURCE_STATUS_OPTIONS  = ['active', 'broken', 'redirected', 'archived'] as const
 
-// Load existing record
-const { data: existing, error: loadError } = await supabase
-  .from('universities')
-  .select('id, name, slug, country_id, city_id, official_url, overview, content_status, verification_status')
-  .eq('id', id)
-  .single()
+const [
+  { data: existing, error: loadError },
+  { data: countriesData },
+  { data: citiesData },
+  { data: mediaAssetsData },
+] = await Promise.all([
+  supabase
+    .from('universities')
+    .select('id, name, slug, country_id, city_id, official_url, overview, content_status, verification_status, logo_id, cover_image_id, og_image_id')
+    .eq('id', id)
+    .single(),
+  supabase.from('countries').select('id, name').order('name', { ascending: true }),
+  supabase.from('cities').select('id, name, country_id').order('name', { ascending: true }),
+  supabase
+    .from('media_assets')
+    .select('id, cloudinary_public_id, display_name, alt_text, folder')
+    .is('deleted_at', null)
+    .eq('is_reusable', true)
+    .eq('upload_status', 'ready')
+    .order('display_name', { ascending: true }),
+])
 
 if (loadError || !existing) {
   return new Response('University not found.', { status: 404 })
@@ -43,6 +62,9 @@ type UniversityRecord = {
   overview: string | null
   content_status: string
   verification_status: string
+  logo_id: string | null
+  cover_image_id: string | null
+  og_image_id: string | null
 }
 type DataSourceRow = {
   id: string
@@ -53,18 +75,14 @@ type DataSourceRow = {
   source_status: string
   is_primary_source: boolean
 }
-const record = existing as UniversityRecord
-
-// Load countries and cities for dropdowns
-const [{ data: countriesData }, { data: citiesData }] = await Promise.all([
-  supabase.from('countries').select('id, name').order('name', { ascending: true }),
-  supabase.from('cities').select('id, name, country_id').order('name', { ascending: true }),
-])
-
 type CountryOption = { id: string; name: string }
 type CityOption = { id: string; name: string; country_id: string }
+
+const record = existing as UniversityRecord
 const countries = (countriesData ?? []) as CountryOption[]
 const cities = (citiesData ?? []) as CityOption[]
+const mediaAssets = (mediaAssetsData ?? []) as MediaAssetOption[]
+const validMediaIds = new Set(mediaAssets.map(a => a.id))
 
 const { data: sourcesData } = await supabase
   .from('data_sources')
@@ -83,17 +101,23 @@ type Values = {
   overview: string
   content_status: string
   verification_status: string
+  logo_id: string
+  cover_image_id: string
+  og_image_id: string
 }
 
 let values: Values = {
-  name: record.name,
-  slug: record.slug,
-  country_id: record.country_id,
-  city_id: record.city_id ?? '',
-  official_url: record.official_url ?? '',
-  overview: record.overview ?? '',
-  content_status: record.content_status,
+  name:               record.name,
+  slug:               record.slug,
+  country_id:         record.country_id,
+  city_id:            record.city_id ?? '',
+  official_url:       record.official_url ?? '',
+  overview:           record.overview ?? '',
+  content_status:     record.content_status,
   verification_status: record.verification_status,
+  logo_id:            record.logo_id ?? '',
+  cover_image_id:     record.cover_image_id ?? '',
+  og_image_id:        record.og_image_id ?? '',
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -121,59 +145,74 @@ if (Astro.request.method === 'POST') {
       else { return Astro.redirect(Astro.url.pathname) }
     }
   } else {
-  values = {
-    name: String(form.get('name') ?? '').trim(),
-    slug: String(form.get('slug') ?? '').trim(),
-    country_id: String(form.get('country_id') ?? '').trim(),
-    city_id: String(form.get('city_id') ?? '').trim(),
-    official_url: String(form.get('official_url') ?? '').trim(),
-    overview: String(form.get('overview') ?? '').trim(),
-    content_status: String(form.get('content_status') ?? 'draft').trim(),
-    verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
-  }
+    values = {
+      name:               String(form.get('name') ?? '').trim(),
+      slug:               String(form.get('slug') ?? '').trim(),
+      country_id:         String(form.get('country_id') ?? '').trim(),
+      city_id:            String(form.get('city_id') ?? '').trim(),
+      official_url:       String(form.get('official_url') ?? '').trim(),
+      overview:           String(form.get('overview') ?? '').trim(),
+      content_status:     String(form.get('content_status') ?? 'draft').trim(),
+      verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
+      logo_id:            String(form.get('logo_id') ?? '').trim(),
+      cover_image_id:     String(form.get('cover_image_id') ?? '').trim(),
+      og_image_id:        String(form.get('og_image_id') ?? '').trim(),
+    }
 
-  if (!values.slug && values.name) values.slug = toSlug(values.name)
+    if (!values.slug && values.name) values.slug = toSlug(values.name)
 
-  const e: FormErrors = {}
-  const nameErr = validateRequired(values.name, 'Name')
-  if (nameErr) e.name = nameErr
-  const countryErr = validateRequired(values.country_id, 'Country')
-  if (countryErr) e.country_id = countryErr
-  const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
-  if (slugErr) e.slug = slugErr
-  const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
-  if (statusErr) e.content_status = statusErr
-  const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
-  if (verErr) e.verification_status = verErr
+    const e: FormErrors = {}
+    const nameErr = validateRequired(values.name, 'Name')
+    if (nameErr) e.name = nameErr
+    const countryErr = validateRequired(values.country_id, 'Country')
+    if (countryErr) e.country_id = countryErr
+    const slugErr = validateRequired(values.slug, 'Slug') ?? validateSlug(values.slug)
+    if (slugErr) e.slug = slugErr
+    const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
+    if (statusErr) e.content_status = statusErr
+    const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
+    if (verErr) e.verification_status = verErr
+    if (values.logo_id && !validMediaIds.has(values.logo_id)) {
+      e.logo_id = 'Selected logo is not valid.'
+    }
+    if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
+      e.cover_image_id = 'Selected cover image is not valid.'
+    }
+    if (values.og_image_id && !validMediaIds.has(values.og_image_id)) {
+      e.og_image_id = 'Selected OG image is not valid.'
+    }
 
-  errors = e
+    errors = e
 
-  if (Object.keys(errors).length === 0) {
-    const { error } = await supabase
-      .from('universities')
-      .update({
-        name: values.name,
-        slug: values.slug,
-        country_id: values.country_id,
-        city_id: values.city_id || null,
-        official_url: values.official_url || null,
-        overview: values.overview || null,
-        content_status: values.content_status,
-        verification_status: values.verification_status,
-      })
-      .eq('id', id)
+    if (Object.keys(errors).length === 0) {
+      const { error } = await supabase
+        .from('universities')
+        .update({
+          name:               values.name,
+          slug:               values.slug,
+          country_id:         values.country_id,
+          city_id:            values.city_id || null,
+          official_url:       values.official_url || null,
+          overview:           values.overview || null,
+          content_status:     values.content_status,
+          verification_status: values.verification_status,
+          logo_id:            values.logo_id || null,
+          cover_image_id:     values.cover_image_id || null,
+          og_image_id:        values.og_image_id || null,
+        })
+        .eq('id', id)
 
-    if (error) {
-      if (error.code === '23505') {
-        serverError = 'A university with this slug already exists.'
+      if (error) {
+        if (error.code === '23505') {
+          serverError = 'A university with this slug already exists.'
+        } else {
+          serverError = 'Could not save. Please try again.'
+        }
       } else {
-        serverError = 'Could not save. Please try again.'
+        return Astro.redirect('/admin/universities')
       }
-    } else {
-      return Astro.redirect('/admin/universities')
     }
   }
-  } // end else (entity edit)
 }
 ---
 <AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/universities" userEmail={user.email ?? ''}>
@@ -258,6 +297,40 @@ if (Astro.request.method === 'POST') {
       </select>
       {errors.verification_status && <p class="mt-1 text-xs text-red-600">{errors.verification_status}</p>}
     </div>
+
+    <fieldset class="border border-gray-200 rounded-md p-4 space-y-4">
+      <legend class="text-sm font-medium text-gray-700 px-1">Images</legend>
+      <div>
+        <MediaPicker
+          fieldName="logo_id"
+          label="Logo"
+          currentId={values.logo_id || null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.logo_id && <p class="mt-1 text-xs text-red-600">{errors.logo_id}</p>}
+      </div>
+      <div>
+        <MediaPicker
+          fieldName="cover_image_id"
+          label="Cover Image"
+          currentId={values.cover_image_id || null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
+      </div>
+      <div>
+        <MediaPicker
+          fieldName="og_image_id"
+          label="OG Image"
+          currentId={values.og_image_id || null}
+          assets={mediaAssets}
+          cloudName={cloudName}
+        />
+        {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
+      </div>
+    </fieldset>
 
     <div class="flex gap-3 pt-2">
       <button type="submit"
