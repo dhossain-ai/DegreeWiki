@@ -7,9 +7,8 @@ Last updated: 2026-06-22
 
 ## Current Phase
 
-Phase 57B.1 - Inline Media Picker UX Upgrade - complete.
-This phase replaced the plain dropdown MediaPicker with a full inline slot-card + native `<dialog>` modal. Admins can choose from a visual library grid, upload directly via the 3-step sign→Cloudinary→complete flow, or import from URL — all without leaving the entity form. Validation uses a single batch `.in('id', unique)` DB call on POST (via `validateReusableReadyMediaIds`). New assets broadcast via `degreewiki:media-added` so all pickers on the page stay in sync.
-Public entity page image rendering is deferred to Phase 57C.
+Phase 57C - Public Media Rendering - complete.
+This phase wires the Cloudinary media assets attached in 57A/57B/57B.1 into all public-facing pages and cards. Article featured images, university logos and cover heroes, scholarship logos and covers, and program/fit-finder university logos now render when public-ready assets exist. All layouts now support `og:image` and `twitter:image` meta tags. Country cover images render on the homepage DestinationCard. Fallbacks (initials/monograms, no image section) are clean when no asset is attached.
 
 Current branch / git status note:
 - Branch: `main`
@@ -44,6 +43,8 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 57C: Public media rendering; article featured images, university/scholarship logos and covers, program/fit-finder university logos, og:image/twitter:image in layouts, country cover on homepage DestinationCard. No migrations. No admin changes.
+- Phase 57B.1: Inline media picker UX upgrade; slot-card + native dialog modal, inline upload/import, auto-select, degreewiki:media-added event.
 - Phase 57B: Entity media attachment; migration 023, MediaPicker component, image pickers in all 12 admin entity forms (6 entities × 2 pages).
 - Phase 57A: Cloudinary/media asset foundation; migration 022, admin media library, signed upload, URL import, MediaImage component.
 - Phase 56C: repo docs compaction complete; exact snapshots were taken, archive files were created, and the active docs were rewritten.
@@ -56,15 +57,17 @@ Current branch / git status note:
 
 ## Known Active Issues
 
-- Public entity pages do not yet render entity images (cover/featured/og) — deferred to Phase 57C.
+- Country/city/subject standalone public pages do not exist — image rendering for those entities is deferred until routes are built.
+- Cloudinary hard-delete (destroy API) not yet implemented.
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
-- Cloudinary hard-delete (destroy API) not yet implemented.
+- Default site OG image not yet configured (no brand asset uploaded to Cloudinary yet).
 
 ## Immediate Next Phases
 
-- Phase 57C: render entity images on public pages (countries, cities, universities, scholarships, articles, subjects).
 - Continue admin permission boundary hardening.
+- Add default site OG image (upload DegreeWiki brand asset to Cloudinary, wire PUBLIC_DEFAULT_OG_IMAGE_PUBLIC_ID).
+- Cloudinary hard-delete (destroy API) when needed.
 
 ## Archive Map
 

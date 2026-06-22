@@ -1,5 +1,6 @@
 ---
 import PublicLayout from '../../../layouts/PublicLayout.astro'
+import MediaImage from '../../../components/public/MediaImage.astro'
 import { createClient } from '../../../lib/supabase/server'
 import { SITE_URL } from '../../../lib/site'
 import SavedResultChat from '../../../components/ai/SavedResultChat.astro'
@@ -45,7 +46,10 @@ const { data: matchRows, error: matchError } = await supabase
       study_mode, delivery_mode, language_of_instruction,
       tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
       official_url,
-      universities(name, slug),
+      universities(
+        name, slug,
+        logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)
+      ),
       countries(name),
       cities(name),
       degree_levels(name),
@@ -227,7 +231,21 @@ const aiExplanation = rawExplanation && rawExplanation.trim().length > 0
           return (
             <li class="border border-gray-200 rounded-lg p-5 bg-white">
               <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
-                <div>
+                <div class="flex items-start gap-3">
+                  {p.universities?.logo?.cloudinary_public_id && (
+                    <div class="flex-none w-10 h-10 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                      <MediaImage
+                        publicId={p.universities.logo.cloudinary_public_id}
+                        alt={p.universities.logo.alt_text || p.universities.logo.display_name || p.universities.name}
+                        width={40}
+                        height={40}
+                        crop="fill"
+                        loading="lazy"
+                        class="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div>
                   <a href={`/programs/${p.slug}`} class="text-lg font-semibold text-blue-600 hover:underline leading-snug">
                     {p.title}
                   </a>
@@ -239,6 +257,7 @@ const aiExplanation = rawExplanation && rawExplanation.trim().length > 0
                     )}
                     {p.universities && location && <span class="mx-1">·</span>}
                     {location}
+                  </div>
                   </div>
                 </div>
                 <div class="shrink-0 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-center min-w-[56px]">

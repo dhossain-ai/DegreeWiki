@@ -304,9 +304,67 @@ Deferred to Phase 57C:
 - Cloudinary hard-delete (destroy API).
 - Public entity_media SELECT (gallery support).
 
+## 2026-06-22 - Phase 57C: Public Media Rendering
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Render selected public media assets on public pages, listing cards, program/fit-finder cards, and SEO/social metadata using MediaImage component and cloudinaryUrl helper.
+
+Key findings:
+- No public routes exist for countries, cities, or subjects — image rendering for those entities deferred to when routes are built.
+- BaseLayout had no og:image or twitter:image support at all — added in this phase.
+- All entity FK constraint names follow PostgreSQL auto-naming ({table}_{column}_fkey) — FK hint joins work without a new migration.
+- RLS policy media_assets_select_public_ready enforces is_public/ready/not-deleted at DB level; PostgREST applies it automatically to embedded joins.
+
+New files:
+- src/lib/public/media.ts: getPublicId(), getAlt(), getOgImageUrl() helpers. Imports only cloudinaryUrl() — no secrets.
+
+Layout changes:
+- src/layouts/BaseLayout.astro: added ogImage? prop; emits og:image, twitter:image, and conditional twitter:card (summary_large_image when image present, summary otherwise).
+- src/layouts/PublicLayout.astro: added ogImage? prop, passes through to BaseLayout.
+
+Public pages updated:
+- src/pages/guides/[slug].astro: featured_image + og_image joins; featured image renders below h1; ogImage passed to layout.
+- src/pages/guides/index.astro: featured_image join; imagePublicId/imageAlt passed to GuideCard.
+- src/pages/universities/[slug].astro: logo + cover_image + og_image joins; logo replaces monogram or falls back; cover hero rendered; ogImage passed.
+- src/pages/universities/index.astro: logo join; logo or initials fallback per listing row.
+- src/pages/scholarships/[slug].astro: logo + cover_image + og_image joins; logo in header; cover hero rendered; ogImage passed.
+- src/pages/scholarships/index.astro: logo join; logo or initials fallback per listing row.
+- src/pages/programs/[slug].astro: university logo/cover/og nested join; small logo next to university name; ogImage via university chain.
+- src/pages/programs/index.astro: university logo nested join; logoPublicId/logoAlt passed to ProgramCard.
+- src/pages/fit-finder/result.astro: university logo join (display only); logo in each program result card.
+- src/pages/fit-finder/results/[id].astro: university logo join (display only); logo in each saved program match card.
+- src/pages/index.astro: country cover_image join; imagePublicId/imageAlt passed to DestinationCard.
+
+Components updated:
+- src/components/public/cards/GuideCard.astro: imagePublicId? + imageAlt? props; thumbnail rendered above title when present; fallback = existing text card.
+- src/components/public/cards/ProgramCard.astro: logoPublicId? + logoAlt? props; logo renders in monogram slot when present; fallback = existing monogram.
+- src/components/public/cards/DestinationCard.astro: imagePublicId? + imageAlt? props; cover image above name when present; fallback = existing text card.
+
+Security:
+- No service role in any modified public file.
+- No set:html or innerHTML in any new code.
+- No CLOUDINARY_API_SECRET or forbidden imports (config.ts, upload.ts) in any public file.
+- All Cloudinary URLs built via url.ts only.
+- RLS enforces public-ready filter; app also defensively checks cloudinary_public_id non-null.
+
+Deferred:
+- Country/city/subject standalone page image rendering (no public routes).
+- Cloudinary hard-delete (destroy API).
+- Default site OG image (no brand asset uploaded yet).
+- Galleries / entity_media SELECT.
+- Inline article body images / rich editor.
+
+Validation:
+- npm run build: PASS.
+- service_role grep: zero new matches in Phase 57C files.
+- set:html/innerHTML grep: zero matches in Phase 57C files.
+- Cloudinary secret grep: zero matches in Phase 57C files.
+- config.ts/upload.ts import grep: zero matches in Phase 57C files.
+
 ## Current / Open Notes
 
-- Phase 57A, 57B, and 57B.1 changes are uncommitted and ready for review.
-- Entity image rendering on public pages deferred to Phase 57C.
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).
 - If a future task needs older history, open the smallest relevant archive file instead of rereading the full snapshots.

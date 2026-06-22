@@ -3,8 +3,10 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
+import MediaImage from '../../components/public/MediaImage.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
+import { getPublicId, getAlt, getOgImageUrl } from '../../lib/public/media'
 
 const { slug } = Astro.params
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -20,7 +22,10 @@ const { data: scholarship } = await supabase
     official_url, application_url, provider_url,
     verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
-    canonical_url, og_title, og_description
+    canonical_url, og_title, og_description,
+    logo:media_assets!scholarships_logo_id_fkey(cloudinary_public_id, alt_text, display_name),
+    cover_image:media_assets!scholarships_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name),
+    og_image:media_assets!scholarships_og_image_id_fkey(cloudinary_public_id, alt_text, display_name)
   `)
   .eq('slug', slug!)
   .eq('content_status', 'published')
@@ -69,8 +74,15 @@ const canonical      = s.canonical_url || `${SITE_URL}/scholarships/${slug}`
 const ogTitle        = s.og_title || pageTitle
 const ogDesc         = s.og_description || pageDesc
 const updatedAt      = formatDate(s.updated_at)
+
+const cloudName     = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+const logoPublicId  = getPublicId(s.logo)
+const logoAlt       = getAlt(s.logo, s.provider_name ?? s.name)
+const coverPublicId = getPublicId(s.cover_image)
+const coverAlt      = getAlt(s.cover_image, s.name)
+const ogImageUrl    = getOgImageUrl(cloudName, s.og_image, s.cover_image ?? s.logo)
 ---
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc} ogImage={ogImageUrl ?? undefined}>
 
   <!-- Page header band -->
   <div class="bg-surface border-b border-edge">
@@ -80,13 +92,29 @@ const updatedAt      = formatDate(s.updated_at)
         ← All Scholarships
       </a>
 
-      {s.provider_name && (
-        <p class="text-sm text-muted mb-2">{s.provider_name}</p>
-      )}
-
-      <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight mb-3">
-        {s.name}
-      </h1>
+      <div class="flex items-start gap-4 mb-3">
+        {logoPublicId && (
+          <div class="flex-none w-14 h-14 rounded-xl overflow-hidden border border-edge bg-surface">
+            <MediaImage
+              publicId={logoPublicId}
+              alt={logoAlt}
+              width={80}
+              height={80}
+              crop="fill"
+              loading="eager"
+              class="w-full h-full object-cover"
+            />
+          </div>
+        )}
+        <div class="min-w-0">
+          {s.provider_name && (
+            <p class="text-sm text-muted mb-1">{s.provider_name}</p>
+          )}
+          <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
+            {s.name}
+          </h1>
+        </div>
+      </div>
 
       <div class="flex flex-wrap items-center gap-2">
         {verInfo && (
@@ -101,6 +129,22 @@ const updatedAt      = formatDate(s.updated_at)
       </div>
     </Container>
   </div>
+
+  {coverPublicId && (
+    <div class="bg-canvas">
+      <Container width="narrow" class="pt-6">
+        <MediaImage
+          publicId={coverPublicId}
+          alt={coverAlt}
+          width={1200}
+          height={500}
+          crop="fill"
+          loading="eager"
+          class="w-full rounded-xl object-cover"
+        />
+      </Container>
+    </div>
+  )}
 
   <!-- Main content -->
   <div class="bg-canvas">

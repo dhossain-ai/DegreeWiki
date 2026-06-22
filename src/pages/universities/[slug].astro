@@ -3,8 +3,10 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
+import MediaImage from '../../components/public/MediaImage.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
+import { getPublicId, getAlt, getOgImageUrl } from '../../lib/public/media'
 
 const { slug } = Astro.params
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -17,7 +19,10 @@ const { data: university } = await supabase
     verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
-    countries(name), cities(name)
+    countries(name), cities(name),
+    logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name),
+    cover_image:media_assets!universities_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name),
+    og_image:media_assets!universities_og_image_id_fkey(cloudinary_public_id, alt_text, display_name)
   `)
   .eq('slug', slug!)
   .eq('content_status', 'published')
@@ -57,8 +62,15 @@ const canonical     = u.canonical_url || `${SITE_URL}/universities/${slug}`
 const ogTitle       = u.og_title || pageTitle
 const ogDesc        = u.og_description || pageDesc
 const updatedAt     = formatDate(u.updated_at)
+
+const cloudName    = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+const logoPublicId = getPublicId(u.logo)
+const logoAlt      = getAlt(u.logo, u.name)
+const coverPublicId = getPublicId(u.cover_image)
+const coverAlt      = getAlt(u.cover_image, `${u.name} campus`)
+const ogImageUrl   = getOgImageUrl(cloudName, u.og_image, u.cover_image ?? u.logo)
 ---
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc} ogImage={ogImageUrl ?? undefined}>
 
   <!-- Page header band -->
   <div class="bg-surface border-b border-edge">
@@ -69,11 +81,25 @@ const updatedAt     = formatDate(u.updated_at)
       </a>
 
       <div class="flex items-start gap-4">
-        <!-- Monogram -->
-        <div class="flex-none w-14 h-14 rounded-xl bg-primary-surface border border-primary-border
-                    flex items-center justify-center font-mono text-sm font-bold text-primary">
-          {initials}
-        </div>
+        <!-- Logo or monogram -->
+        {logoPublicId ? (
+          <div class="flex-none w-14 h-14 rounded-xl overflow-hidden border border-edge bg-surface">
+            <MediaImage
+              publicId={logoPublicId}
+              alt={logoAlt}
+              width={80}
+              height={80}
+              crop="fill"
+              loading="eager"
+              class="w-full h-full object-cover"
+            />
+          </div>
+        ) : (
+          <div class="flex-none w-14 h-14 rounded-xl bg-primary-surface border border-primary-border
+                      flex items-center justify-center font-mono text-sm font-bold text-primary">
+            {initials}
+          </div>
+        )}
         <div class="min-w-0">
           <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight mb-1">
             {u.name}
@@ -90,6 +116,22 @@ const updatedAt     = formatDate(u.updated_at)
       </div>
     </Container>
   </div>
+
+  {coverPublicId && (
+    <div class="bg-canvas">
+      <Container width="narrow" class="pt-6">
+        <MediaImage
+          publicId={coverPublicId}
+          alt={coverAlt}
+          width={1600}
+          height={600}
+          crop="fill"
+          loading="eager"
+          class="w-full rounded-xl object-cover"
+        />
+      </Container>
+    </div>
+  )}
 
   <!-- Main content -->
   <div class="bg-canvas">

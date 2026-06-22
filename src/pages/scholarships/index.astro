@@ -2,6 +2,7 @@
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
+import MediaImage from '../../components/public/MediaImage.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -34,7 +35,8 @@ const hasFilters = !!(q || scholarshipType || providerType || fundingType || app
 let query = supabase
   .from('scholarships')
   .select(
-    'id, name, slug, scholarship_type, provider_name, provider_type, funding_type, application_type, amount_min, amount_max, currency, deadline, deadline_text',
+    `id, name, slug, scholarship_type, provider_name, provider_type, funding_type, application_type, amount_min, amount_max, currency, deadline, deadline_text,
+     logo:media_assets!scholarships_logo_id_fkey(cloudinary_public_id, alt_text, display_name)`,
     { count: 'exact' }
   )
   .eq('content_status', 'published')
@@ -293,9 +295,29 @@ const finput  = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
             const amount   = formatAmount(s.amount_min, s.amount_max, s.currency)
             const deadline = formatDeadline(s.deadline, s.deadline_text)
             return (
-              <li class="rounded-xl border border-edge bg-surface px-4 py-4
+              <li class="flex gap-4 rounded-xl border border-edge bg-surface px-4 py-4
                          hover:border-[#cbd5e1] hover:shadow-sm transition-all">
 
+                {s.logo?.cloudinary_public_id ? (
+                  <div class="flex-none w-10 h-10 rounded-md overflow-hidden border border-edge bg-surface self-start mt-0.5">
+                    <MediaImage
+                      publicId={s.logo.cloudinary_public_id}
+                      alt={s.logo.alt_text || s.logo.display_name || s.name}
+                      width={40}
+                      height={40}
+                      crop="fill"
+                      loading="lazy"
+                      class="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div class="flex-none w-10 h-10 rounded-md bg-surface border border-edge
+                              flex items-center justify-center text-xs font-bold text-muted self-start mt-0.5">
+                    {(s.provider_name ?? s.name).slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+
+                <div class="flex-1 min-w-0">
                 <div class="flex items-start justify-between gap-4 mb-2">
                   <a href={`/scholarships/${s.slug}`}
                      class="text-[15px] font-semibold text-ink hover:text-primary leading-snug">
@@ -326,6 +348,7 @@ const finput  = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
                   {deadline && (
                     <Badge variant="deadline">Deadline: {deadline}</Badge>
                   )}
+                </div>
                 </div>
 
               </li>

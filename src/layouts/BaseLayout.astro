@@ -9,8 +9,9 @@ interface Props {
   ogDescription?: string
   ogType?: string
   ogUrl?: string
+  ogImage?: string
 }
-const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescription, ogType, ogUrl } = Astro.props
+const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescription, ogType, ogUrl, ogImage } = Astro.props
 ---
 <!doctype html>
 <html lang="en">
@@ -30,9 +31,11 @@ const { title = 'DegreeWiki', description, noindex, canonical, ogTitle, ogDescri
     <meta property="og:title" content={ogTitle ?? title ?? 'DegreeWiki'} />
     {(ogDescription ?? description) && <meta property="og:description" content={ogDescription ?? description} />}
     {(ogUrl ?? canonical) && <meta property="og:url" content={ogUrl ?? canonical} />}
-    <meta name="twitter:card" content="summary" />
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    <meta name="twitter:card" content={ogImage ? 'summary_large_image' : 'summary'} />
     <meta name="twitter:title" content={ogTitle ?? title ?? 'DegreeWiki'} />
     {(ogDescription ?? description) && <meta name="twitter:description" content={ogDescription ?? description} />}
+    {ogImage && <meta name="twitter:image" content={ogImage} />}
   </head>
   <body class="min-h-screen bg-gray-50 text-gray-900">
     <slot />

@@ -1,6 +1,7 @@
 ---
 import Card from '../../ui/Card.astro'
 import Badge from '../../ui/Badge.astro'
+import MediaImage from '../MediaImage.astro'
 
 interface Props {
   href: string
@@ -8,10 +9,25 @@ interface Props {
   category?: string | null
   date?: string | null
   summary?: string | null
+  imagePublicId?: string | null
+  imageAlt?: string | null
 }
-const { href, title, category = null, date = null, summary = null } = Astro.props
+const { href, title, category = null, date = null, summary = null, imagePublicId = null, imageAlt = null } = Astro.props
 ---
 <Card href={href} padding="sm">
+  {imagePublicId && (
+    <div class="-mx-3 -mt-3 mb-2 overflow-hidden rounded-t-[9px]">
+      <MediaImage
+        publicId={imagePublicId}
+        alt={imageAlt ?? title}
+        width={480}
+        height={240}
+        crop="fill"
+        loading="lazy"
+        class="w-full object-cover"
+      />
+    </div>
+  )}
   {(category || date) && (
     <div class="flex items-center gap-2 mb-1.5">
       {category && <Badge variant="info">{category}</Badge>}

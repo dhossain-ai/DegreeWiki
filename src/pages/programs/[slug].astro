@@ -3,8 +3,10 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
+import MediaImage from '../../components/public/MediaImage.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
+import { getPublicId, getAlt, getOgImageUrl } from '../../lib/public/media'
 
 const { slug } = Astro.params
 const supabase = createClient(Astro.cookies, Astro.request)
@@ -22,7 +24,12 @@ const { data: program } = await supabase
     verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
-    universities(name, slug),
+    universities(
+      name, slug,
+      logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name),
+      cover_image:media_assets!universities_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name),
+      og_image:media_assets!universities_og_image_id_fkey(cloudinary_public_id, alt_text, display_name)
+    ),
     degree_levels(name),
     subjects!programs_primary_subject_id_fkey(name),
     countries(name),
@@ -117,8 +124,13 @@ const canonical      = p.canonical_url || `${SITE_URL}/programs/${slug}`
 const ogTitle        = p.og_title || pageTitle
 const ogDesc         = p.og_description || pageDesc
 const updatedAt      = formatDate(p.updated_at)
+
+const cloudName        = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+const uniLogoPublicId  = getPublicId(p.universities?.logo)
+const uniLogoAlt       = getAlt(p.universities?.logo, p.universities?.name ?? '')
+const ogImageUrl       = getOgImageUrl(cloudName, p.universities?.og_image, p.universities?.cover_image ?? p.universities?.logo)
 ---
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc}>
+<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc} ogImage={ogImageUrl ?? undefined}>
 
   <!-- Page header band -->
   <div class="bg-surface border-b border-edge">
@@ -129,12 +141,27 @@ const updatedAt      = formatDate(p.updated_at)
       </a>
 
       {p.universities && (
-        <p class="text-sm text-muted mb-2">
-          <a href={`/universities/${p.universities.slug}`}
-             class="text-ink-secondary hover:text-ink hover:underline">
-            {p.universities.name}
-          </a>
-        </p>
+        <div class="flex items-center gap-2 mb-2">
+          {uniLogoPublicId && (
+            <div class="flex-none w-8 h-8 rounded-lg overflow-hidden border border-edge bg-surface">
+              <MediaImage
+                publicId={uniLogoPublicId}
+                alt={uniLogoAlt}
+                width={48}
+                height={48}
+                crop="fill"
+                loading="eager"
+                class="w-full h-full object-cover"
+              />
+            </div>
+          )}
+          <p class="text-sm text-muted">
+            <a href={`/universities/${p.universities.slug}`}
+               class="text-ink-secondary hover:text-ink hover:underline">
+              {p.universities.name}
+            </a>
+          </p>
+        </div>
       )}
 
       <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight mb-3">

@@ -30,7 +30,8 @@ const categories = categoriesData ?? []
 let query = supabase
   .from('articles')
   .select(
-    'id, title, slug, summary, published_at, article_categories(id, name)',
+    `id, title, slug, summary, published_at, article_categories(id, name),
+     featured_image:media_assets!articles_featured_image_id_fkey(cloudinary_public_id, alt_text, display_name)`,
     { count: 'exact' }
   )
   .eq('content_status', 'published')
@@ -182,6 +183,8 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
               category={a.article_categories?.name ?? null}
               date={formatDate(a.published_at)}
               summary={a.summary ?? null}
+              imagePublicId={a.featured_image?.cloudinary_public_id ?? null}
+              imageAlt={a.featured_image?.alt_text || a.featured_image?.display_name || a.title}
             />
           ))}
         </div>

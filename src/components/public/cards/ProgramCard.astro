@@ -1,10 +1,6 @@
 ---
-/**
- * Full-anatomy program card matching the Phase 55A locked design reference.
- * All fields beyond href+title are optional — the card degrades gracefully.
- * Save/Compare buttons render correct visual state from props; JS interactivity
- * is wired in Phase 55C+.
- */
+import MediaImage from '../MediaImage.astro'
+
 interface Props {
   href: string
   title: string
@@ -43,6 +39,10 @@ interface Props {
   saved?: boolean
   comparing?: boolean
   class?: string
+  /** University logo Cloudinary public ID — replaces monogram when set */
+  logoPublicId?: string | null
+  /** Alt text for the university logo */
+  logoAlt?: string | null
 }
 
 const {
@@ -69,6 +69,8 @@ const {
   saved = false,
   comparing = false,
   class: className = '',
+  logoPublicId = null,
+  logoAlt = null,
 } = Astro.props
 
 /* Auto-compute monogram from university name (up to 3 initials). */
@@ -102,8 +104,20 @@ const cardState = comparing
   ].join(' ')}
 >
 
-  {/* ── Monogram block ──────────────────────────────── */}
-  {displayMonogram && (
+  {/* ── Logo or monogram block ─────────────────────── */}
+  {logoPublicId ? (
+    <div class="flex-none self-start w-14 h-14 rounded-[10px] overflow-hidden border border-edge bg-surface">
+      <MediaImage
+        publicId={logoPublicId}
+        alt={logoAlt ?? universityName ?? ''}
+        width={56}
+        height={56}
+        crop="fill"
+        loading="lazy"
+        class="w-full h-full object-cover"
+      />
+    </div>
+  ) : displayMonogram ? (
     <div
       class="flex-none self-start w-14 h-14 rounded-[10px] bg-[#f1f5f9] border border-edge
              flex items-center justify-center font-mono text-[15px] font-bold text-ink tracking-wide"
@@ -111,7 +125,7 @@ const cardState = comparing
     >
       {displayMonogram}
     </div>
-  )}
+  ) : null}
 
   {/* ── Main body ───────────────────────────────────── */}
   <div class="flex-1 min-w-0 flex flex-col gap-[10px]">

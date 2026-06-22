@@ -1,19 +1,35 @@
 ---
 import Card from '../../ui/Card.astro'
+import MediaImage from '../MediaImage.astro'
 
 interface Props {
   href: string
   name: string
   programCount?: number | null
   scholarshipCount?: number | null
+  imagePublicId?: string | null
+  imageAlt?: string | null
 }
-const { href, name, programCount = null, scholarshipCount = null } = Astro.props
+const { href, name, programCount = null, scholarshipCount = null, imagePublicId = null, imageAlt = null } = Astro.props
 
 const stats: string[] = []
 if (programCount != null) stats.push(`${programCount.toLocaleString()} ${programCount === 1 ? 'program' : 'programs'}`)
 if (scholarshipCount != null) stats.push(`${scholarshipCount.toLocaleString()} ${scholarshipCount === 1 ? 'scholarship' : 'scholarships'}`)
 ---
 <Card href={href} padding="sm">
+  {imagePublicId && (
+    <div class="-mx-3 -mt-3 mb-2 overflow-hidden rounded-t-[9px]">
+      <MediaImage
+        publicId={imagePublicId}
+        alt={imageAlt ?? name}
+        width={320}
+        height={160}
+        crop="fill"
+        loading="lazy"
+        class="w-full object-cover"
+      />
+    </div>
+  )}
   <h3 class="text-sm font-semibold text-ink mb-1">{name}</h3>
   {stats.length > 0 ? (
     <p class="text-xs text-muted">{stats.join(' · ')}</p>

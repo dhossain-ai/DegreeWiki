@@ -2,6 +2,7 @@
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
+import MediaImage from '../../components/public/MediaImage.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -33,7 +34,8 @@ const cities    = citiesData    ?? []
 let query = supabase
   .from('universities')
   .select(
-    'id, name, slug, official_url, ranking_summary, countries(name), cities(name)',
+    `id, name, slug, official_url, ranking_summary, countries(name), cities(name),
+     logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)`,
     { count: 'exact' }
   )
   .eq('content_status', 'published')
@@ -204,10 +206,24 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
             return (
               <li class="flex gap-4 rounded-xl border border-edge bg-surface px-4 py-4
                          hover:border-[#cbd5e1] hover:shadow-sm transition-all">
-                <div class="flex-none w-10 h-10 rounded-lg bg-primary-surface border border-primary-border
-                            flex items-center justify-center font-mono text-xs font-bold text-primary">
-                  {initials}
-                </div>
+                {u.logo?.cloudinary_public_id ? (
+                  <div class="flex-none w-10 h-10 rounded-lg overflow-hidden border border-edge bg-surface">
+                    <MediaImage
+                      publicId={u.logo.cloudinary_public_id}
+                      alt={u.logo.alt_text || u.logo.display_name || u.name}
+                      width={40}
+                      height={40}
+                      crop="fill"
+                      loading="lazy"
+                      class="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div class="flex-none w-10 h-10 rounded-lg bg-primary-surface border border-primary-border
+                              flex items-center justify-center font-mono text-xs font-bold text-primary">
+                    {initials}
+                  </div>
+                )}
                 <div class="min-w-0 flex-1">
                   <div class="flex items-start justify-between gap-4">
                     <a href={`/universities/${u.slug}`}

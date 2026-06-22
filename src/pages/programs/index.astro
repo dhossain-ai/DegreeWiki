@@ -59,7 +59,10 @@ let query = supabase
     `id, title, slug,
      study_mode, delivery_mode, language_of_instruction,
      tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
-     universities(name, slug),
+     universities(
+       name, slug,
+       logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)
+     ),
      degree_levels(name, code),
      countries(name, iso2),
      cities(name),
@@ -397,6 +400,8 @@ const finput  = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
                         language={p.language_of_instruction ?? null}
                         tuitionDisplay={td.display}
                         tuitionPer={td.per}
+                        logoPublicId={p.universities?.logo?.cloudinary_public_id ?? null}
+                        logoAlt={p.universities?.logo?.alt_text || p.universities?.logo?.display_name || p.universities?.name || null}
                       />
                     </li>
                   )
