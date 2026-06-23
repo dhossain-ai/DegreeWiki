@@ -48,6 +48,8 @@ if (error) console.error('guides list error:', error.message)
 const allRows   = data ?? []
 const overLimit = (count ?? allRows.length) > 200
 const rows      = allRows.slice(0, 200)
+const latestGuides = hasFilters ? [] : rows.slice(0, 3)
+const browseRows = hasFilters ? rows : rows.slice(latestGuides.length)
 
 function formatDate(d: string | null): string | null {
   if (!d) return null
@@ -71,19 +73,71 @@ if (categoryId) {
 
 const flabel  = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
 const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-primary'
+const browseCount = browseRows.length
 ---
 
-<PublicLayout title="Study Abroad Guides — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/guides'}>
+<PublicLayout
+  title="Study Abroad Guides — DegreeWiki"
+  description="Browse practical DegreeWiki guides on visas, scholarships, applications, and choosing the right study abroad path."
+  noindex={hasFilters}
+  canonical={SITE_URL + '/guides'}
+>
 
-  <!-- Page header band -->
-  <div class="bg-surface border-b border-edge">
-    <Container width="default" class="py-7 sm:py-8">
-      <h1 class="text-[28px] sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
-        Study Abroad Guides
-      </h1>
-      <p class="mt-1.5 text-base text-muted">
-        Expert guides on studying abroad, visa applications, and choosing the right program.
-      </p>
+  <div class="border-b border-edge bg-[linear-gradient(135deg,rgba(14,165,233,0.08),rgba(248,250,252,0.96),rgba(16,185,129,0.08))]">
+    <Container width="default" class="py-8 sm:py-10">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)] lg:items-end">
+        <div>
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary">Guide discovery</p>
+          <h1 class="text-[30px] font-bold leading-tight tracking-[-0.03em] text-ink sm:text-4xl">
+            Study Abroad Guides
+          </h1>
+          <p class="mt-3 max-w-2xl text-base leading-7 text-ink-secondary">
+            Explore practical guides on applications, visas, scholarships, and decision-making so you can move from research to a shortlist with confidence.
+          </p>
+          <div class="mt-5 flex flex-wrap gap-3">
+            <a
+              href="/fit-finder"
+              class="inline-flex items-center justify-center rounded-[10px] bg-primary px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+            >
+              Start Fit Finder
+            </a>
+            <a
+              href="/programs"
+              class="inline-flex items-center justify-center rounded-[10px] border border-edge bg-surface px-5 py-3 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary"
+            >
+              Browse programs
+            </a>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-edge bg-surface/95 p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Browse by topic</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <a
+              href="/guides"
+              class={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                !categoryId
+                  ? 'border-primary-border bg-primary-surface text-primary'
+                  : 'border-edge bg-white text-ink hover:border-primary/40 hover:text-primary'
+              }`}
+            >
+              All guides
+            </a>
+            {categories.map((c: any) => (
+              <a
+                href={`/guides?category=${c.id}`}
+                class={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  categoryId === c.id
+                    ? 'border-primary-border bg-primary-surface text-primary'
+                    : 'border-edge bg-white text-ink hover:border-primary/40 hover:text-primary'
+                }`}
+              >
+                {c.name}
+              </a>
+            ))}
+          </div>
+        </div>
+      </div>
     </Container>
   </div>
 
@@ -94,9 +148,9 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
       <form method="get" action="/guides">
 
         <!-- Search + filter row -->
-        <div class="flex flex-col sm:flex-row gap-3 mb-4">
+        <div class="mb-4 flex flex-col gap-3 rounded-2xl border border-edge bg-surface p-4 sm:flex-row sm:items-end">
           <div class="relative flex-1">
-            <label for="q" class="sr-only">Search guides</label>
+            <label for="q" class={flabel}>Search guides</label>
             <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
                  viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
@@ -112,7 +166,7 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
           </div>
 
           <div class="sm:w-52 flex-none">
-            <label for="category" class="sr-only">Category</label>
+            <label for="category" class={flabel}>Category</label>
             <select id="category" name="category" class={`${fselect} h-[44px]`}>
               <option value="">All categories</option>
               {categories.map((c: any) => (
@@ -162,33 +216,76 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
         </p>
       ) : null}
 
-      <!-- Results -->
+      {!hasFilters && latestGuides.length > 0 && (
+        <section class="mb-10">
+          <div class="mb-4 flex items-end justify-between gap-3">
+            <div>
+              <h2 class="text-xl font-semibold tracking-[-0.02em] text-ink">Latest guides</h2>
+              <p class="mt-1 text-sm text-muted">Freshly published advice to help you plan your next step.</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {latestGuides.map((a: any) => (
+              <GuideCard
+                href={`/guides/${a.slug}`}
+                title={a.title}
+                category={a.article_categories?.name ?? null}
+                date={formatDate(a.published_at)}
+                summary={a.summary ?? null}
+                imagePublicId={a.featured_image?.cloudinary_public_id ?? null}
+                imageAlt={a.featured_image?.alt_text || a.featured_image?.display_name || a.title}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {rows.length === 0 ? (
-        <div class="text-center py-16 rounded-xl border border-edge bg-surface">
-          <p class="text-base font-medium text-ink mb-2">
+        <div class="rounded-2xl border border-dashed border-edge bg-surface px-6 py-16 text-center">
+          <p class="mb-2 text-base font-medium text-ink">
             {hasFilters ? 'No guides match your filters.' : 'No guides have been published yet.'}
           </p>
+          <p class="mx-auto mb-5 max-w-xl text-sm leading-6 text-muted">
+            {hasFilters
+              ? 'Try a broader search term, switch categories, or clear filters to browse every published guide.'
+              : 'Once published guides are available, they will appear here with categories, summaries, and quick access to the full article.'}
+          </p>
           {hasFilters && (
-            <a href="/guides" class="text-sm text-primary hover:text-primary-hover">
+            <a href="/guides" class="text-sm font-semibold text-primary hover:text-primary-hover">
               Clear filters and browse all
             </a>
           )}
         </div>
-      ) : (
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {rows.map((a: any) => (
-            <GuideCard
-              href={`/guides/${a.slug}`}
-              title={a.title}
-              category={a.article_categories?.name ?? null}
-              date={formatDate(a.published_at)}
-              summary={a.summary ?? null}
-              imagePublicId={a.featured_image?.cloudinary_public_id ?? null}
-              imageAlt={a.featured_image?.alt_text || a.featured_image?.display_name || a.title}
-            />
-          ))}
-        </div>
-      )}
+      ) : browseRows.length > 0 || hasFilters ? (
+        <>
+          <div class="mb-4 flex items-end justify-between gap-3">
+            <div>
+              <h2 class="text-xl font-semibold tracking-[-0.02em] text-ink">
+                {hasFilters ? 'Matching guides' : 'All guides'}
+              </h2>
+              <p class="mt-1 text-sm text-muted">
+                {hasFilters
+                  ? `Browse ${rows.length === 1 ? 'the guide that matches' : 'the guides that match'} your current search.`
+                  : `${browseCount} ${browseCount === 1 ? 'guide remains' : 'guides remain'} after the latest highlights above.`}
+              </p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {browseRows.map((a: any) => (
+              <GuideCard
+                href={`/guides/${a.slug}`}
+                title={a.title}
+                category={a.article_categories?.name ?? null}
+                date={formatDate(a.published_at)}
+                summary={a.summary ?? null}
+                imagePublicId={a.featured_image?.cloudinary_public_id ?? null}
+                imageAlt={a.featured_image?.alt_text || a.featured_image?.display_name || a.title}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
 
     </Container>
   </div>

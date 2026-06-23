@@ -31,6 +31,54 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-24 - Phase 61: Guide Discovery UX + Safe Article Markdown Rendering
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Fix public guide/article body rendering so published guides no longer show raw Markdown markers.
+- Improve `/guides` discovery UX without schema changes, new dependencies, or unsafe HTML rendering.
+
+Files added:
+- `src/lib/public/markdown.ts`
+- `src/components/public/ArticleInlineContent.astro`
+- `src/components/public/ArticleBody.astro`
+
+Files modified:
+- `src/pages/guides/[slug].astro`
+- `src/pages/guides/index.astro`
+- `src/components/public/cards/GuideCard.astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Added a small internal parser in `src/lib/public/markdown.ts` that converts stored article body text into a safe block model instead of HTML strings.
+- Supported block-level subset: blank-line paragraphs, `##`/`###`/`####` headings, unordered lists, ordered lists, and graceful fallback for unknown syntax.
+- Supported inline subset: `**bold**`, simple `*italic*`, and `[label](https://...)` links.
+- `# Heading` is normalized to an `h2` rather than rendering a second page-level `h1`.
+- Links are accepted only for valid `http/https` URLs; invalid/unsafe URLs degrade to plain text labels.
+- Added `ArticleBody.astro` + `ArticleInlineContent.astro` so Astro renders escaped text nodes and semantic elements directly, with no `set:html`, `innerHTML`, or full Markdown library.
+- Updated `src/pages/guides/[slug].astro` to use the safe renderer while preserving featured image, SourceBox, last-updated text, Fit Finder panel, related guides, and 404 behavior.
+- Improved `/guides` with a richer hero, Fit Finder / programs CTAs, quick category pills, latest-guide highlights, stronger empty-state copy, and clearer “All guides” hierarchy.
+- Refined `GuideCard.astro` spacing and added a clearer “Read guide” affordance.
+
+Safety:
+- No migrations.
+- No new dependencies.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient` in any modified public file.
+- No admin article form changes.
+
+Validation:
+- `npm run build`: pending at implementation time; run immediately after code changes.
+- Required greps for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient` to be run against the modified files.
+
+Notes:
+- The inline parser intentionally stays small and conservative rather than aiming for full Markdown compatibility.
+- Unknown or malformed Markdown degrades to readable text instead of throwing or injecting HTML.
+
 ## 2026-06-21 - Phase 56A: Auth Role Routing Fix
 
 Tool:

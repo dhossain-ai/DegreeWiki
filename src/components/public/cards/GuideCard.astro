@@ -14,9 +14,9 @@ interface Props {
 }
 const { href, title, category = null, date = null, summary = null, imagePublicId = null, imageAlt = null } = Astro.props
 ---
-<Card href={href} padding="sm">
+<Card href={href} padding="sm" class="group flex h-full flex-col">
   {imagePublicId && (
-    <div class="-mx-3 -mt-3 mb-2 overflow-hidden rounded-t-[9px]">
+    <div class="-mx-3 -mt-3 mb-3 overflow-hidden rounded-t-[9px]">
       <MediaImage
         publicId={imagePublicId}
         alt={imageAlt ?? title}
@@ -24,16 +24,19 @@ const { href, title, category = null, date = null, summary = null, imagePublicId
         height={240}
         crop="fill"
         loading="lazy"
-        class="w-full object-cover"
+        class="h-44 w-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
       />
     </div>
   )}
   {(category || date) && (
-    <div class="flex items-center gap-2 mb-1.5">
+    <div class="mb-2 flex flex-wrap items-center gap-2">
       {category && <Badge variant="info">{category}</Badge>}
       {date && <span class="text-xs text-muted">{date}</span>}
     </div>
   )}
-  <h3 class="text-sm font-semibold text-ink mb-1 leading-snug line-clamp-2">{title}</h3>
-  {summary && <p class="text-xs text-muted line-clamp-2">{summary}</p>}
+  <h3 class="mb-2 text-base font-semibold leading-snug text-ink line-clamp-2">{title}</h3>
+  {summary && <p class="text-sm leading-6 text-muted line-clamp-3">{summary}</p>}
+  <div class="mt-auto pt-4 text-sm font-semibold text-primary">
+    Read guide →
+  </div>
 </Card>

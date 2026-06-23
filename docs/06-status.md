@@ -3,12 +3,12 @@
 > AI agent reading rule:
 > Read this active status file first for current context. Do not read archived status/history files unless the current task explicitly needs older phase details. For old phase details, use `docs/archive/README.md` to choose the smallest relevant archive file.
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 ## Current Phase
 
-Phase 60 - Public Article UX + SEO Rendering - complete.
-This phase rewrites both article admin forms (`new.astro` and `[id].astro`) with a two-column layout (main content + sticky sidebar), surfaces the six SEO fields that were already in the schema but never wired into the forms (`seo_title`, `seo_description`, `seo_h1`, `canonical_url`, `og_title`, `og_description`), adds live word count + reading time, summary character counter, a Google-snippet SEO preview, and writing template buttons for common guide types. The edit form also shows `data_completeness_score` and `source_confidence_score` as read-only progress bars. A "Save and Publish" action button overrides status to published + index after full validation. No migration, no new dependencies, no service role in any page or component.
+Phase 61 - Guide Discovery UX + Safe Article Markdown Rendering - complete.
+This phase adds a small internal safe article renderer for public guides with escaped Astro output for headings, paragraphs, lists, bold, simple italics, and safe `http/https` links, so public guide pages no longer show raw Markdown markers. It also improves `/guides` discovery UX with a stronger hero, quick topic browsing, latest-guides highlights, clearer result hierarchy, and a stronger card CTA. No migration, no new dependencies, no `set:html`, no `innerHTML`, and no service role in any public page or component.
 
 Current branch / git status note:
 - Branch: `main`
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 61: guide discovery UX + safe article Markdown rendering; public guide bodies now render a safe internal Markdown subset (h2/h3/h4, paragraphs, ordered/unordered lists, bold, simple italics, safe external links) without `set:html`/`innerHTML`; `/guides` now has an improved hero, quick category browsing, latest-guide highlights, better empty state, and clearer guide card affordances. No migrations, no new dependencies.
 - Phase 60: Public article UX + SEO rendering; seo_h1 wired as H1; last_verified_at wired into SourceBox; reading time computed server-side and shown in article header; summary moved to header as lede; FitFinderMiniPanel CTA added; related articles by same category added; og:type="article" set; article:published_time/article:modified_time meta tags added to BaseLayout. No migrations, no new dependencies.
 - Phase 59: Article authoring UX; two-column layout; six SEO fields surfaced (seo_title/description/h1, og_title/description, canonical_url); live word count + reading time; summary char counter; SEO search preview; writing template buttons; Save and Publish action; data quality scores read-only in edit form. No migrations, no new dependencies.
 - Phase 58D: Mixed-batch nested research pack import; staged university inserted first; staged programs auto-linked to that university; rich program `raw_data` mapped during create-new program merge; research pack template/prompt and preview added. No migrations, no new dependencies.
@@ -64,15 +65,14 @@ Current branch / git status note:
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
 - Default site OG image not yet configured (no brand asset uploaded to Cloudinary yet).
-- Import CSV/file upload deferred to Phase 61.
+- Import CSV/file upload remains deferred to a future import-focused phase.
 - Mixed-batch research pack staging import is still supported, and Phase 58E adds a separate local direct-draft production import script for trusted packs.
 - Fields without production columns, such as `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform `notes`, remain preserved in staging `raw_data`.
 
 ## Immediate Next Phases
 
-- Phase 61: CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
+- CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
 - Article junction table wiring (article_countries, article_subjects, article_degree_levels) in the admin form — deferred from Phase 59.
-- Markdown/rich-text preview for article body — deferred from Phase 59.
 - Continue admin permission boundary hardening.
 - Add default site OG image (upload DegreeWiki brand asset to Cloudinary, wire PUBLIC_DEFAULT_OG_IMAGE_PUBLIC_ID).
 - Cloudinary hard-delete (destroy API) when needed.
