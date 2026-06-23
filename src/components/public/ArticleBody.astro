@@ -1,0 +1,53 @@
+---
+import ArticleInlineContent from './ArticleInlineContent.astro'
+import { parseArticleMarkdown } from '../../lib/public/markdown'
+
+interface Props {
+  content: string | null | undefined
+  class?: string
+}
+
+const { content, class: className = '' } = Astro.props
+const blocks = parseArticleMarkdown(content)
+---
+{blocks.length > 0 && (
+  <div class={`space-y-5 text-base leading-[1.8] text-ink ${className}`}>
+    {blocks.map((block) => (
+      block.type === 'paragraph' ? (
+        <p>
+          <ArticleInlineContent nodes={block.children} />
+        </p>
+      ) : block.type === 'heading' ? (
+        block.level === 2 ? (
+          <h2 class="pt-2 text-[1.45rem] font-bold tracking-[-0.02em] text-ink">
+            <ArticleInlineContent nodes={block.children} />
+          </h2>
+        ) : block.level === 3 ? (
+          <h3 class="pt-1 text-[1.2rem] font-semibold tracking-[-0.01em] text-ink">
+            <ArticleInlineContent nodes={block.children} />
+          </h3>
+        ) : (
+          <h4 class="text-lg font-semibold text-ink">
+            <ArticleInlineContent nodes={block.children} />
+          </h4>
+        )
+      ) : block.type === 'ul' ? (
+        <ul class="list-disc space-y-2 pl-6 marker:text-primary">
+          {block.items.map((item) => (
+            <li>
+              <ArticleInlineContent nodes={item} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ol class="list-decimal space-y-2 pl-6 marker:font-semibold marker:text-ink-secondary">
+          {block.items.map((item) => (
+            <li>
+              <ArticleInlineContent nodes={item} />
+            </li>
+          ))}
+        </ol>
+      )
+    ))}
+  </div>
+)}
