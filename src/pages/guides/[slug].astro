@@ -5,6 +5,7 @@ import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
 import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
+import ArticleBody from '../../components/public/ArticleBody.astro'
 import GuideCard from '../../components/public/cards/GuideCard.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
@@ -58,9 +59,7 @@ const ogImageUrl       = getOgImageUrl(cloudName, a.og_image, a.featured_image)
 const wordCount   = a.content ? a.content.trim().split(/\s+/).filter(Boolean).length : 0
 const readingTime = wordCount > 0 ? Math.ceil(wordCount / 200) : null
 
-const contentParas: string[] = a.content
-  ? a.content.split('\n\n').map((p: string) => p.trim()).filter(Boolean)
-  : []
+const hasArticleContent = typeof a.content === 'string' && a.content.trim().length > 0
 
 const categoryId   = a.article_categories?.id ?? null
 const categoryName = a.article_categories?.name ?? null
@@ -159,12 +158,8 @@ if (categoryId) {
   <div class="bg-canvas">
     <Container width="narrow" class="py-7 sm:py-8">
 
-      {contentParas.length > 0 ? (
-        <div class="space-y-5 text-base text-ink leading-[1.75] mb-10">
-          {contentParas.map((para: string) => (
-            <p>{para}</p>
-          ))}
-        </div>
+      {hasArticleContent ? (
+        <ArticleBody content={a.content} class="mb-10" />
       ) : (
         !a.summary && (
           <p class="text-sm text-muted mb-10">No content available.</p>
