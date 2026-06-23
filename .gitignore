@@ -22,6 +22,9 @@ Thumbs.db
 dist/
 .astro/
 
+data/raw/
+data/reports/
+
 # IDE
 .vscode/
 .idea/
