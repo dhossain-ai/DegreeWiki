@@ -4,6 +4,8 @@ import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
+import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
+import GuideCard from '../../components/public/cards/GuideCard.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 import { getPublicId, getAlt, getOgImageUrl } from '../../lib/public/media'
@@ -14,9 +16,9 @@ const supabase = createClient(Astro.cookies, Astro.request)
 const { data: article } = await supabase
   .from('articles')
   .select(`
-    id, title, slug, summary, content, published_at,
-    verification_status, source_confidence_score, updated_at,
-    seo_title, seo_description,
+    id, title, slug, summary, content, published_at, updated_at,
+    verification_status, source_confidence_score, last_verified_at,
+    seo_title, seo_description, seo_h1,
     canonical_url, og_title, og_description,
     article_categories(id, name, slug),
     featured_image:media_assets!articles_featured_image_id_fkey(cloudinary_public_id, alt_text, display_name),
@@ -37,18 +39,24 @@ function formatDate(d: string | null): string | null {
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-const pubDate   = formatDate(a.published_at)
+const pubDate        = formatDate(a.published_at)
+const updatedAt      = formatDate(a.updated_at)
+const lastVerifiedAt = formatDate(a.last_verified_at)
+
+const h1        = a.seo_h1 || a.title
 const pageTitle = a.seo_title || a.title
 const pageDesc  = a.seo_description || a.summary || undefined
 const canonical = a.canonical_url || `${SITE_URL}/guides/${slug}`
 const ogTitle   = a.og_title || pageTitle
 const ogDesc    = a.og_description || pageDesc
-const updatedAt = formatDate(a.updated_at)
 
 const cloudName        = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 const featuredPublicId = getPublicId(a.featured_image)
 const featuredAlt      = getAlt(a.featured_image, a.title)
 const ogImageUrl       = getOgImageUrl(cloudName, a.og_image, a.featured_image)
+
+const wordCount   = a.content ? a.content.trim().split(/\s+/).filter(Boolean).length : 0
+const readingTime = wordCount > 0 ? Math.ceil(wordCount / 200) : null
 
 const contentParas: string[] = a.content
   ? a.content.split('\n\n').map((p: string) => p.trim()).filter(Boolean)
@@ -56,10 +64,38 @@ const contentParas: string[] = a.content
 
 const categoryId   = a.article_categories?.id ?? null
 const categoryName = a.article_categories?.name ?? null
----
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc} ogImage={ogImageUrl ?? undefined}>
 
-  <!-- Page header band -->
+// Related articles: same category, excluding current article, most recent first
+let relatedArticles: any[] = []
+if (categoryId) {
+  const { data: relatedData } = await supabase
+    .from('articles')
+    .select(`
+      id, title, slug, summary, published_at,
+      article_categories(id, name),
+      featured_image:media_assets!articles_featured_image_id_fkey(cloudinary_public_id, alt_text, display_name)
+    `)
+    .eq('content_status', 'published')
+    .eq('article_category_id', categoryId)
+    .neq('id', a.id)
+    .order('published_at', { ascending: false, nullsFirst: false })
+    .limit(3)
+  relatedArticles = relatedData ?? []
+}
+---
+<PublicLayout
+  title={`${pageTitle} — DegreeWiki`}
+  description={pageDesc}
+  canonical={canonical}
+  ogTitle={ogTitle}
+  ogDescription={ogDesc}
+  ogImage={ogImageUrl ?? undefined}
+  ogType="article"
+  articlePublishedTime={a.published_at ?? undefined}
+  articleModifiedTime={a.updated_at ?? undefined}
+>
+
+  <!-- Article header band -->
   <div class="bg-surface border-b border-edge">
     <Container width="narrow" class="py-7 sm:py-8">
       <a href="/guides"
@@ -67,7 +103,7 @@ const categoryName = a.article_categories?.name ?? null
         ← All Guides
       </a>
 
-      <!-- Category + date meta -->
+      <!-- Category + date + reading time meta row -->
       <div class="flex flex-wrap items-center gap-2 mb-3">
         {categoryName && categoryId && (
           <a href={`/guides?category=${categoryId}`}>
@@ -80,14 +116,29 @@ const categoryName = a.article_categories?.name ?? null
         {pubDate && (
           <span class="text-xs text-muted">{pubDate}</span>
         )}
+        {readingTime && (
+          <>
+            <span class="text-xs text-muted" aria-hidden="true">·</span>
+            <span class="text-xs text-muted">{readingTime} min read</span>
+          </>
+        )}
       </div>
 
-      <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
-        {a.title}
+      <!-- H1: uses seo_h1 if set, falls back to title -->
+      <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight mb-3">
+        {h1}
       </h1>
+
+      <!-- Summary/lede shown in header for immediate context -->
+      {a.summary && (
+        <p class="text-base text-ink-secondary leading-relaxed">
+          {a.summary}
+        </p>
+      )}
     </Container>
   </div>
 
+  <!-- Featured image -->
   {featuredPublicId && (
     <div class="bg-canvas border-b border-edge">
       <Container width="narrow" class="pt-6">
@@ -104,41 +155,38 @@ const categoryName = a.article_categories?.name ?? null
     </div>
   )}
 
-  <!-- Main content -->
+  <!-- Article body -->
   <div class="bg-canvas">
     <Container width="narrow" class="py-7 sm:py-8">
 
-      <!-- Summary / lead -->
-      {a.summary && (
-        <p class="text-base text-ink-secondary leading-relaxed border-l-[3px] border-primary-border pl-4 mb-8">
-          {a.summary}
-        </p>
-      )}
-
-      <!-- Article content -->
       {contentParas.length > 0 ? (
-        <div class="space-y-4 text-sm text-ink-secondary leading-relaxed mb-8">
+        <div class="space-y-5 text-base text-ink leading-[1.75] mb-10">
           {contentParas.map((para: string) => (
             <p>{para}</p>
           ))}
         </div>
       ) : (
         !a.summary && (
-          <p class="text-sm text-muted mb-8">No content available.</p>
+          <p class="text-sm text-muted mb-10">No content available.</p>
         )
       )}
 
-      <!-- Source & verification -->
+      <!-- Source & verification trust box -->
       <SourceBox
         verificationStatus={a.verification_status}
-        lastVerifiedAt={null}
+        lastVerifiedAt={lastVerifiedAt}
         officialUrl={null}
         sourceConfidenceScore={a.source_confidence_score ?? null}
       />
 
       {updatedAt && (
-        <p class="text-xs text-muted mb-6">Last updated: {updatedAt}</p>
+        <p class="text-xs text-muted mb-8">Last updated: {updatedAt}</p>
       )}
+
+      <!-- Fit Finder CTA -->
+      <div class="mb-10">
+        <FitFinderMiniPanel />
+      </div>
 
       <a href="/guides" class="text-sm text-primary hover:text-primary-hover">
         ← All Guides
@@ -146,5 +194,29 @@ const categoryName = a.article_categories?.name ?? null
 
     </Container>
   </div>
+
+  <!-- Related articles in same category -->
+  {relatedArticles.length > 0 && (
+    <div class="border-t border-edge bg-surface">
+      <Container width="narrow" class="py-8 sm:py-10">
+        <h2 class="text-base font-semibold text-ink mb-4">
+          More in {categoryName}
+        </h2>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {relatedArticles.map((r: any) => (
+            <GuideCard
+              href={`/guides/${r.slug}`}
+              title={r.title}
+              category={r.article_categories?.name ?? null}
+              date={formatDate(r.published_at)}
+              summary={r.summary ?? null}
+              imagePublicId={r.featured_image?.cloudinary_public_id ?? null}
+              imageAlt={r.featured_image?.alt_text || r.featured_image?.display_name || r.title}
+            />
+          ))}
+        </div>
+      </Container>
+    </div>
+  )}
 
 </PublicLayout>

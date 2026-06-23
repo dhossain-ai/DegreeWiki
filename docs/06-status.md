@@ -7,7 +7,7 @@ Last updated: 2026-06-23
 
 ## Current Phase
 
-Phase 59 - Article Authoring UX - complete.
+Phase 60 - Public Article UX + SEO Rendering - complete.
 This phase rewrites both article admin forms (`new.astro` and `[id].astro`) with a two-column layout (main content + sticky sidebar), surfaces the six SEO fields that were already in the schema but never wired into the forms (`seo_title`, `seo_description`, `seo_h1`, `canonical_url`, `og_title`, `og_description`), adds live word count + reading time, summary character counter, a Google-snippet SEO preview, and writing template buttons for common guide types. The edit form also shows `data_completeness_score` and `source_confidence_score` as read-only progress bars. A "Save and Publish" action button overrides status to published + index after full validation. No migration, no new dependencies, no service role in any page or component.
 
 Current branch / git status note:
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 60: Public article UX + SEO rendering; seo_h1 wired as H1; last_verified_at wired into SourceBox; reading time computed server-side and shown in article header; summary moved to header as lede; FitFinderMiniPanel CTA added; related articles by same category added; og:type="article" set; article:published_time/article:modified_time meta tags added to BaseLayout. No migrations, no new dependencies.
 - Phase 59: Article authoring UX; two-column layout; six SEO fields surfaced (seo_title/description/h1, og_title/description, canonical_url); live word count + reading time; summary char counter; SEO search preview; writing template buttons; Save and Publish action; data quality scores read-only in edit form. No migrations, no new dependencies.
 - Phase 58D: Mixed-batch nested research pack import; staged university inserted first; staged programs auto-linked to that university; rich program `raw_data` mapped during create-new program merge; research pack template/prompt and preview added. No migrations, no new dependencies.
 - Phase 58E: Local direct-draft research pack import script; draft/unverified production-only writes; exact university/program duplicate matching; empty-field-only updates for draft matches; source URLs preserved in `data_sources`; markdown import report added. No migrations, no new dependencies.
@@ -63,13 +64,13 @@ Current branch / git status note:
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
 - Default site OG image not yet configured (no brand asset uploaded to Cloudinary yet).
-- Import CSV/file upload deferred to Phase 60.
+- Import CSV/file upload deferred to Phase 61.
 - Mixed-batch research pack staging import is still supported, and Phase 58E adds a separate local direct-draft production import script for trusted packs.
 - Fields without production columns, such as `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform `notes`, remain preserved in staging `raw_data`.
 
 ## Immediate Next Phases
 
-- Phase 60: CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
+- Phase 61: CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
 - Article junction table wiring (article_countries, article_subjects, article_degree_levels) in the admin form — deferred from Phase 59.
 - Markdown/rich-text preview for article body — deferred from Phase 59.
 - Continue admin permission boundary hardening.

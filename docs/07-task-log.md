@@ -610,6 +610,68 @@ Known limitations:
 - The script still depends on local Supabase credentials to actually run.
 - Program rows that cannot resolve degree level or required university context are skipped with a report entry instead of being forced through.
 
+## 2026-06-23 - Phase 60: Public Article UX + SEO Rendering
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Improve the public article/guide detail page UX and SEO signal after Phase 59 improved the admin authoring form.
+- Wire the SEO fields that were added to the schema but not yet used on the public side.
+- Add reading time, Fit Finder CTA, and related article cards.
+
+Hard stop check:
+- No database migration required — seo_h1 existed since migration 008; last_verified_at since migration 017.
+- No new dependencies.
+- No Markdown renderer introduced — content continues to render as plain paragraphs split on \n\n.
+- No set:html or innerHTML.
+- No service role in public pages.
+- No architecture changes.
+- No changes to admin article forms (Phase 59 files untouched).
+
+Files modified:
+- `src/pages/guides/[slug].astro`: full rewrite.
+- `src/layouts/BaseLayout.astro`: added articlePublishedTime/articleModifiedTime props and meta tags.
+- `src/layouts/PublicLayout.astro`: pass-through for the two new props.
+- `docs/06-status.md`: updated phase.
+- `docs/07-task-log.md`: added this entry.
+
+Changes to `[slug].astro`:
+- SELECT now fetches `seo_h1` and `last_verified_at` (both existed in schema; both were previously missing from the public query).
+- H1 element now uses `seo_h1 || title` so editors can set a different display heading without changing the canonical title.
+- Reading time computed server-side: `ceil(wordCount / 200)` where wordCount is whitespace-split word count of `content`.
+- Category badge + published date + reading time shown in a single meta row in the article header.
+- Summary moved from the article body (below featured image) into the header band as a lede/subtitle directly below the H1 — better editorial structure.
+- `SourceBox` now receives `lastVerifiedAt` from the DB (was hardcoded to `null` since Phase 57C).
+- `ogType="article"` passed to PublicLayout for correct Open Graph type.
+- `articlePublishedTime` and `articleModifiedTime` passed as ISO strings for the new meta tags.
+- `FitFinderMiniPanel` added below the article body and trust box.
+- Related articles query added: same `article_category_id`, excludes current article, ordered by `published_at` DESC, limit 3.
+- Related articles rendered as a `GuideCard` grid in a new section below the main article container.
+
+Changes to `BaseLayout.astro`:
+- Added `articlePublishedTime?: string` and `articleModifiedTime?: string` props.
+- Emits `<meta property="article:published_time">` and `<meta property="article:modified_time">` when values are present.
+
+Changes to `PublicLayout.astro`:
+- Added `articlePublishedTime?: string` and `articleModifiedTime?: string` props with pass-through to BaseLayout.
+
+Security:
+- No innerHTML or set:html in any modified file.
+- No service role or createServiceClient in any public file.
+- Related articles query uses the anon/RLS client — RLS `articles_select_published` enforces content_status = 'published'.
+- All reading time and word count logic is server-side arithmetic on trusted DB content.
+
+Validation:
+- `npm run build`: PASS.
+- `grep -rn "innerHTML|set:html" src/pages/guides/ src/layouts/BaseLayout.astro src/layouts/PublicLayout.astro`: NONE.
+- `grep -rn "service_role|SERVICE_ROLE|createServiceClient" src/pages/guides/ src/layouts/BaseLayout.astro src/layouts/PublicLayout.astro`: NONE.
+
+Deferred:
+- Article junction table wiring (article_countries/subjects/degree_levels) in the admin form.
+- Markdown/rich-text body rendering.
+- Reading time on guide listing cards (would require selecting `content` in the listing query; expensive for large lists).
+
 ## 2026-06-23 - Phase 59: Article Authoring UX
 
 Tool:
