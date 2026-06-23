@@ -3,16 +3,16 @@
 > AI agent reading rule:
 > Read this active status file first for current context. Do not read archived status/history files unless the current task explicitly needs older phase details. For old phase details, use `docs/archive/README.md` to choose the smallest relevant archive file.
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 ## Current Phase
 
-Phase 58E - Direct Draft Research Pack Import - complete.
-This phase adds a local-only `scripts/import-research-pack.mjs` workflow that reads the cleaned MRU research pack JSON or falls back to the raw JSON, validates the nested research-pack shape, and writes directly into production `universities` and `programs` as draft/unverified records only. Universities are matched by exact normalized name and/or official URL; programs are matched by normalized title + university_id + degree level. Existing draft/unverified matches only receive empty-field patches, source URLs are preserved through `data_sources`, and a markdown import report is written under `data/reports/`. No staging, publish, verify, or delete step is performed automatically, and no page/component code uses the service role.
+Phase 59 - Article Authoring UX - complete.
+This phase rewrites both article admin forms (`new.astro` and `[id].astro`) with a two-column layout (main content + sticky sidebar), surfaces the six SEO fields that were already in the schema but never wired into the forms (`seo_title`, `seo_description`, `seo_h1`, `canonical_url`, `og_title`, `og_description`), adds live word count + reading time, summary character counter, a Google-snippet SEO preview, and writing template buttons for common guide types. The edit form also shows `data_completeness_score` and `source_confidence_score` as read-only progress bars. A "Save and Publish" action button overrides status to published + index after full validation. No migration, no new dependencies, no service role in any page or component.
 
 Current branch / git status note:
 - Branch: `main`
-- Working tree has the expected untracked raw input folder plus Phase 58E implementation changes pending review/commit.
+- Working tree has untracked data directories only.
 
 ## Current Product Summary
 
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 59: Article authoring UX; two-column layout; six SEO fields surfaced (seo_title/description/h1, og_title/description, canonical_url); live word count + reading time; summary char counter; SEO search preview; writing template buttons; Save and Publish action; data quality scores read-only in edit form. No migrations, no new dependencies.
 - Phase 58D: Mixed-batch nested research pack import; staged university inserted first; staged programs auto-linked to that university; rich program `raw_data` mapped during create-new program merge; research pack template/prompt and preview added. No migrations, no new dependencies.
 - Phase 58E: Local direct-draft research pack import script; draft/unverified production-only writes; exact university/program duplicate matching; empty-field-only updates for draft matches; source URLs preserved in `data_sources`; markdown import report added. No migrations, no new dependencies.
 - Phase 58C: Import templates + AI prompts + JSON preview + program university selector + set_match_scholarship_id + set_match_article_id + auto quality check on bulk import. No migrations, no new dependencies.
@@ -69,6 +70,8 @@ Current branch / git status note:
 ## Immediate Next Phases
 
 - Phase 60: CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
+- Article junction table wiring (article_countries, article_subjects, article_degree_levels) in the admin form — deferred from Phase 59.
+- Markdown/rich-text preview for article body — deferred from Phase 59.
 - Continue admin permission boundary hardening.
 - Add default site OG image (upload DegreeWiki brand asset to Cloudinary, wire PUBLIC_DEFAULT_OG_IMAGE_PUBLIC_ID).
 - Cloudinary hard-delete (destroy API) when needed.

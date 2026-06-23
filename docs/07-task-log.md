@@ -610,6 +610,61 @@ Known limitations:
 - The script still depends on local Supabase credentials to actually run.
 - Program rows that cannot resolve degree level or required university context are skipped with a report entry instead of being forced through.
 
+## 2026-06-23 - Phase 59: Article Authoring UX
+
+Tool:
+- Claude Sonnet 4.6 (Claude Code)
+
+Goal:
+- Improve the admin article create and edit forms with a better layout, surface the six SEO fields that already existed in the schema but were never wired into the forms, and add live editorial aids (word count, SEO preview, writing templates, char counters).
+
+Files modified:
+- `src/pages/admin/articles/new.astro`: full rewrite.
+- `src/pages/admin/articles/[id].astro`: full rewrite.
+- `docs/06-status.md`: updated phase and next phases.
+- `docs/07-task-log.md`: added this entry.
+
+Schema gap surfaced (no migration needed):
+- Six fields existed in `articles` since migration 008 but were never in the admin form: `seo_title`, `seo_description`, `seo_h1`, `canonical_url`, `og_title`, `og_description`.
+- `data_completeness_score` and `source_confidence_score` added to the edit page select query and displayed read-only.
+
+Layout changes:
+- Identity section (title + slug) is now full-width above a two-column grid.
+- Left column: Editorial Setup (category + writing template buttons), Content (summary + body), Images, SEO (preview + 6 fields).
+- Right sidebar (`lg:sticky lg:top-6`): Publishing, Verification, Data Quality (edit only, read-only), Actions.
+- Single `<form method="post">` wraps both columns — POST logic unchanged.
+
+Features added:
+- **Writing template buttons**: five `<button type="button" data-template="...">` buttons; clicking pre-fills `#content` textarea via `.value = WRITING_TEMPLATES[key]`; `confirm()` if body is non-empty. Templates defined entirely inside `<script is:inline>` as a JS object literal — no Astro frontmatter interpolation.
+- **Summary character counter**: `#summary-count` updated via `input` event using `textContent`.
+- **Word count + reading time**: `#word-count` updated via `input` event; words = whitespace-split count; reading time = `ceil(words/200)` minutes.
+- **SEO preview box**: simulated Google snippet with `#seo-preview-url`, `#seo-preview-title`, `#seo-preview-desc` updated via `textContent` only; fallback chain `seo_title || title` and `seo_description || summary`.
+- **SEO char counters**: inline `<span>` counters next to seo_title and seo_description labels; green ≥50/120, red >60/160.
+- **Save and Publish action**: `<button name="action" value="publish">` triggers server-side status override (`content_status = published`, `indexing_status = index`) before validation runs; validation still executes in full.
+- **Human-readable status labels**: `CONTENT_STATUS_LABELS`, `VERIFICATION_LABELS`, `INDEXING_LABELS` maps used in `<select>` options; raw enum values unchanged as form values.
+- **`canonical_url` validation**: `validateUrl()` from existing `validate.ts` applied server-side.
+- **Data quality sidebar** (edit only): `data_completeness_score` and `source_confidence_score` shown as read-only progress bars with inline percentage widths via server-rendered `style` attribute; `published_at` shown if set.
+
+Security:
+- No `innerHTML`, no `set:html`, no `eval` anywhere in the modified files.
+- No `service_role` or `createServiceClient` in any page or component.
+- All JS preview and counter updates use `textContent` or `.value` only.
+- `WRITING_TEMPLATES` are static string constants — no user input interpolated.
+- `canonical_url` validated with `validateUrl()` server-side.
+- UUID allow-list validation for media fields unchanged.
+- Progress bar widths are clamped server-side (`Math.min(100, Math.max(0, Number(...)))`) before use in `style` attribute.
+
+Validation:
+- `npm run build`: PASS.
+- `grep -rn "innerHTML" src/pages/admin/articles/`: no matches (exit 1).
+- `grep -rn "set:html" src/pages/admin/articles/`: no matches (exit 1).
+- `grep -rn "service_role|SERVICE_ROLE|createServiceClient" src/pages/admin/articles/`: no matches (exit 1).
+
+Deferred:
+- Article junction table wiring (article_countries, article_subjects, article_degree_levels) — requires additional DB queries and multi-select UI.
+- Markdown/rich-text body preview.
+- Slug auto-generation on title keystroke (currently server-side only on POST).
+
 ## Current / Open Notes
 
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).

@@ -9,6 +9,7 @@ import {
   validateRequired,
   validateIn,
   validateSlug,
+  validateUrl,
 } from '../../../lib/admin/validate'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
@@ -21,19 +22,31 @@ if (!id) return new Response('Not found.', { status: 404 })
 
 const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 
-const CONTENT_STATUS_OPTIONS   = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
-const VERIFICATION_OPTIONS     = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
-const INDEXING_STATUS_OPTIONS  = ['draft', 'index', 'noindex'] as const
+const CONTENT_STATUS_OPTIONS  = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS    = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const INDEXING_STATUS_OPTIONS = ['draft', 'index', 'noindex'] as const
+
+const CONTENT_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', in_review: 'In Review', published: 'Published',
+  unpublished: 'Unpublished', archived: 'Archived',
+}
+const VERIFICATION_LABELS: Record<string, string> = {
+  unverified: 'Unverified', partially_verified: 'Partially Verified', verified: 'Verified',
+  source_conflict: 'Source Conflict', outdated: 'Outdated', needs_review: 'Needs Review',
+}
+const INDEXING_LABELS: Record<string, string> = {
+  draft: 'Not set (draft)', index: 'Allow indexing', noindex: 'No-index',
+}
 
 const [articleResult, categoriesResult, mediaAssets] = await Promise.all([
   supabase
     .from('articles')
-    .select('id, title, slug, summary, content, article_category_id, content_status, verification_status, indexing_status, published_at, featured_image_id, og_image_id')
+    .select('id, title, slug, summary, content, article_category_id, content_status, verification_status, indexing_status, published_at, featured_image_id, og_image_id, seo_title, seo_description, seo_h1, canonical_url, og_title, og_description, data_completeness_score, source_confidence_score')
     .eq('id', id)
     .single(),
   supabase
     .from('article_categories')
-    .select('id, name')
+    .select('id, name, slug')
     .order('display_order'),
   loadReusableReadyMediaAssets(supabase),
 ])
@@ -55,12 +68,23 @@ type ArticleRecord = {
   published_at: string | null
   featured_image_id: string | null
   og_image_id: string | null
+  seo_title: string | null
+  seo_description: string | null
+  seo_h1: string | null
+  canonical_url: string | null
+  og_title: string | null
+  og_description: string | null
+  data_completeness_score: number
+  source_confidence_score: number
 }
-type CategoryRow = { id: string; name: string }
+type CategoryRow = { id: string; name: string; slug: string }
 
 const record = articleResult.data as ArticleRecord
 const categories = (categoriesResult.data ?? []) as CategoryRow[]
 const validCategoryIds = new Set(categories.map(c => c.id))
+
+const completenessWidth = Math.min(100, Math.max(0, Number(record.data_completeness_score ?? 0)))
+const confidenceWidth   = Math.min(100, Math.max(0, Number(record.source_confidence_score ?? 0)))
 
 type Values = {
   title: string
@@ -73,19 +97,31 @@ type Values = {
   verification_status: string
   featured_image_id: string
   og_image_id: string
+  seo_title: string
+  seo_description: string
+  seo_h1: string
+  canonical_url: string
+  og_title: string
+  og_description: string
 }
 
 let values: Values = {
-  title: record.title,
-  slug: record.slug,
-  content_status: record.content_status,
+  title:               record.title,
+  slug:                record.slug,
+  content_status:      record.content_status,
   article_category_id: record.article_category_id ?? '',
-  summary: record.summary ?? '',
-  content: record.content ?? '',
-  indexing_status: record.indexing_status,
+  summary:             record.summary ?? '',
+  content:             record.content ?? '',
+  indexing_status:     record.indexing_status,
   verification_status: record.verification_status,
-  featured_image_id: record.featured_image_id ?? '',
-  og_image_id: record.og_image_id ?? '',
+  featured_image_id:   record.featured_image_id ?? '',
+  og_image_id:         record.og_image_id ?? '',
+  seo_title:           record.seo_title ?? '',
+  seo_description:     record.seo_description ?? '',
+  seo_h1:              record.seo_h1 ?? '',
+  canonical_url:       record.canonical_url ?? '',
+  og_title:            record.og_title ?? '',
+  og_description:      record.og_description ?? '',
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -93,18 +129,30 @@ let serverError = ''
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
   const g = (key: string) => String(form.get(key) ?? '').trim()
+  const action = g('action')
 
   values = {
-    title: g('title'),
-    slug: g('slug'),
-    content_status: g('content_status') || 'draft',
+    title:               g('title'),
+    slug:                g('slug'),
+    content_status:      g('content_status') || 'draft',
     article_category_id: g('article_category_id'),
-    summary: g('summary'),
-    content: g('content'),
-    indexing_status: g('indexing_status') || 'draft',
+    summary:             g('summary'),
+    content:             g('content'),
+    indexing_status:     g('indexing_status') || 'draft',
     verification_status: g('verification_status') || 'unverified',
-    featured_image_id: g('featured_image_id'),
-    og_image_id: g('og_image_id'),
+    featured_image_id:   g('featured_image_id'),
+    og_image_id:         g('og_image_id'),
+    seo_title:           g('seo_title'),
+    seo_description:     g('seo_description'),
+    seo_h1:              g('seo_h1'),
+    canonical_url:       g('canonical_url'),
+    og_title:            g('og_title'),
+    og_description:      g('og_description'),
+  }
+
+  if (action === 'publish') {
+    values.content_status  = 'published'
+    values.indexing_status = 'index'
   }
 
   if (!values.slug && values.title) values.slug = toSlug(values.title)
@@ -129,6 +177,10 @@ if (Astro.request.method === 'POST') {
   if (values.article_category_id && !validCategoryIds.has(values.article_category_id)) {
     e.article_category_id = 'Selected category is not valid.'
   }
+
+  const canonErr = validateUrl(values.canonical_url, 'Canonical URL')
+  if (canonErr) e.canonical_url = canonErr
+
   const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.featured_image_id, values.og_image_id])
   if (values.featured_image_id && !validMediaIds.has(values.featured_image_id)) {
     e.featured_image_id = 'Selected featured image is not valid.'
@@ -145,16 +197,22 @@ if (Astro.request.method === 'POST') {
     const { error } = await supabase
       .from('articles')
       .update({
-        title: values.title,
-        slug: values.slug,
-        content_status: values.content_status,
+        title:               values.title,
+        slug:                values.slug,
+        content_status:      values.content_status,
         article_category_id: values.article_category_id || null,
-        summary: values.summary || null,
-        content: values.content || null,
-        indexing_status: values.indexing_status,
+        summary:             values.summary || null,
+        content:             values.content || null,
+        indexing_status:     values.indexing_status,
         verification_status: values.verification_status,
-        featured_image_id: values.featured_image_id || null,
-        og_image_id: values.og_image_id || null,
+        featured_image_id:   values.featured_image_id || null,
+        og_image_id:         values.og_image_id || null,
+        seo_title:           values.seo_title || null,
+        seo_description:     values.seo_description || null,
+        seo_h1:              values.seo_h1 || null,
+        canonical_url:       values.canonical_url || null,
+        og_title:            values.og_title || null,
+        og_description:      values.og_description || null,
         ...(isFirstPublish ? { published_at: new Date().toISOString() } : {}),
       })
       .eq('id', id)
@@ -169,15 +227,20 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const inputClass  = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
-const selectClass = inputClass + ' bg-white'
-const labelClass  = 'block text-sm font-medium text-gray-700 mb-1'
-const errorClass  = 'mt-1 text-xs text-red-600'
+const inputClass       = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass      = inputClass + ' bg-white'
+const labelClass       = 'block text-sm font-medium text-gray-700 mb-1'
+const hintClass        = 'mt-0.5 text-xs text-gray-400'
+const errorClass       = 'mt-1 text-xs text-red-600'
 const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 pb-1 border-b border-gray-200'
+const cardClass        = 'rounded-lg border border-gray-200 bg-white p-5'
 ---
 <AdminLayout title={`Edit ${record.title} — DegreeWiki Admin`} activePath="/admin/articles" userEmail={_user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-bold text-gray-900">Edit Article</h1>
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">Edit Article</h1>
+      <p class="text-xs text-gray-400 font-mono mt-0.5">/guides/{record.slug}</p>
+    </div>
     <a href="/admin/articles" class="text-sm text-gray-500 hover:underline">← Back to Articles</a>
   </div>
 
@@ -185,118 +248,390 @@ const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking
     <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
   )}
 
-  <form method="post" class="max-w-2xl space-y-6">
+  <form method="post">
 
-    <!-- Identity -->
-    <div>
+    <!-- Identity: full-width above the two-column grid -->
+    <div class={`${cardClass} mb-6`}>
       <h2 class={sectionHeadClass}>Identity</h2>
-      <div class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label for="title" class={labelClass}>Title *</label>
-          <input type="text" id="title" name="title" value={values.title} class={inputClass} />
+          <label for="title" class={labelClass}>Title <span class="text-red-500">*</span></label>
+          <input type="text" id="title" name="title" value={values.title}
+            class={inputClass} />
+          <p class={hintClass}>Clear, keyword-rich title shown on the article page and in listings.</p>
           {errors.title && <p class={errorClass}>{errors.title}</p>}
         </div>
         <div>
-          <label for="slug" class={labelClass}>Slug *</label>
-          <input type="text" id="slug" name="slug" value={values.slug} class={inputClass + ' font-mono'} />
+          <label for="slug" class={labelClass}>Slug <span class="text-red-500">*</span></label>
+          <input type="text" id="slug" name="slug" value={values.slug}
+            class={`${inputClass} font-mono`} />
+          <p class={hintClass}>URL path segment. Changing this will break existing links.</p>
           {errors.slug && <p class={errorClass}>{errors.slug}</p>}
         </div>
-        <div>
-          <label for="content_status" class={labelClass}>Status *</label>
-          <select id="content_status" name="content_status" class={selectClass}>
-            {CONTENT_STATUS_OPTIONS.map(s => (
-              <option value={s} selected={values.content_status === s}>{s}</option>
-            ))}
-          </select>
-          {errors.content_status && <p class={errorClass}>{errors.content_status}</p>}
+      </div>
+    </div>
+
+    <!-- Two-column grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+
+      <!-- LEFT: main authoring column -->
+      <div class="space-y-6">
+
+        <!-- Editorial Setup -->
+        <div class={cardClass}>
+          <h2 class={sectionHeadClass}>Editorial Setup</h2>
+          <div class="space-y-4">
+            <div>
+              <label for="article_category_id" class={labelClass}>Category / Guide Type</label>
+              <select id="article_category_id" name="article_category_id" class={selectClass}>
+                <option value="">— none —</option>
+                {categories.map(c => (
+                  <option value={c.id} data-slug={c.slug}
+                    selected={values.article_category_id === c.id}>{c.name}</option>
+                ))}
+              </select>
+              <p class={hintClass}>Classifies this article in the guides navigation.</p>
+              {errors.article_category_id && <p class={errorClass}>{errors.article_category_id}</p>}
+            </div>
+            <div>
+              <p class={labelClass}>Writing Templates</p>
+              <p class={hintClass}>Pre-fill the body with a starter outline. Existing content will be replaced after confirmation.</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <button type="button" data-template="country-guide"
+                  class="px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+                  Country Guide
+                </button>
+                <button type="button" data-template="scholarship-guide"
+                  class="px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+                  Scholarship Guide
+                </button>
+                <button type="button" data-template="university-guide"
+                  class="px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+                  University Guide
+                </button>
+                <button type="button" data-template="application-advice"
+                  class="px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+                  Application Advice
+                </button>
+                <button type="button" data-template="general"
+                  class="px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+                  General Guide
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- Categorisation -->
-    <div>
-      <h2 class={sectionHeadClass}>Categorisation</h2>
-      <div>
-        <label for="article_category_id" class={labelClass}>Category</label>
-        <select id="article_category_id" name="article_category_id" class={selectClass}>
-          <option value="">— none —</option>
-          {categories.map(c => (
-            <option value={c.id} selected={values.article_category_id === c.id}>{c.name}</option>
-          ))}
-        </select>
-        {errors.article_category_id && <p class={errorClass}>{errors.article_category_id}</p>}
-      </div>
-    </div>
-
-    <!-- Content -->
-    <div>
-      <h2 class={sectionHeadClass}>Content</h2>
-      <div class="space-y-4">
-        <div>
-          <label for="summary" class={labelClass}>Summary</label>
-          <textarea id="summary" name="summary" rows={3} class={inputClass}>{values.summary}</textarea>
+        <!-- Content -->
+        <div class={cardClass}>
+          <h2 class={sectionHeadClass}>Content</h2>
+          <div class="space-y-4">
+            <div>
+              <label for="summary" class={labelClass}>Summary</label>
+              <textarea id="summary" name="summary" rows={3}
+                placeholder="2–3 sentences describing this article…"
+                class={inputClass}>{values.summary}</textarea>
+              <p class={hintClass}>Shown in listings and used as the meta description fallback. Aim for 120–155 characters.</p>
+              <p class="mt-1 text-xs text-gray-400" id="summary-count">0 / 155 chars</p>
+            </div>
+            <div>
+              <label for="content" class={labelClass}>Body</label>
+              <textarea id="content" name="content" rows={20}
+                placeholder="Article body — plain text or Markdown. Use ## for headings."
+                class={inputClass}>{values.content}</textarea>
+              <p class={hintClass}>Plain text or Markdown. Rich-text editor not available in this phase.</p>
+              <p class="mt-1 text-xs text-gray-400" id="word-count">0 words</p>
+            </div>
+          </div>
         </div>
-        <div>
-          <label for="content" class={labelClass}>Body</label>
-          <p class="text-xs text-gray-400 mb-1">Plain text. Rich text editor not available in this phase.</p>
-          <textarea id="content" name="content" rows={12} class={inputClass}>{values.content}</textarea>
+
+        <!-- Images -->
+        <div class={cardClass}>
+          <h2 class={sectionHeadClass}>Images</h2>
+          <div class="space-y-4">
+            <div>
+              <MediaPicker fieldName="featured_image_id" label="Featured Image"
+                currentId={values.featured_image_id || null} assets={mediaAssets} cloudName={cloudName}
+                defaultSubfolder="articles" />
+              {errors.featured_image_id && <p class={errorClass}>{errors.featured_image_id}</p>}
+            </div>
+            <div>
+              <MediaPicker fieldName="og_image_id" label="OG / Social Image"
+                currentId={values.og_image_id || null} assets={mediaAssets} cloudName={cloudName}
+                defaultSubfolder="articles" copyFromField="featured_image_id" copyFromLabel="Featured Image" />
+              <p class={hintClass}>Shown when shared on social media. Defaults to featured image if blank.</p>
+              {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- Images -->
-    <div>
-      <h2 class={sectionHeadClass}>Images</h2>
-      <div class="space-y-4">
-        <div>
-          <MediaPicker fieldName="featured_image_id" label="Featured Image"
-            currentId={values.featured_image_id || null} assets={mediaAssets} cloudName={cloudName}
-            defaultSubfolder="articles" />
-          {errors.featured_image_id && <p class={errorClass}>{errors.featured_image_id}</p>}
+        <!-- SEO -->
+        <div class={cardClass}>
+          <h2 class={sectionHeadClass}>SEO</h2>
+          <div class="space-y-4">
+
+            <!-- Search preview -->
+            <div class="rounded-md border border-gray-200 bg-gray-50 p-4">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Search Preview</p>
+              <p class="text-xs text-gray-500 truncate mb-1 font-mono" id="seo-preview-url">degreewiki.com › guides › {record.slug}</p>
+              <p class="text-base text-blue-700 font-medium leading-snug truncate mb-1" id="seo-preview-title">
+                {values.seo_title || values.title}
+              </p>
+              <p class="text-sm text-gray-600 leading-relaxed" id="seo-preview-desc">
+                {values.seo_description || values.summary || 'Article description…'}
+              </p>
+            </div>
+
+            <div>
+              <label for="seo_title" class={labelClass}>
+                SEO Title
+                <span class="ml-2 font-normal text-gray-400 text-xs" id="seo-title-count">0 / 60</span>
+              </label>
+              <input type="text" id="seo_title" name="seo_title" value={values.seo_title}
+                placeholder="Leave blank to use the article title"
+                class={inputClass} />
+              <p class={hintClass}>~50–60 characters recommended for Google display.</p>
+              {errors.seo_title && <p class={errorClass}>{errors.seo_title}</p>}
+            </div>
+
+            <div>
+              <label for="seo_description" class={labelClass}>
+                SEO Description
+                <span class="ml-2 font-normal text-gray-400 text-xs" id="seo-desc-count">0 / 160</span>
+              </label>
+              <textarea id="seo_description" name="seo_description" rows={2}
+                placeholder="Leave blank to use the article summary"
+                class={inputClass}>{values.seo_description}</textarea>
+              <p class={hintClass}>~120–160 characters recommended for Google snippets.</p>
+              {errors.seo_description && <p class={errorClass}>{errors.seo_description}</p>}
+            </div>
+
+            <div>
+              <label for="seo_h1" class={labelClass}>Page H1</label>
+              <input type="text" id="seo_h1" name="seo_h1" value={values.seo_h1}
+                placeholder="Leave blank to use the article title"
+                class={inputClass} />
+              <p class={hintClass}>Main heading displayed on the article page. Defaults to the title if blank.</p>
+              {errors.seo_h1 && <p class={errorClass}>{errors.seo_h1}</p>}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="og_title" class={labelClass}>OG Title</label>
+                <input type="text" id="og_title" name="og_title" value={values.og_title}
+                  placeholder="Defaults to SEO title"
+                  class={inputClass} />
+                <p class={hintClass}>Social sharing title override.</p>
+                {errors.og_title && <p class={errorClass}>{errors.og_title}</p>}
+              </div>
+              <div>
+                <label for="og_description" class={labelClass}>OG Description</label>
+                <textarea id="og_description" name="og_description" rows={2}
+                  placeholder="Defaults to SEO description"
+                  class={inputClass}>{values.og_description}</textarea>
+                <p class={hintClass}>Social sharing description override.</p>
+                {errors.og_description && <p class={errorClass}>{errors.og_description}</p>}
+              </div>
+            </div>
+
+            <div>
+              <label for="canonical_url" class={labelClass}>Canonical URL</label>
+              <input type="url" id="canonical_url" name="canonical_url" value={values.canonical_url}
+                placeholder="https://degreewiki.com/guides/your-slug"
+                class={inputClass} />
+              <p class={hintClass}>Only set if this article has a canonical URL different from its default path.</p>
+              {errors.canonical_url && <p class={errorClass}>{errors.canonical_url}</p>}
+            </div>
+
+          </div>
         </div>
-        <div>
-          <MediaPicker fieldName="og_image_id" label="OG Image"
-            currentId={values.og_image_id || null} assets={mediaAssets} cloudName={cloudName}
-            defaultSubfolder="articles" copyFromField="featured_image_id" copyFromLabel="Featured Image" />
-          {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
+
+      </div><!-- /LEFT -->
+
+      <!-- RIGHT: sticky sidebar -->
+      <div class="space-y-4 lg:sticky lg:top-6">
+
+        <!-- Publishing -->
+        <div class={`${cardClass} space-y-3`}>
+          <h2 class={sectionHeadClass}>Publishing</h2>
+          <div>
+            <label for="content_status" class={labelClass}>Content Status <span class="text-red-500">*</span></label>
+            <select id="content_status" name="content_status" class={selectClass}>
+              {CONTENT_STATUS_OPTIONS.map(s => (
+                <option value={s} selected={values.content_status === s}>
+                  {CONTENT_STATUS_LABELS[s] ?? s}
+                </option>
+              ))}
+            </select>
+            {errors.content_status && <p class={errorClass}>{errors.content_status}</p>}
+          </div>
+          <div>
+            <label for="indexing_status" class={labelClass}>Indexing <span class="text-red-500">*</span></label>
+            <select id="indexing_status" name="indexing_status" class={selectClass}>
+              {INDEXING_STATUS_OPTIONS.map(s => (
+                <option value={s} selected={values.indexing_status === s}>
+                  {INDEXING_LABELS[s] ?? s}
+                </option>
+              ))}
+            </select>
+            <p class={hintClass}>Set to "Allow indexing" only when the article is ready for Google.</p>
+            {errors.indexing_status && <p class={errorClass}>{errors.indexing_status}</p>}
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- Publishing -->
-    <div>
-      <h2 class={sectionHeadClass}>Publishing</h2>
-      <div>
-        <label for="indexing_status" class={labelClass}>Indexing Status *</label>
-        <select id="indexing_status" name="indexing_status" class={selectClass}>
-          {INDEXING_STATUS_OPTIONS.map(s => (
-            <option value={s} selected={values.indexing_status === s}>{s}</option>
-          ))}
-        </select>
-        {errors.indexing_status && <p class={errorClass}>{errors.indexing_status}</p>}
-      </div>
-    </div>
+        <!-- Verification -->
+        <div class={`${cardClass} space-y-3`}>
+          <h2 class={sectionHeadClass}>Verification</h2>
+          <div>
+            <label for="verification_status" class={labelClass}>Verification Status <span class="text-red-500">*</span></label>
+            <select id="verification_status" name="verification_status" class={selectClass}>
+              {VERIFICATION_OPTIONS.map(s => (
+                <option value={s} selected={values.verification_status === s}>
+                  {VERIFICATION_LABELS[s] ?? s}
+                </option>
+              ))}
+            </select>
+            {errors.verification_status && <p class={errorClass}>{errors.verification_status}</p>}
+          </div>
+        </div>
 
-    <!-- Verification -->
-    <div>
-      <h2 class={sectionHeadClass}>Verification</h2>
-      <div>
-        <label for="verification_status" class={labelClass}>Verification Status *</label>
-        <select id="verification_status" name="verification_status" class={selectClass}>
-          {VERIFICATION_OPTIONS.map(s => (
-            <option value={s} selected={values.verification_status === s}>{s}</option>
-          ))}
-        </select>
-        {errors.verification_status && <p class={errorClass}>{errors.verification_status}</p>}
-      </div>
-    </div>
+        <!-- Data Quality (read-only) -->
+        <div class={`${cardClass} space-y-3`}>
+          <h2 class={sectionHeadClass}>Data Quality</h2>
+          <div class="space-y-2 text-xs text-gray-600">
+            <div class="flex items-center justify-between">
+              <span>Completeness</span>
+              <span class="font-mono font-medium">{record.data_completeness_score} / 100</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-1.5">
+              <div class="bg-blue-500 h-1.5 rounded-full" style={`width: ${completenessWidth}%`}></div>
+            </div>
+            <div class="flex items-center justify-between pt-1">
+              <span>Source Confidence</span>
+              <span class="font-mono font-medium">{record.source_confidence_score} / 100</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-1.5">
+              <div class="bg-green-500 h-1.5 rounded-full" style={`width: ${confidenceWidth}%`}></div>
+            </div>
+            <p class="text-xs text-gray-400 pt-1">Auto-calculated. Not directly editable.</p>
+          </div>
+          {record.published_at && (
+            <div class="pt-2 border-t border-gray-100 text-xs text-gray-500">
+              Published: {new Date(record.published_at).toLocaleDateString()}
+            </div>
+          )}
+        </div>
 
-    <div class="flex gap-3 pt-2">
-      <button type="submit"
-        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
-        Save Changes
-      </button>
-      <a href="/admin/articles" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
-    </div>
+        <!-- Actions -->
+        <div class={`${cardClass} space-y-2`}>
+          <button type="submit" name="action" value="save"
+            class="w-full px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+            Save Changes
+          </button>
+          <button type="submit" name="action" value="publish"
+            class="w-full px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700">
+            Save and Publish
+          </button>
+          <a href="/admin/articles"
+            class="block text-center text-sm text-gray-500 hover:underline py-1">
+            Cancel
+          </a>
+        </div>
+
+      </div><!-- /RIGHT -->
+
+    </div><!-- /grid -->
   </form>
+
+  <script is:inline>
+    (function () {
+      var WRITING_TEMPLATES = {
+        'country-guide':      '## Overview\n\n## Why Study Here?\n\n## Top Universities\n\n## Admission Requirements\n\n## Tuition and Living Costs\n\n## Visa Requirements\n\n## Student Life\n\n## Sources\n',
+        'scholarship-guide':  '## Overview\n\n## Who Can Apply?\n\n## Award Value\n\n## How to Apply\n\n## Key Deadlines\n\n## Tips for a Strong Application\n\n## Sources\n',
+        'university-guide':   '## About the University\n\n## Popular Programs\n\n## Admission Requirements\n\n## Tuition Fees\n\n## Campus Life\n\n## How to Apply\n\n## Sources\n',
+        'application-advice': '## Before You Apply\n\n## Step-by-Step Process\n\n## Documents Required\n\n## Common Mistakes to Avoid\n\n## After You Apply\n\n## Sources\n',
+        'general':            '## Introduction\n\n## Key Points\n\n## What to Know\n\n## Next Steps\n\n## Sources\n'
+      };
+
+      var summaryEl     = document.getElementById('summary');
+      var bodyEl        = document.getElementById('content');
+      var titleEl       = document.getElementById('title');
+      var slugEl        = document.getElementById('slug');
+      var seoTitleEl    = document.getElementById('seo_title');
+      var seoDescEl     = document.getElementById('seo_description');
+      var summaryCount  = document.getElementById('summary-count');
+      var wordCountEl   = document.getElementById('word-count');
+      var seoTitleCount = document.getElementById('seo-title-count');
+      var seoDescCount  = document.getElementById('seo-desc-count');
+      var previewUrl    = document.getElementById('seo-preview-url');
+      var previewTitle  = document.getElementById('seo-preview-title');
+      var previewDesc   = document.getElementById('seo-preview-desc');
+
+      function updateSummaryCount() {
+        if (!summaryEl || !summaryCount) return;
+        var len = summaryEl.value.length;
+        summaryCount.textContent = len + ' / 155 chars';
+        summaryCount.style.color = len > 155 ? '#dc2626' : '';
+      }
+
+      function updateWordCount() {
+        if (!bodyEl || !wordCountEl) return;
+        var text = bodyEl.value.trim();
+        var words = text ? text.split(/\s+/).filter(function (w) { return w.length > 0; }).length : 0;
+        if (words === 0) {
+          wordCountEl.textContent = '0 words';
+        } else {
+          var mins = Math.max(1, Math.ceil(words / 200));
+          wordCountEl.textContent = words + ' words · ' + mins + ' min read';
+        }
+      }
+
+      function updateSeoPreview() {
+        if (previewUrl) {
+          var slug = slugEl ? slugEl.value.trim() : '';
+          previewUrl.textContent = 'degreewiki.com › guides' + (slug ? ' › ' + slug : ' › …');
+        }
+        if (previewTitle) {
+          var t = (seoTitleEl && seoTitleEl.value.trim()) || (titleEl && titleEl.value.trim()) || 'Article title';
+          previewTitle.textContent = t.length > 70 ? t.slice(0, 70) + '…' : t;
+        }
+        if (previewDesc) {
+          var d = (seoDescEl && seoDescEl.value.trim()) || (summaryEl && summaryEl.value.trim()) || 'Article description…';
+          previewDesc.textContent = d.length > 160 ? d.slice(0, 160) + '…' : d;
+        }
+        if (seoTitleCount && seoTitleEl) {
+          var tLen = seoTitleEl.value.length;
+          seoTitleCount.textContent = tLen + ' / 60';
+          seoTitleCount.style.color = tLen > 60 ? '#dc2626' : tLen >= 50 ? '#16a34a' : '';
+        }
+        if (seoDescCount && seoDescEl) {
+          var dLen = seoDescEl.value.length;
+          seoDescCount.textContent = dLen + ' / 160';
+          seoDescCount.style.color = dLen > 160 ? '#dc2626' : dLen >= 120 ? '#16a34a' : '';
+        }
+      }
+
+      if (summaryEl) summaryEl.addEventListener('input', updateSummaryCount);
+      if (bodyEl) bodyEl.addEventListener('input', updateWordCount);
+      [titleEl, slugEl, seoTitleEl, seoDescEl, summaryEl].forEach(function (el) {
+        if (el) el.addEventListener('input', updateSeoPreview);
+      });
+
+      document.querySelectorAll('[data-template]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var key = btn.getAttribute('data-template');
+          var tpl = WRITING_TEMPLATES[key];
+          if (!tpl || !bodyEl) return;
+          if (bodyEl.value.trim() && !confirm('Replace existing body content with this template?')) return;
+          bodyEl.value = tpl;
+          bodyEl.dispatchEvent(new Event('input'));
+          bodyEl.focus();
+        });
+      });
+
+      updateSummaryCount();
+      updateWordCount();
+      updateSeoPreview();
+    })();
+  </script>
 </AdminLayout>
