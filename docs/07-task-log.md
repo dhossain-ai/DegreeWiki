@@ -31,6 +31,202 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-24 - Phase 63: Saved Programs MVP
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Make the public program Save button real using the existing `public.saved_items` table.
+- Avoid database migrations, service role usage, RLS bypasses, new dependencies, and admin/import/AI changes.
+
+Files added:
+- `src/components/public/SavedProgramEnhancement.astro`
+- `src/pages/api/saved-items/program.ts`
+- `src/pages/account/saved-programs.astro`
+
+Files modified:
+- `src/components/public/cards/ProgramCard.astro`
+- `src/pages/index.astro`
+- `src/pages/programs/index.astro`
+- `src/pages/programs/[slug].astro`
+- `src/pages/account.astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Added authenticated `POST`/`DELETE` API at `/api/saved-items/program`.
+- API validates JSON body and UUID-shaped `program_id`, requires `supabase.auth.getUser()`, verifies the program exists with `content_status = 'published'` before saving, then writes `saved_items` with `user_id = user.id`, `entity_type = 'program'`, and `entity_id = program_id`.
+- Duplicate saves are idempotent through the existing unique constraint and `upsert(..., ignoreDuplicates: true)`.
+- Deletes are scoped to the current user's `saved_items` row and are idempotent.
+- Updated `ProgramCard` Save controls with saved/auth/login data attributes and accessible Save/Saved state.
+- Added a shared safe client enhancement that uses `querySelectorAll`, `dataset`, `classList`, `textContent`, `addEventListener`, and `fetch`; anonymous clicks route to sign-in with a return URL.
+- `/programs`, homepage featured programs, and `/programs/[slug]` now load initial saved state server-side for signed-in users using only visible published program IDs.
+- `/programs/[slug]` now includes a page-level Save/Saved button in the "Apply and verify" panel.
+- `/account` now shows a saved-program count and link.
+- Added `/account/saved-programs`, listing the current user's saved published programs with existing `ProgramCard` UI.
+
+Safety:
+- No migration.
+- No new dependency.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No `set:html`.
+- No `innerHTML`.
+- No admin changes.
+- No AI/import changes.
+- API does not expose raw Supabase errors publicly.
+- API does not allow saving unpublished/nonexistent programs through the app path.
+
+Validation:
+- `npm run build`: PASS.
+- Security grep checks for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS on modified source files.
+
+## 2026-06-24 - Phase 62C: Program Compare UX Fix
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Clarify the public program compare workflow so users understand that compare needs 2-4 programs.
+- Fix the one-program direct compare state so it no longer says there are no published programs to compare.
+
+Files modified:
+- `src/pages/programs/index.astro`
+- `src/pages/programs/compare.astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Updated the `/programs` local compare enhancement so compare controls behave as toggle buttons when JS is available and do not navigate on the first click.
+- The compare tray now shows "Selected for comparison", selected count, available selected titles, a clear action, and guidance to select 2-4 programs.
+- The "Compare programs" action stays inactive until 2-4 programs are selected, then navigates to `/programs/compare?ids=id1,id2`.
+- Selection remains capped at 4 programs, with a clear message when users try to add a fifth.
+- Fixed the browser and server UUID validators used by compare from the inherited malformed pattern to the full UUID shape.
+- Updated `/programs/compare` so exactly one valid published program shows "1 program selected. Add one more program to compare.", keeps the selected program visible, and links back to browse programs.
+- Updated the zero-valid-program state to say "No valid published programs found." and explain that invalid, unpublished, or unavailable IDs may have been ignored.
+- The compare page still fetches only `content_status = published`, limits input to the first 4 valid-looking IDs, ignores invalid UUIDs safely, and renders missing fields as `Not listed.`.
+
+Safety:
+- No migrations.
+- No new dependencies.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient` in modified public files.
+- No admin changes.
+- No AI feature changes.
+- No import/staging changes.
+- No large architecture change.
+
+Validation:
+- `npm run build`: PASS.
+- `rg -n "innerHTML"` on modified source files: no matches.
+- `rg -n "set:html"` on modified source files: no matches.
+- `rg -n "service_role"` on modified source files: no matches.
+- `rg -n "SERVICE_ROLE"` on modified source files: no matches.
+- `rg -n "createServiceClient"` on modified source files: no matches.
+
+## 2026-06-24 - Phase 62B: Public Navigation + Program Compare Bugfix
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Fix the visible-but-nonfunctional public program compare control before committing Phase 62.
+- Fix the public Destinations menu/footer link opening a 404.
+
+Files added:
+- `src/pages/programs/compare.astro`
+- `src/pages/destinations/index.astro`
+
+Files modified:
+- `src/components/public/cards/ProgramCard.astro`
+- `src/pages/programs/index.astro`
+- `src/pages/programs/[slug].astro`
+- `src/pages/index.astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Added real compare metadata and fallback hrefs to `ProgramCard`, with `programId` passed from the program listing, homepage featured programs, and related program cards.
+- Added a small anonymous client-side compare enhancement on `/programs` using `localStorage`, `dataset`, `classList`, `textContent`, and `URLSearchParams` only.
+- The compare tray appears once programs are selected, enables navigation when at least 2 programs are selected, stores up to 4 selected IDs, and prevents selecting more than 4 with a friendly message.
+- Added `/programs/compare?ids=id1,id2,id3,id4`, which validates UUIDs, limits to 4 IDs, fetches only `content_status = published` programs, reorders results to the requested order, and shows missing fields as `Not listed`.
+- The compare page includes title, university, country/city, degree level, subject, tuition, duration, language, study mode, delivery mode, deadline/intake, verification status, and official/application links when available.
+- Added `/destinations`, which lists published `is_destination_enabled` countries using existing country cover image data and links each card to the existing `/programs?country=...` public route.
+
+Safety:
+- No migrations.
+- No new dependencies.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient` in modified public files.
+- No admin form changes.
+- No AI feature changes.
+- No import/staging changes.
+- No raw DB errors exposed publicly.
+
+Validation:
+- `npm run build`: PASS.
+- `rg -n "innerHTML"` on modified source files: no matches.
+- `rg -n "set:html"` on modified source files: no matches.
+- `rg -n "service_role"` on modified source files: no matches.
+- `rg -n "SERVICE_ROLE"` on modified source files: no matches.
+- `rg -n "createServiceClient"` on modified source files: no matches.
+
+Notes:
+- The compare flow is intentionally anonymous and browser-local; it does not add saved compares, accounts, tables, or server writes.
+- `/destinations` uses the lowest-risk route fix because the header and footer already point to that public path.
+
+## 2026-06-24 - Phase 62: Public Program Discovery UX Bundle
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Improve public program discovery UX because programs are the core DegreeWiki content type.
+- Upgrade `/programs`, `ProgramCard`, and `/programs/[slug]` using only existing schema, existing data, and existing components.
+
+Files modified:
+- `src/pages/programs/index.astro`
+- `src/pages/programs/[slug].astro`
+- `src/components/public/cards/ProgramCard.astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Reworked `/programs` with a stronger discovery hero, browse-universities / guides CTAs, a Fit Finder panel, better helper copy, and quick browse entry points for degree levels, subjects, and destinations.
+- Kept the existing SSR/RLS query pattern and expanded the public-safe filters already implied by the page state so city, university, and delivery mode are now exposed in the UI alongside keyword, degree level, subject, country, language, study mode, and max tuition.
+- Added safer list-state handling on `/programs`: server-side query errors still log internally, while the public page now shows friendly fallback copy instead of raw failures; no unpublished rows are exposed.
+- Expanded list-card usage so program cards now show duration, explicit verification labels for verified/partially verified records, and last-checked trust context when available.
+- Extended `ProgramCard.astro` with `verificationLabel` and `verificationTone` props so public pages can distinguish verified vs partially verified without changing saved/compare affordances.
+- Rebuilt `/programs/[slug]` around earlier decision-making context: tuition, duration, language, next intake/deadline, official/apply actions, and verification state now surface much higher on the page.
+- Added a wider detail layout with optional university cover media, a sticky key-facts rail, SourceBox trust display, Fit Finder CTA, and sectioned content for admissions, tuition/fees, intakes, curriculum, and career outcomes.
+- Added a cheap related-programs section that reuses existing published data only, preferring same-subject matches and falling back to same university or country context without introducing new tables or architecture changes.
+
+Safety:
+- No migrations.
+- No new dependencies.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient` in modified public files.
+- No admin form changes.
+- No AI feature expansion.
+- No import/staging changes.
+- No raw DB/provider errors exposed publicly.
+
+Validation:
+- `npm run build`: PASS.
+- `rg -n "innerHTML"` on modified source files: no matches.
+- `rg -n "set:html"` on modified source files: no matches.
+- `rg -n "service_role"` on modified source files: no matches.
+- `rg -n "SERVICE_ROLE"` on modified source files: no matches.
+- `rg -n "createServiceClient"` on modified source files: no matches.
+
+Notes:
+- Related programs stay intentionally cheap and conservative so the phase does not drift into major query architecture work.
+- Verification labels are only surfaced on list cards for public-safe published records where the existing verification status is already meaningful.
+
 ## 2026-06-24 - Phase 61: Guide Discovery UX + Safe Article Markdown Rendering
 
 Tool:
