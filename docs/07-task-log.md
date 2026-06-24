@@ -971,6 +971,57 @@ Deferred:
 - Markdown/rich-text body preview.
 - Slug auto-generation on title keystroke (currently server-side only on POST).
 
+## 2026-06-24 - Phase 64: Public University + Scholarship UX Bundle
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Improve public university and scholarship listing/detail UX using existing schema, existing components, existing data, and bounded public-safe queries only.
+
+Files modified:
+- `src/pages/universities/index.astro`
+- `src/pages/universities/[slug].astro`
+- `src/pages/scholarships/index.astro`
+- `src/pages/scholarships/[slug].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+University UX changes:
+- Rebuilt `/universities` around a wider information-first discovery header with program search and scholarship paths, Fit Finder CTA, summary cards, sticky country/city filters, active chips, richer empty states, and denser university result cards.
+- University cards now show logo/monogram, location, verification badge, source-checked date, official link, and a bounded published program count for currently visible universities.
+- Rebuilt `/universities/[slug]` with logo/cover support, official action panel, sticky key facts, SourceBox, Fit Finder CTA, resilient empty-detail fallback, and a related published-program sample from `programs.university_id`.
+- Did not add institution type or ownership UI because those columns are absent from the current `universities` schema.
+
+Scholarship UX changes:
+- Rebuilt `/scholarships` around a wider discovery header, Fit Finder CTA, sticky filters, active chips, richer empty state, and information-dense scholarship cards.
+- Scholarship cards now show provider, amount, deadline, funding/application classification, verification/source date, host countries, degree levels, and eligibility summary when available.
+- Rebuilt `/scholarships/[slug]` with logo/cover support, apply/verify action panel, sticky key facts, SourceBox, Fit Finder CTA, relationship-backed applies-to sections, nationality notes, and linked published programs.
+- Related university/program data is filtered before rendering so draft/unpublished related records do not appear publicly.
+
+Security and scope:
+- No migration.
+- No new dependency.
+- No `set:html` or `innerHTML`.
+- No service role or `createServiceClient`.
+- No admin, import/staging, or AI feature changes.
+- All public primary entity queries still require `content_status = 'published'`.
+- Related program samples are bounded and filtered to published records before rendering.
+
+Validation:
+- `npm run build`: PASS.
+- Security greps for modified source files:
+  - `innerHTML`: none.
+  - `set:html`: none.
+  - `service_role`: none.
+  - `SERVICE_ROLE`: none.
+  - `createServiceClient`: none.
+
+Deferred:
+- Saved universities/scholarships and compare flows remain out of scope.
+- New university ownership/type filters remain deferred because the schema has no such columns.
+- Scholarship country/degree filters remain deferred because listing filters were limited to existing scalar filter controls already present on the page.
+
 ## Current / Open Notes
 
 - Cloudinary account must be configured for SHA-256 signatures (or set CLOUDINARY_SIGNATURE_ALGORITHM=sha1 as fallback).
