@@ -31,11 +31,12 @@ type LatestPreview = {
 
 let profileExists = false
 let savedCount = 0
+let savedProgramCount = 0
 let latestResult: LatestResult | null = null
 let latestPreview: LatestPreview | null = null
 let hasConversationHistory = false
 
-const [profileResult, savedCountResult, latestResultResult] = await Promise.all([
+const [profileResult, savedCountResult, savedProgramCountResult, latestResultResult] = await Promise.all([
   supabase
     .from('student_profiles')
     .select('id')
@@ -45,6 +46,11 @@ const [profileResult, savedCountResult, latestResultResult] = await Promise.all(
   supabase
     .from('ai_finder_results')
     .select('id', { count: 'exact', head: true }),
+  supabase
+    .from('saved_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('entity_type', 'program'),
   supabase
     .from('ai_finder_results')
     .select('id, created_at, result_status, shortlist_count, ai_explanation')
@@ -63,6 +69,12 @@ if (savedCountResult.error) {
   console.error('account: ai_finder_results count error:', savedCountResult.error.message)
 } else {
   savedCount = savedCountResult.count ?? 0
+}
+
+if (savedProgramCountResult.error) {
+  console.error('account: saved_items program count error:', savedProgramCountResult.error.message)
+} else {
+  savedProgramCount = savedProgramCountResult.count ?? 0
 }
 
 if (latestResultResult.error) {
@@ -132,6 +144,7 @@ function formatDate(iso: string): string {
 }
 
 const savedLabel = savedCount === 1 ? '1 saved result' : `${savedCount} saved results`
+const savedProgramLabel = savedProgramCount === 1 ? '1 saved program' : `${savedProgramCount} saved programs`
 const latestResultIsUsable = !!latestResult &&
   latestResult.result_status === 'complete' &&
   latestResult.shortlist_count > 0
@@ -177,7 +190,7 @@ const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI abo
 
     <section class="mb-8">
       <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Your status</h2>
-      <div class="grid gap-4 md:grid-cols-3">
+      <div class="grid gap-4 md:grid-cols-4">
         <article class="rounded-xl border border-gray-200 bg-white p-5">
           <p class="text-sm font-medium text-gray-900 mb-1">Fit Finder profile</p>
           <p class="text-sm text-gray-600 mb-4">
@@ -193,6 +206,14 @@ const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI abo
           <p class="text-sm text-gray-600 mb-4">{savedLabel}</p>
           <a href="/fit-finder/results" class="text-sm font-medium text-blue-600 hover:underline">
             View saved results →
+          </a>
+        </article>
+
+        <article class="rounded-xl border border-gray-200 bg-white p-5">
+          <p class="text-sm font-medium text-gray-900 mb-1">Saved programs</p>
+          <p class="text-sm text-gray-600 mb-4">{savedProgramLabel}</p>
+          <a href="/account/saved-programs" class="text-sm font-medium text-blue-600 hover:underline">
+            View saved programs →
           </a>
         </article>
 
@@ -313,6 +334,10 @@ const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI abo
         <div class="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden bg-white">
           <a href="/programs" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
             <p class="text-sm font-medium text-gray-900">Browse programs</p>
+            <span class="text-gray-400 text-sm">&rarr;</span>
+          </a>
+          <a href="/account/saved-programs" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
+            <p class="text-sm font-medium text-gray-900">Saved programs</p>
             <span class="text-gray-400 text-sm">&rarr;</span>
           </a>
           <a href="/guides" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
