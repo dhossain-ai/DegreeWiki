@@ -7,12 +7,12 @@ Last updated: 2026-06-24
 
 ## Current Phase
 
-Phase 61 - Guide Discovery UX + Safe Article Markdown Rendering - complete.
-This phase adds a small internal safe article renderer for public guides with escaped Astro output for headings, paragraphs, lists, bold, simple italics, and safe `http/https` links, so public guide pages no longer show raw Markdown markers. It also improves `/guides` discovery UX with a stronger hero, quick topic browsing, latest-guides highlights, clearer result hierarchy, and a stronger card CTA. No migration, no new dependencies, no `set:html`, no `innerHTML`, and no service role in any public page or component.
+Phase 63 - Saved Programs MVP - complete.
+Saved program actions now use the existing `public.saved_items` table from migration 013 with no database migration. Program cards and the program detail page expose real Save/Saved behavior: anonymous users are routed to sign in with a return URL, and signed-in users can save/unsave published programs through a small authenticated API. The API validates UUID input, verifies `programs.content_status = 'published'` before saving, uses the SSR Supabase client only, and relies on existing owner-only RLS. `/account` now shows a saved-program count and links to `/account/saved-programs`, which lists the current user's saved published programs. No new dependency, no `set:html`, no `innerHTML`, no service role, no RLS bypass, and no admin/import/AI changes.
 
 Current branch / git status note:
 - Branch: `main`
-- Working tree has untracked data directories only.
+- Working tree contains uncommitted Phase 62/62B/62C and Phase 63 source/docs changes pending review.
 
 ## Current Product Summary
 
@@ -43,6 +43,10 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 63: saved programs MVP; uses existing `saved_items` owner-only RLS table, adds authenticated `/api/saved-items/program` POST/DELETE, validates published programs before saving, wires ProgramCard/home/program listing/program detail save states, and adds `/account/saved-programs`. No migration, no new dependency, no service role, no RLS bypass, and no admin/import/AI changes.
+- Phase 62C: program compare UX fix; `/programs` compare buttons now behave as JS-enhanced toggles into a local tray, the tray shows selected count/title context and activates "Compare programs" only with 2-4 programs, selection remains capped at 4, `/programs/compare` now handles exactly one valid published program with a helpful "Add one more program to compare" state, zero valid IDs with a "No valid published programs found" state, invalid UUIDs safely ignored, and missing fields rendered as `Not listed.`. No migrations, no new dependencies, no unsafe HTML APIs, no service role, and no admin/import/AI changes.
+- Phase 62B: public navigation + program compare bugfix; `ProgramCard` compare controls now carry real compare links/metadata, `/programs` has a small localStorage compare tray that allows 2-4 selected published programs and prevents more than 4, `/programs/compare` renders a safe public comparison page from existing published data only, and `/destinations` now lists published destination-enabled countries instead of the public menu opening a 404. No migrations, no new dependencies, no unsafe HTML APIs, no service role, and no admin/import/AI changes.
+- Phase 62: public program discovery UX bundle; `/programs` now has a stronger discovery hero, broader existing-field filters (including city, university, and delivery mode), quick browse entry points, improved safe empty/error states, clearer verification display, and a Fit Finder CTA. `ProgramCard` now supports explicit public verification labels, and `/programs/[slug]` now surfaces tuition/duration/language/intake earlier, shows official/apply actions sooner, uses a sticky key-facts rail plus SourceBox and Fit Finder, and adds cheap related programs from existing published data only. No migrations, no new dependencies.
 - Phase 61: guide discovery UX + safe article Markdown rendering; public guide bodies now render a safe internal Markdown subset (h2/h3/h4, paragraphs, ordered/unordered lists, bold, simple italics, safe external links) without `set:html`/`innerHTML`; `/guides` now has an improved hero, quick category browsing, latest-guide highlights, better empty state, and clearer guide card affordances. No migrations, no new dependencies.
 - Phase 60: Public article UX + SEO rendering; seo_h1 wired as H1; last_verified_at wired into SourceBox; reading time computed server-side and shown in article header; summary moved to header as lede; FitFinderMiniPanel CTA added; related articles by same category added; og:type="article" set; article:published_time/article:modified_time meta tags added to BaseLayout. No migrations, no new dependencies.
 - Phase 59: Article authoring UX; two-column layout; six SEO fields surfaced (seo_title/description/h1, og_title/description, canonical_url); live word count + reading time; summary char counter; SEO search preview; writing template buttons; Save and Publish action; data quality scores read-only in edit form. No migrations, no new dependencies.
@@ -60,7 +64,7 @@ Current branch / git status note:
 
 ## Known Active Issues
 
-- Country/city/subject standalone public pages do not exist — image rendering for those entities is deferred until routes are built.
+- Standalone country/city/subject detail pages do not exist — `/destinations` now lists destination countries, while deeper entity detail pages remain deferred.
 - Cloudinary hard-delete (destroy API) not yet implemented.
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
