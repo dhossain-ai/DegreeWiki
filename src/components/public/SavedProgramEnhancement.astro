@@ -1,0 +1,95 @@
+<script>
+  (() => {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const buttons = Array.from(document.querySelectorAll('[data-save-program-button]'))
+
+    if (buttons.length === 0) return
+
+    function setSavedState(button, saved) {
+      button.dataset.saved = saved ? 'true' : 'false'
+      button.setAttribute('aria-pressed', saved ? 'true' : 'false')
+      button.setAttribute('aria-label', saved ? 'Remove from saved programs' : 'Save program')
+      button.classList.toggle('text-primary', saved)
+      button.classList.toggle('bg-primary-surface', saved)
+      button.classList.toggle('border-primary', saved)
+      button.classList.toggle('text-ink-secondary', !saved)
+      button.classList.toggle('bg-surface', !saved)
+      button.classList.toggle('border-edge', !saved)
+
+      const icon = button.querySelector('[data-save-icon]')
+      if (icon) icon.setAttribute('fill', saved ? 'currentColor' : 'none')
+
+      const label = button.querySelector('[data-save-label]')
+      if (label) label.textContent = saved ? 'Saved' : 'Save'
+    }
+
+    function setBusy(button, busy) {
+      button.disabled = busy
+      button.classList.toggle('opacity-60', busy)
+      button.classList.toggle('cursor-wait', busy)
+    }
+
+    function showTemporaryLabel(button, message) {
+      const label = button.querySelector('[data-save-label]')
+      if (!label) return
+
+      const saved = button.dataset.saved === 'true'
+      label.textContent = message
+      window.setTimeout(() => {
+        label.textContent = saved ? 'Saved' : 'Save'
+      }, 1800)
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', async () => {
+        const loginHref = button.dataset.saveLoginHref || '/login'
+        const isAuthenticated = button.dataset.saveAuthenticated === 'true'
+
+        if (!isAuthenticated) {
+          window.location.href = loginHref
+          return
+        }
+
+        const programId = button.dataset.programId || ''
+        if (!UUID_RE.test(programId)) {
+          showTemporaryLabel(button, 'Unavailable')
+          return
+        }
+
+        const wasSaved = button.dataset.saved === 'true'
+        setBusy(button, true)
+
+        try {
+          const response = await fetch('/api/saved-items/program', {
+            method: wasSaved ? 'DELETE' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ program_id: programId }),
+          })
+
+          if (response.status === 401) {
+            window.location.href = loginHref
+            return
+          }
+
+          let data = null
+          try {
+            data = await response.json()
+          } catch {
+            data = null
+          }
+
+          if (!response.ok || !data || data.ok !== true) {
+            showTemporaryLabel(button, response.status === 404 ? 'Unavailable' : 'Try again')
+            return
+          }
+
+          setSavedState(button, data.saved === true)
+        } catch {
+          showTemporaryLabel(button, 'Try again')
+        } finally {
+          setBusy(button, false)
+        }
+      })
+    })
+  })()
+</script>
