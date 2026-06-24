@@ -3,6 +3,7 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
+import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
@@ -35,6 +36,7 @@ let query = supabase
   .from('universities')
   .select(
     `id, name, slug, official_url, ranking_summary, countries(name), cities(name),
+     verification_status, last_verified_at, source_confidence_score,
      logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)`,
     { count: 'exact' }
   )
@@ -52,6 +54,28 @@ if (error) console.error('universities list error:', error.message)
 const allRows   = data ?? []
 const overLimit = (count ?? allRows.length) > 200
 const rows      = allRows.slice(0, 200)
+const resultCount = count ?? rows.length
+
+const visibleUniversityIds = rows.map((u: any) => u.id).filter(Boolean)
+let programCountByUniversity = new Map<string, number>()
+
+if (visibleUniversityIds.length > 0) {
+  const { data: programRows, error: programCountError } = await supabase
+    .from('programs')
+    .select('university_id')
+    .eq('content_status', 'published')
+    .in('university_id', visibleUniversityIds)
+    .limit(5000)
+
+  if (programCountError) {
+    console.error('universities program count error:', programCountError.message)
+  } else {
+    programRows?.forEach((row: any) => {
+      if (!row.university_id) return
+      programCountByUniversity.set(row.university_id, (programCountByUniversity.get(row.university_id) ?? 0) + 1)
+    })
+  }
+}
 
 function buildUrlWithout(param: string): string {
   const params = new URLSearchParams(Astro.url.searchParams)
@@ -63,6 +87,17 @@ function buildUrlWithout(param: string): string {
 function uniInitials(name: string): string {
   const caps = name.split(/\s+/).map((w: string) => w[0]?.toUpperCase() ?? '').filter(Boolean)
   return caps.slice(0, 2).join('') || name.slice(0, 2).toUpperCase()
+}
+
+function formatShortDate(d: string | null): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function getVerificationInfo(status: string | null | undefined): { label: string; variant: 'verified' | 'neutral' } | null {
+  if (status === 'verified') return { label: 'Verified', variant: 'verified' }
+  if (status === 'partially_verified') return { label: 'Partially verified', variant: 'neutral' }
+  return null
 }
 
 type FilterChip = { key: string; label: string; removeHref: string }
@@ -78,30 +113,66 @@ if (cityId) {
 }
 
 const flabel  = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
-const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-primary'
+const fselect = 'w-full rounded-[10px] border border-edge bg-surface px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-primary'
+const headlineCount = error ? '200+' : overLimit ? '200+' : resultCount.toLocaleString()
 ---
 
-<PublicLayout title="Universities — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/universities'}>
+<PublicLayout
+  title="Universities — DegreeWiki"
+  description="Browse published university profiles with locations, official links, available program counts, and source-aware verification details."
+  noindex={hasFilters}
+  canonical={SITE_URL + '/universities'}
+>
 
-  <!-- Page header band -->
   <div class="bg-surface border-b border-edge">
-    <Container width="default" class="py-7 sm:py-8">
-      <h1 class="text-[28px] sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
-        Universities
-      </h1>
-      <p class="mt-1.5 text-base text-muted">Search and compare universities worldwide.</p>
+    <Container width="wide" class="py-8 sm:py-10">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.08em] text-primary mb-3">University discovery</p>
+          <h1 class="text-[30px] sm:text-[38px] font-bold text-ink tracking-[-0.03em] leading-tight">
+            Find published universities with practical facts, program links, and source context.
+          </h1>
+          <p class="mt-3 max-w-2xl text-base sm:text-[17px] text-ink-secondary leading-relaxed">
+            Search by university name, country, or city. Profiles show official links and verification details when DegreeWiki has them.
+          </p>
+
+          <div class="mt-5 flex flex-wrap gap-3">
+            <a href="/programs" class="inline-flex items-center justify-center rounded-[10px] bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-hover transition-colors">
+              Browse programs
+            </a>
+            <a href="/scholarships" class="inline-flex items-center justify-center rounded-[10px] border border-edge bg-canvas px-5 py-3 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary transition-colors">
+              Explore scholarships
+            </a>
+          </div>
+
+          <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3">
+              <p class="text-[22px] font-bold text-ink leading-none">{headlineCount}</p>
+              <p class="mt-1 text-xs text-muted">{hasFilters ? 'Universities in view' : 'Published universities'}</p>
+            </div>
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3">
+              <p class="text-[22px] font-bold text-ink leading-none">{countries.length.toLocaleString()}</p>
+              <p class="mt-1 text-xs text-muted">Destination countries</p>
+            </div>
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3 col-span-2 sm:col-span-1">
+              <p class="text-[22px] font-bold text-ink leading-none">{cities.length.toLocaleString()}</p>
+              <p class="mt-1 text-xs text-muted">Cities in filters</p>
+            </div>
+          </div>
+        </div>
+
+        <FitFinderMiniPanel class="h-full" />
+      </div>
     </Container>
   </div>
 
-  <!-- Main content -->
   <div class="bg-canvas min-h-[60vh]">
-    <Container width="default" class="py-6 sm:py-8">
+    <Container width="wide" class="py-6 sm:py-8">
 
       <form method="get" action="/universities">
-
-        <!-- Keyword search bar -->
-        <div class="flex gap-2.5 mb-4">
-          <div class="relative flex-1">
+        <div class="rounded-2xl border border-edge bg-surface p-4 sm:p-5 mb-6">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div class="relative flex-1">
             <label for="q" class="sr-only">Search universities</label>
             <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
                  viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -111,27 +182,50 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
             <input
               id="q" name="q" type="search"
               value={q ?? ''}
-              placeholder="Search by university name…"
-              class="w-full h-[44px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface
+              placeholder="Search by university name"
+              class="w-full h-[46px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface
                      text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary"
             />
           </div>
-          <button type="submit"
-                  class="h-[44px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px]
+
+            <div class="flex gap-2.5">
+              <button type="submit"
+                  class="h-[46px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px]
                          hover:bg-primary-hover transition-colors flex-none">
-            Search
-          </button>
-          {hasFilters && (
-            <a href="/universities"
-               class="h-[44px] px-4 inline-flex items-center text-[13.5px] font-medium text-ink-secondary
-                      border border-edge rounded-[10px] hover:bg-surface transition-colors flex-none">
-              Clear all
-            </a>
+                Search
+              </button>
+              {hasFilters && (
+                <a href="/universities"
+                   class="h-[46px] px-4 inline-flex items-center justify-center text-[13.5px] font-medium text-ink-secondary
+                          border border-edge rounded-[10px] hover:bg-canvas transition-colors flex-none">
+                  Clear all
+                </a>
+              )}
+            </div>
+          </div>
+
+          {activeChips.length > 0 && (
+            <div class="flex flex-wrap gap-2 mt-4" aria-label="Active filters">
+              {activeChips.map(chip => (
+                <a href={chip.removeHref}
+                   class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border
+                          text-primary text-sm font-medium rounded-full hover:bg-primary-border transition-colors">
+                  {chip.label}
+                  <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
+                </a>
+              ))}
+            </div>
           )}
         </div>
 
-        <!-- Filter panel -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 mb-4 bg-surface border border-edge rounded-xl">
+        <div class="flex flex-col md:flex-row gap-5 md:gap-8">
+          <aside class="w-full md:w-72 lg:w-80 md:flex-none md:sticky md:top-[88px] md:self-start" aria-label="University filters">
+            <div class="bg-surface border border-edge rounded-2xl p-4">
+              <div class="flex items-center justify-between mb-4">
+                <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Filters</span>
+                {hasFilters && <a href="/universities" class="text-xs text-primary hover:underline">Clear all</a>}
+              </div>
+              <div class="space-y-4">
           <div>
             <label for="country" class={flabel}>Country</label>
             <select id="country" name="country" class={fselect}>
@@ -150,105 +244,129 @@ const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
               ))}
             </select>
           </div>
-          <div class="sm:col-span-2 flex justify-end">
+              </div>
             <button type="submit"
-                    class="h-[36px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px]
+                    class="mt-4 w-full h-[42px] bg-primary text-white text-sm font-semibold rounded-[10px]
                            hover:bg-primary-hover transition-colors">
               Apply filters
             </button>
-          </div>
-        </div>
+            </div>
+          </aside>
 
-      </form>
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-col gap-2 mb-5">
+              <h2 class="text-lg font-semibold text-ink">University results</h2>
+              {error ? (
+                <p class="text-sm text-muted">University listings are temporarily unavailable. Please try again shortly.</p>
+              ) : overLimit ? (
+                <p class="text-sm text-muted">
+                  Showing the first <span class="font-semibold text-ink">200</span> universities. Narrow the filters to get a more focused list.
+                </p>
+              ) : rows.length > 0 ? (
+                <p class="text-sm text-muted">
+                  <span class="font-semibold text-ink">{resultCount.toLocaleString()}</span>
+                  {resultCount === 1 ? ' university matches your search.' : ' universities match your search.'}
+                </p>
+              ) : (
+                <p class="text-sm text-muted">No universities match the current view.</p>
+              )}
+            </div>
 
-      <!-- Active filter chips -->
-      {activeChips.length > 0 && (
-        <div class="flex flex-wrap gap-2 mb-5" aria-label="Active filters">
-          {activeChips.map(chip => (
-            <a href={chip.removeHref}
-               class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border
-                      text-primary text-sm font-medium rounded-full hover:bg-primary-border transition-colors">
-              {chip.label}
-              <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
-            </a>
-          ))}
-        </div>
-      )}
-
-      <!-- Results count -->
-      {overLimit ? (
-        <p class="text-sm text-muted mb-4">
-          Showing 200 of {(count ?? 200).toLocaleString()} universities. Narrow your search to see more.
-        </p>
-      ) : rows.length > 0 ? (
-        <p class="text-sm text-muted mb-4">
-          {rows.length} {rows.length === 1 ? 'university' : 'universities'} found.
-        </p>
-      ) : null}
-
-      <!-- Results list -->
-      {rows.length === 0 ? (
-        <div class="text-center py-16 rounded-xl border border-edge bg-surface">
-          <p class="text-base font-medium text-ink mb-2">
-            {hasFilters ? 'No universities match your filters.' : 'No universities have been published yet.'}
-          </p>
-          {hasFilters && (
-            <a href="/universities" class="text-sm text-primary hover:text-primary-hover">
-              Clear filters and browse all
-            </a>
-          )}
-        </div>
-      ) : (
-        <ul class="space-y-2.5">
+            {rows.length === 0 ? (
+              <div class="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-edge rounded-2xl">
+                <h2 class="text-lg font-semibold text-ink mb-1.5">
+                  {hasFilters ? 'No universities match your filters' : 'No published universities yet'}
+                </h2>
+                <p class="text-sm text-muted mb-5 max-w-md leading-relaxed">
+                  {hasFilters
+                    ? 'Try a broader keyword, remove a location filter, or switch to program search if you are looking for a specific degree.'
+                    : 'Published university profiles will appear here with location, official links, and verification context.'}
+                </p>
+                <div class="flex flex-col sm:flex-row gap-3">
+                  {hasFilters && (
+                    <a href="/universities" class="inline-flex items-center justify-center h-[40px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px] hover:bg-primary-hover transition-colors">
+                      Clear all filters
+                    </a>
+                  )}
+                  <a href="/programs" class="inline-flex items-center justify-center h-[40px] px-5 border border-edge bg-surface text-sm font-semibold text-ink rounded-[9px] hover:border-primary/40 hover:text-primary transition-colors">
+                    Browse programs
+                  </a>
+                </div>
+              </div>
+            ) : (
+        <ul class="space-y-4">
           {rows.map((u: any) => {
-            const location = [u.countries?.name, u.cities?.name].filter(Boolean).join(', ')
+            const location = [u.cities?.name, u.countries?.name].filter(Boolean).join(', ')
             const initials = uniInitials(u.name)
+            const programCount = programCountByUniversity.get(u.id) ?? 0
+            const verification = getVerificationInfo(u.verification_status)
+            const sourceChecked = formatShortDate(u.last_verified_at)
             return (
-              <li class="flex gap-4 rounded-xl border border-edge bg-surface px-4 py-4
-                         hover:border-[#cbd5e1] hover:shadow-sm transition-all">
+              <li class="rounded-xl border border-edge bg-surface p-5 hover:border-[#cbd5e1] hover:shadow-sm transition-all">
+                <div class="flex flex-col gap-4 sm:flex-row">
                 {u.logo?.cloudinary_public_id ? (
-                  <div class="flex-none w-10 h-10 rounded-lg overflow-hidden border border-edge bg-surface">
+                  <div class="flex-none w-14 h-14 rounded-[10px] overflow-hidden border border-edge bg-surface">
                     <MediaImage
                       publicId={u.logo.cloudinary_public_id}
                       alt={u.logo.alt_text || u.logo.display_name || u.name}
-                      width={40}
-                      height={40}
+                      width={56}
+                      height={56}
                       crop="fill"
                       loading="lazy"
                       class="w-full h-full object-cover"
                     />
                   </div>
                 ) : (
-                  <div class="flex-none w-10 h-10 rounded-lg bg-primary-surface border border-primary-border
-                              flex items-center justify-center font-mono text-xs font-bold text-primary">
+                  <div class="flex-none w-14 h-14 rounded-[10px] bg-primary-surface border border-primary-border
+                              flex items-center justify-center font-mono text-sm font-bold text-primary">
                     {initials}
                   </div>
                 )}
                 <div class="min-w-0 flex-1">
                   <div class="flex items-start justify-between gap-4">
+                    <div>
+                      <a href={`/universities/${u.slug}`}
+                         class="text-[18px] font-semibold text-ink hover:text-primary leading-snug tracking-[-0.01em]">
+                        {u.name}
+                      </a>
+                      {location && <p class="text-sm text-ink-secondary mt-1">{location}</p>}
+                    </div>
                     <a href={`/universities/${u.slug}`}
-                       class="text-[15px] font-semibold text-ink hover:text-primary leading-snug">
-                      {u.name}
+                       class="hidden sm:inline-flex items-center justify-center rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors shrink-0">
+                      View profile
+                    </a>
+                  </div>
+
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {programCount > 0 && <Badge variant="info">{programCount} {programCount === 1 ? 'program' : 'programs'}</Badge>}
+                    {verification && <Badge variant={verification.variant}>{verification.label}</Badge>}
+                    {sourceChecked && <Badge variant="neutral">Source checked {sourceChecked}</Badge>}
+                  </div>
+
+                  {u.ranking_summary && (
+                    <p class="text-sm text-muted mt-3 line-clamp-2">{u.ranking_summary}</p>
+                  )}
+
+                  <div class="mt-4 flex flex-wrap gap-3 border-t border-edge-subtle pt-3">
+                    <a href={`/programs?university=${u.id}`} class="text-sm font-semibold text-primary hover:text-primary-hover">
+                      Browse programs at this university
                     </a>
                     {u.official_url && (
-                      <a href={u.official_url} target="_blank" rel="noopener noreferrer"
-                         class="text-xs text-muted hover:text-ink-secondary whitespace-nowrap shrink-0 mt-0.5">
+                      <a href={u.official_url} target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-ink-secondary hover:text-ink">
                         Official site ↗
                       </a>
                     )}
                   </div>
-                  {location && (
-                    <p class="text-sm text-muted mt-0.5">{location}</p>
-                  )}
-                  {u.ranking_summary && (
-                    <p class="text-xs text-muted mt-1.5 line-clamp-1">{u.ranking_summary}</p>
-                  )}
+                </div>
                 </div>
               </li>
             )
           })}
         </ul>
-      )}
+            )}
+          </div>
+        </div>
+      </form>
 
     </Container>
   </div>
