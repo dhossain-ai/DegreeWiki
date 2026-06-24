@@ -4,6 +4,9 @@ import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
+import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
+import ProgramCard from '../../components/public/cards/ProgramCard.astro'
+import SavedProgramEnhancement from '../../components/public/SavedProgramEnhancement.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 import { getPublicId, getAlt, getOgImageUrl } from '../../lib/public/media'
@@ -35,17 +38,22 @@ if (!university) {
 const u = university as any
 
 const VERIFICATION_MAP: Record<string, { label: string; variant: 'verified' | 'neutral' }> = {
-  verified:           { label: 'Verified',           variant: 'verified' },
-  partially_verified: { label: 'Partially Verified', variant: 'neutral'  },
-  source_conflict:    { label: 'Under Review',       variant: 'neutral'  },
-  outdated:           { label: 'Under Review',       variant: 'neutral'  },
-  needs_review:       { label: 'Under Review',       variant: 'neutral'  },
+  verified: { label: 'Verified', variant: 'verified' },
+  partially_verified: { label: 'Partially verified', variant: 'neutral' },
+  source_conflict: { label: 'Under review', variant: 'neutral' },
+  outdated: { label: 'May need updating', variant: 'neutral' },
+  needs_review: { label: 'Needs review', variant: 'neutral' },
 }
 const verInfo = VERIFICATION_MAP[u.verification_status] ?? null
 
-function formatDate(d: string | null): string | null {
+function formatDate(d: string | null | undefined): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+function formatShortDate(d: string | null | undefined): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 function uniInitials(name: string): string {
@@ -53,177 +61,290 @@ function uniInitials(name: string): string {
   return caps.slice(0, 2).join('') || name.slice(0, 2).toUpperCase()
 }
 
-const location      = [u.countries?.name, u.cities?.name].filter(Boolean).join(', ')
-const initials      = uniInitials(u.name)
+function abbreviateDegree(code: string | null | undefined, name: string | null | undefined): string | null {
+  if (!code && !name) return null
+  const c = (code ?? '').toLowerCase()
+  const n = (name ?? '').toLowerCase()
+  if (c === 'phd' || c === 'doctorate' || n.includes('phd') || n.includes('doctor')) return 'PhD'
+  if (c === 'mba' || n.includes('mba')) return 'MBA'
+  if (c === 'master' || n.includes('master')) return 'MSc'
+  if (c === 'bachelor' || n.includes('bachelor')) return 'BSc'
+  if (c === 'postgraduate' || n.includes('postgraduate')) return 'PG'
+  return name ?? null
+}
+
+function formatDuration(months: number | null | undefined): string | null {
+  if (!months) return null
+  if (months === 12) return '1 year'
+  if (months % 12 === 0) return `${months / 12} years`
+  return `${months} months`
+}
+
+function moneyPrefix(currency: string | null | undefined): string {
+  const cur = (currency ?? '').toUpperCase()
+  if (cur === 'EUR') return '€'
+  if (cur === 'USD') return '$'
+  if (cur === 'GBP') return '£'
+  return cur ? `${cur} ` : ''
+}
+
+function tuitionDisplay(p: any): { display: string | null; per: string | null } {
+  const min = p.tuition_min_amount
+  const max = p.tuition_max_amount
+  if (min == null && max == null) return { display: null, per: null }
+  const fmt = (n: number) => `${moneyPrefix(p.tuition_currency)}${Number(n).toLocaleString()}`
+  const display = min != null && max != null && min !== max ? `${fmt(min)}–${fmt(max)}` : fmt(min ?? max)
+  const per = p.tuition_period ? `per ${p.tuition_period.replace(/_/g, ' ')}` : 'per year'
+  return { display, per }
+}
+
+const location = [u.cities?.name, u.countries?.name].filter(Boolean).join(', ')
+const initials = uniInitials(u.name)
 const lastVerifiedAt = formatDate(u.last_verified_at)
-const pageTitle     = u.seo_title || u.name
-const pageDesc      = u.seo_description || u.ranking_summary || undefined
-const canonical     = u.canonical_url || `${SITE_URL}/universities/${slug}`
-const ogTitle       = u.og_title || pageTitle
-const ogDesc        = u.og_description || pageDesc
-const updatedAt     = formatDate(u.updated_at)
+const lastVerifiedShort = formatShortDate(u.last_verified_at)
+const pageTitle = u.seo_title || u.name
+const pageDesc = u.seo_description || u.ranking_summary || [u.name, location].filter(Boolean).join(' · ') || undefined
+const canonical = u.canonical_url || `${SITE_URL}/universities/${slug}`
+const ogTitle = u.og_title || pageTitle
+const ogDesc = u.og_description || pageDesc
+const updatedAt = formatDate(u.updated_at)
 
-const cloudName    = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 const logoPublicId = getPublicId(u.logo)
-const logoAlt      = getAlt(u.logo, u.name)
+const logoAlt = getAlt(u.logo, u.name)
 const coverPublicId = getPublicId(u.cover_image)
-const coverAlt      = getAlt(u.cover_image, `${u.name} campus`)
-const ogImageUrl   = getOgImageUrl(cloudName, u.og_image, u.cover_image ?? u.logo)
----
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc} ogImage={ogImageUrl ?? undefined}>
+const coverAlt = getAlt(u.cover_image, `${u.name} campus`)
+const ogImageUrl = getOgImageUrl(cloudName, u.og_image, u.cover_image ?? u.logo)
 
-  <!-- Page header band -->
+const { data: relatedProgramsData, error: relatedProgramsError } = await supabase
+  .from('programs')
+  .select(`
+    id, title, slug, duration_months, language_of_instruction,
+    tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+    verification_status, last_verified_at,
+    universities(
+      name, slug,
+      logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)
+    ),
+    degree_levels(name, code),
+    countries(name, iso2),
+    cities(name),
+    subjects!programs_primary_subject_id_fkey(name)
+  `)
+  .eq('content_status', 'published')
+  .eq('university_id', u.id)
+  .order('title')
+  .limit(3)
+
+if (relatedProgramsError) console.error('university related programs error:', relatedProgramsError.message)
+const relatedPrograms = relatedProgramsData ?? []
+const hasProfileContent = !!(u.overview || u.ranking_summary)
+---
+<PublicLayout
+  title={`${pageTitle} — DegreeWiki`}
+  description={pageDesc}
+  canonical={canonical}
+  ogTitle={ogTitle}
+  ogDescription={ogDesc}
+  ogImage={ogImageUrl ?? undefined}
+>
   <div class="bg-surface border-b border-edge">
-    <Container width="narrow" class="py-7 sm:py-8">
-      <a href="/universities"
-         class="inline-flex items-center gap-1 text-sm text-primary hover:text-primary-hover mb-4">
+    <Container width="wide" class="py-7 sm:py-9">
+      <a href="/universities" class="inline-flex items-center gap-1 text-sm text-primary hover:text-primary-hover mb-5">
         ← All Universities
       </a>
 
-      <div class="flex items-start gap-4">
-        <!-- Logo or monogram -->
-        {logoPublicId ? (
-          <div class="flex-none w-14 h-14 rounded-xl overflow-hidden border border-edge bg-surface">
-            <MediaImage
-              publicId={logoPublicId}
-              alt={logoAlt}
-              width={80}
-              height={80}
-              crop="fill"
-              loading="eager"
-              class="w-full h-full object-cover"
-            />
-          </div>
-        ) : (
-          <div class="flex-none w-14 h-14 rounded-xl bg-primary-surface border border-primary-border
-                      flex items-center justify-center font-mono text-sm font-bold text-primary">
-            {initials}
-          </div>
-        )}
-        <div class="min-w-0">
-          <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight mb-1">
-            {u.name}
-          </h1>
-          {location && (
-            <p class="text-base text-muted">{location}</p>
-          )}
-          {verInfo && (
-            <div class="mt-2">
-              <Badge variant={verInfo.variant}>{verInfo.label}</Badge>
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div class="flex items-start gap-4">
+          {logoPublicId ? (
+            <div class="flex-none w-16 h-16 rounded-xl overflow-hidden border border-edge bg-surface">
+              <MediaImage publicId={logoPublicId} alt={logoAlt} width={96} height={96} crop="fill" loading="eager" class="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div class="flex-none w-16 h-16 rounded-xl bg-primary-surface border border-primary-border flex items-center justify-center font-mono text-base font-bold text-primary">
+              {initials}
             </div>
           )}
+
+          <div class="min-w-0">
+            <h1 class="text-[30px] sm:text-[38px] font-bold text-ink tracking-[-0.03em] leading-tight">{u.name}</h1>
+            {location && <p class="mt-2 text-base text-ink-secondary">{location}</p>}
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              {verInfo && <Badge variant={verInfo.variant}>{verInfo.label}</Badge>}
+              {lastVerifiedShort && <Badge variant="neutral">Source checked {lastVerifiedShort}</Badge>}
+              {relatedPrograms.length > 0 && <Badge variant="info">Programs listed</Badge>}
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-edge bg-canvas p-5">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-3">Plan your next step</p>
+          <div class="flex flex-col gap-3">
+            <a href={`/programs?university=${u.id}`} class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-white text-sm font-semibold rounded-[10px] hover:bg-primary-hover transition-colors">
+              Browse programs
+            </a>
+            {u.official_url && (
+              <a href={u.official_url} target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-edge bg-surface text-ink-secondary text-sm font-semibold rounded-[10px] hover:border-primary/40 hover:text-ink transition-colors">
+                Official website ↗
+              </a>
+            )}
+            <p class="text-xs text-muted leading-relaxed">
+              Confirm admissions, fees, deadlines, and campus details directly with the university before applying.
+            </p>
+          </div>
         </div>
       </div>
     </Container>
   </div>
 
   {coverPublicId && (
-    <div class="bg-canvas">
-      <Container width="narrow" class="pt-6">
-        <MediaImage
-          publicId={coverPublicId}
-          alt={coverAlt}
-          width={1600}
-          height={600}
-          crop="fill"
-          loading="eager"
-          class="w-full rounded-xl object-cover"
-        />
+    <div class="bg-canvas border-b border-edge">
+      <Container width="wide" class="pt-6">
+        <MediaImage publicId={coverPublicId} alt={coverAlt} width={1600} height={640} crop="fill" loading="eager" class="w-full rounded-2xl object-cover" />
       </Container>
     </div>
   )}
 
-  <!-- Main content -->
   <div class="bg-canvas">
-    <Container width="narrow" class="py-7 sm:py-8">
+    <Container width="wide" class="py-7 sm:py-8">
+      <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div>
+          {hasProfileContent ? (
+            <div class="space-y-7">
+              {u.overview && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-3">Overview</h2>
+                  <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{u.overview}</p>
+                </section>
+              )}
 
-      <!-- Key facts panel -->
-      {(u.countries?.name || u.cities?.name || u.founded_year != null || u.student_count != null) && (
-        <div class="bg-surface border border-edge rounded-xl p-5 mb-7">
-          <h2 class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-4">
-            About this university
-          </h2>
-          <dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-            {u.countries?.name && (
-              <div>
-                <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Country</dt>
-                <dd class="text-sm font-medium text-ink">{u.countries.name}</dd>
-              </div>
-            )}
-            {u.cities?.name && (
-              <div>
-                <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">City</dt>
-                <dd class="text-sm font-medium text-ink">{u.cities.name}</dd>
-              </div>
-            )}
-            {u.founded_year != null && (
-              <div>
-                <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Founded</dt>
-                <dd class="text-sm font-medium text-ink">{u.founded_year}</dd>
-              </div>
-            )}
-            {u.student_count != null && (
-              <div>
-                <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Students</dt>
-                <dd class="text-sm font-medium text-ink">{(u.student_count as number).toLocaleString()}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
-      )}
+              {u.ranking_summary && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-3">Rankings and reputation</h2>
+                  <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{u.ranking_summary}</p>
+                </section>
+              )}
+            </div>
+          ) : (
+            <div class="rounded-2xl border border-edge bg-surface p-6">
+              <h2 class="text-lg font-semibold text-ink mb-2">Published university information</h2>
+              <p class="text-sm text-muted leading-relaxed">
+                This profile is live, but detailed public notes have not been added yet. Use the official website and program listings to verify admissions, fees, deadlines, and campus details.
+              </p>
+            </div>
+          )}
 
-      <!-- Rankings -->
-      {u.ranking_summary && (
-        <div class="mb-6">
-          <h2 class="text-lg font-semibold text-ink mb-2">Rankings</h2>
-          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{u.ranking_summary}</p>
-        </div>
-      )}
+          {updatedAt && <p class="text-xs text-muted mt-6">Last updated: {updatedAt}</p>}
 
-      <!-- Overview -->
-      {u.overview && (
-        <div class="mb-6">
-          <h2 class="text-lg font-semibold text-ink mb-2">Overview</h2>
-          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{u.overview}</p>
-        </div>
-      )}
-
-      <!-- Browse programs link -->
-      <div class="mb-6 py-4 px-5 rounded-xl border border-primary-border bg-primary-surface">
-        <a href={`/programs?university=${u.id}`}
-           class="text-sm font-medium text-primary hover:text-primary-hover">
-          Browse programs at {u.name} →
-        </a>
-      </div>
-
-      <!-- Official website CTA -->
-      {u.official_url && (
-        <div class="mb-6">
-          <a href={u.official_url} target="_blank" rel="noopener noreferrer"
-             class="inline-flex items-center gap-2 px-5 py-2.5 border border-edge bg-surface text-ink-secondary
-                    text-sm font-medium rounded-[9px] hover:border-primary/40 hover:text-ink transition-colors">
-            Visit Official Website ↗
+          <a href="/universities" class="inline-flex mt-6 text-sm text-primary hover:text-primary-hover">
+            ← All Universities
           </a>
         </div>
-      )}
 
-      <!-- Source & verification -->
-      <SourceBox
-        verificationStatus={u.verification_status}
-        lastVerifiedAt={lastVerifiedAt}
-        officialUrl={u.official_url ?? null}
-        sourceConfidenceScore={u.source_confidence_score ?? null}
-      />
+        <aside class="space-y-5 lg:sticky lg:top-[88px] lg:self-start">
+          <div class="rounded-2xl border border-edge bg-surface p-5">
+            <h2 class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-4">Key facts</h2>
+            <dl class="space-y-3">
+              {u.countries?.name && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Country</dt>
+                  <dd class="text-sm font-medium text-ink">{u.countries.name}</dd>
+                </div>
+              )}
+              {u.cities?.name && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">City</dt>
+                  <dd class="text-sm font-medium text-ink">{u.cities.name}</dd>
+                </div>
+              )}
+              {u.founded_year != null && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Founded</dt>
+                  <dd class="text-sm font-medium text-ink">{u.founded_year}</dd>
+                </div>
+              )}
+              {u.student_count != null && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Students</dt>
+                  <dd class="text-sm font-medium text-ink">{(u.student_count as number).toLocaleString()}</dd>
+                </div>
+              )}
+              {relatedPrograms.length > 0 && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Published programs</dt>
+                  <dd class="text-sm font-medium text-ink">At least {relatedPrograms.length} listed</dd>
+                </div>
+              )}
+              {lastVerifiedAt && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Last verified</dt>
+                  <dd class="text-sm font-medium text-ink">{lastVerifiedAt}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
 
-      {updatedAt && (
-        <p class="text-xs text-muted mb-6">Last updated: {updatedAt}</p>
-      )}
+          <SourceBox
+            verificationStatus={u.verification_status}
+            lastVerifiedAt={lastVerifiedAt}
+            officialUrl={u.official_url ?? null}
+            sourceConfidenceScore={u.source_confidence_score ?? null}
+          />
 
-      <a href="/universities" class="text-sm text-primary hover:text-primary-hover">
-        ← All Universities
-      </a>
-
+          <FitFinderMiniPanel />
+        </aside>
+      </div>
     </Container>
   </div>
 
+  {relatedPrograms.length > 0 && (
+    <div class="border-t border-edge bg-surface">
+      <Container width="wide" class="py-8 sm:py-10">
+        <div class="mb-4 flex items-end justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-ink">Published programs at {u.name}</h2>
+            <p class="mt-1 text-sm text-muted">A small sample from the public program directory.</p>
+          </div>
+          <a href={`/programs?university=${u.id}`} class="hidden sm:inline-flex text-sm font-semibold text-primary hover:text-primary-hover">
+            View all programs
+          </a>
+        </div>
+        <div class="flex flex-col gap-4">
+          {relatedPrograms.map((program: any) => {
+            const tuition = tuitionDisplay(program)
+            return (
+              <ProgramCard
+                href={`/programs/${program.slug}`}
+                programId={program.id}
+                title={program.title}
+                universityName={program.universities?.name ?? u.name}
+                universityHref={program.universities?.slug ? `/universities/${program.universities.slug}` : null}
+                degreeLevel={abbreviateDegree(program.degree_levels?.code, program.degree_levels?.name)}
+                field={program.subjects?.name ?? null}
+                countryCode={program.countries?.iso2 ?? null}
+                location={[program.cities?.name, program.countries?.name].filter(Boolean).join(', ') || null}
+                duration={formatDuration(program.duration_months)}
+                language={program.language_of_instruction ?? null}
+                tuitionDisplay={tuition.display}
+                tuitionPer={tuition.per}
+                verificationLabel={
+                  program.verification_status === 'verified'
+                    ? 'Verified'
+                    : program.verification_status === 'partially_verified'
+                      ? 'Partially verified'
+                      : null
+                }
+                verificationTone={program.verification_status === 'partially_verified' ? 'neutral' : 'verified'}
+                sourceChecked={formatShortDate(program.last_verified_at)}
+                logoPublicId={program.universities?.logo?.cloudinary_public_id ?? logoPublicId}
+                logoAlt={program.universities?.logo?.alt_text || program.universities?.logo?.display_name || program.universities?.name || logoAlt}
+              />
+            )
+          })}
+        </div>
+      </Container>
+    </div>
+  )}
+
+  <SavedProgramEnhancement />
 </PublicLayout>
