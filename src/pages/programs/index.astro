@@ -1,44 +1,58 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import ProgramCard from '../../components/public/cards/ProgramCard.astro'
+import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
+import SavedProgramEnhancement from '../../components/public/SavedProgramEnhancement.astro'
 import Container from '../../components/ui/Container.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
 const supabase = createClient(Astro.cookies, Astro.request)
+const { data: { user } } = await supabase.auth.getUser()
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function parseUUID(v: string | null): string | undefined {
   return v && UUID_RE.test(v) ? v : undefined
 }
 
-const STUDY_MODES    = ['full_time', 'part_time', 'online', 'hybrid'] as const
+const STUDY_MODES = ['full_time', 'part_time', 'online', 'hybrid'] as const
 const DELIVERY_MODES = ['on_campus', 'online', 'hybrid', 'distance'] as const
 
-const sp            = Astro.url.searchParams
-const q             = sp.get('q')?.trim().slice(0, 100) || undefined
-const countryId     = parseUUID(sp.get('country'))
-const cityId        = parseUUID(sp.get('city'))
-const universityId  = parseUUID(sp.get('university'))
+const sp = Astro.url.searchParams
+const q = sp.get('q')?.trim().slice(0, 100) || undefined
+const countryId = parseUUID(sp.get('country'))
+const cityId = parseUUID(sp.get('city'))
+const universityId = parseUUID(sp.get('university'))
 const degreeLevelId = parseUUID(sp.get('degree_level'))
-const subjectId     = parseUUID(sp.get('subject'))
-const rawSM         = sp.get('study_mode') ?? ''
-const studyMode     = (STUDY_MODES as readonly string[]).includes(rawSM) ? rawSM : undefined
-const rawDM         = sp.get('delivery_mode') ?? ''
-const deliveryMode  = (DELIVERY_MODES as readonly string[]).includes(rawDM) ? rawDM : undefined
-const language      = sp.get('language')?.trim().slice(0, 80) || undefined
-const rawTM         = parseFloat(sp.get('tuition_max') ?? '')
-const tuitionMax    = isFinite(rawTM) && rawTM > 0 ? rawTM : undefined
+const subjectId = parseUUID(sp.get('subject'))
+const rawSM = sp.get('study_mode') ?? ''
+const studyMode = (STUDY_MODES as readonly string[]).includes(rawSM) ? rawSM : undefined
+const rawDM = sp.get('delivery_mode') ?? ''
+const deliveryMode = (DELIVERY_MODES as readonly string[]).includes(rawDM) ? rawDM : undefined
+const language = sp.get('language')?.trim().slice(0, 80) || undefined
+const rawTM = parseFloat(sp.get('tuition_max') ?? '')
+const tuitionMax = isFinite(rawTM) && rawTM > 0 ? rawTM : undefined
 
-const hasFilters = !!(q || countryId || cityId || universityId || degreeLevelId ||
-  subjectId || studyMode || deliveryMode || language || tuitionMax)
+const hasFilters = !!(
+  q ||
+  countryId ||
+  cityId ||
+  universityId ||
+  degreeLevelId ||
+  subjectId ||
+  studyMode ||
+  deliveryMode ||
+  language ||
+  tuitionMax
+)
 
 const [
-  { data: countriesData },
-  { data: citiesData },
-  { data: universitiesData },
-  { data: degreeLevelsData },
-  { data: subjectsData },
+  { data: countriesData, error: countriesError },
+  { data: citiesData, error: citiesError },
+  { data: universitiesData, error: universitiesError },
+  { data: degreeLevelsData, error: degreeLevelsError },
+  { data: subjectsData, error: subjectsError },
 ] = await Promise.all([
   supabase.from('countries').select('id, name').eq('is_destination_enabled', true).order('name'),
   supabase.from('cities').select('id, name').order('name'),
@@ -47,18 +61,25 @@ const [
   supabase.from('subjects').select('id, name').order('name'),
 ])
 
-const countries    = countriesData ?? []
-const cities       = citiesData ?? []
-const univs        = universitiesData ?? []
+if (countriesError) console.error('programs countries error:', countriesError.message)
+if (citiesError) console.error('programs cities error:', citiesError.message)
+if (universitiesError) console.error('programs universities error:', universitiesError.message)
+if (degreeLevelsError) console.error('programs degree levels error:', degreeLevelsError.message)
+if (subjectsError) console.error('programs subjects error:', subjectsError.message)
+
+const countries = countriesData ?? []
+const cities = citiesData ?? []
+const universities = universitiesData ?? []
 const degreeLevels = degreeLevelsData ?? []
-const subjects     = subjectsData ?? []
+const subjects = subjectsData ?? []
 
 let query = supabase
   .from('programs')
   .select(
-    `id, title, slug,
+    `id, title, slug, duration_months,
      study_mode, delivery_mode, language_of_instruction,
      tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+     verification_status, last_verified_at,
      universities(
        name, slug,
        logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)
@@ -73,23 +94,42 @@ let query = supabase
   .order('title')
   .limit(201)
 
-if (q)              query = query.ilike('title', `%${q}%`)
-if (countryId)      query = query.eq('country_id', countryId)
-if (cityId)         query = query.eq('city_id', cityId)
-if (universityId)   query = query.eq('university_id', universityId)
-if (degreeLevelId)  query = query.eq('degree_level_id', degreeLevelId)
-if (subjectId)      query = query.eq('primary_subject_id', subjectId)
-if (studyMode)      query = query.eq('study_mode', studyMode)
-if (deliveryMode)   query = query.eq('delivery_mode', deliveryMode)
-if (language)       query = query.ilike('language_of_instruction', `%${language}%`)
+if (q) query = query.ilike('title', `%${q}%`)
+if (countryId) query = query.eq('country_id', countryId)
+if (cityId) query = query.eq('city_id', cityId)
+if (universityId) query = query.eq('university_id', universityId)
+if (degreeLevelId) query = query.eq('degree_level_id', degreeLevelId)
+if (subjectId) query = query.eq('primary_subject_id', subjectId)
+if (studyMode) query = query.eq('study_mode', studyMode)
+if (deliveryMode) query = query.eq('delivery_mode', deliveryMode)
+if (language) query = query.ilike('language_of_instruction', `%${language}%`)
 if (tuitionMax != null) query = query.lte('tuition_max_amount', tuitionMax)
 
 const { data, count, error } = await query
 if (error) console.error('programs list error:', error.message)
 
-const allRows   = data ?? []
+const allRows = data ?? []
 const overLimit = (count ?? allRows.length) > 200
-const rows      = allRows.slice(0, 200)
+const rows = allRows.slice(0, 200)
+const resultCount = count ?? rows.length
+
+const visibleProgramIds = rows.map((program: any) => program.id).filter(Boolean)
+let savedProgramIds = new Set<string>()
+
+if (user && visibleProgramIds.length > 0) {
+  const { data: savedRows, error: savedError } = await supabase
+    .from('saved_items')
+    .select('entity_id')
+    .eq('user_id', user.id)
+    .eq('entity_type', 'program')
+    .in('entity_id', visibleProgramIds)
+
+  if (savedError) {
+    console.error('programs saved_items error:', savedError.message)
+  } else {
+    savedProgramIds = new Set((savedRows ?? []).map((row: any) => row.entity_id).filter(Boolean))
+  }
+}
 
 function abbreviateDegree(code: string | null | undefined, name: string | null | undefined): string | null {
   if (!code && !name) return null
@@ -104,6 +144,22 @@ function abbreviateDegree(code: string | null | undefined, name: string | null |
   return null
 }
 
+function formatDuration(months: number | null | undefined): string | null {
+  if (!months) return null
+  if (months === 12) return '1 year'
+  if (months % 12 === 0) return `${months / 12} years`
+  return `${months} months`
+}
+
+function formatShortDate(d: string | null | undefined): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 function tuitionDisplay(p: any): { display: string | null; per: string | null } {
   const min = p.tuition_min_amount
   const max = p.tuition_max_amount
@@ -112,16 +168,22 @@ function tuitionDisplay(p: any): { display: string | null; per: string | null } 
   const sym = cur === 'EUR' ? '€' : cur === 'USD' ? '$' : cur === 'GBP' ? '£' : ''
   const prefix = sym || (cur ? `${cur} ` : '')
   const fmt = (n: number) => `${prefix}${Number(n).toLocaleString()}`
-  const display = min != null ? fmt(min) : fmt(max)
+  const display = min != null && max != null && min !== max ? `${fmt(min)}–${fmt(max)}` : fmt(min ?? max)
   const per = p.tuition_period?.replace(/_/g, ' ') ?? 'per year'
   return { display, per }
+}
+
+function getVerificationInfo(status: string | null | undefined): { label: string; tone: 'verified' | 'neutral' } | null {
+  if (status === 'verified') return { label: 'Verified', tone: 'verified' }
+  if (status === 'partially_verified') return { label: 'Partially verified', tone: 'neutral' }
+  return null
 }
 
 function buildUrlWithout(param: string): string {
   const params = new URLSearchParams(Astro.url.searchParams)
   params.delete(param)
   const qs = params.toString()
-  return '/programs' + (qs ? '?' + qs : '')
+  return '/programs' + (qs ? `?${qs}` : '')
 }
 
 type FilterChip = { key: string; label: string; removeHref: string }
@@ -129,326 +191,704 @@ const activeChips: FilterChip[] = []
 
 if (q) activeChips.push({ key: 'q', label: `"${q}"`, removeHref: buildUrlWithout('q') })
 if (degreeLevelId) {
-  const dl = degreeLevels.find((d: any) => d.id === degreeLevelId)
-  activeChips.push({ key: 'degree_level', label: (dl as any)?.name ?? 'Degree level', removeHref: buildUrlWithout('degree_level') })
+  const degreeLevel = degreeLevels.find((d: any) => d.id === degreeLevelId)
+  activeChips.push({
+    key: 'degree_level',
+    label: (degreeLevel as any)?.name ?? 'Degree level',
+    removeHref: buildUrlWithout('degree_level'),
+  })
 }
 if (subjectId) {
-  const sub = subjects.find((s: any) => s.id === subjectId)
-  activeChips.push({ key: 'subject', label: (sub as any)?.name ?? 'Subject', removeHref: buildUrlWithout('subject') })
+  const subject = subjects.find((s: any) => s.id === subjectId)
+  activeChips.push({
+    key: 'subject',
+    label: (subject as any)?.name ?? 'Subject',
+    removeHref: buildUrlWithout('subject'),
+  })
 }
 if (countryId) {
-  const c = countries.find((c: any) => c.id === countryId)
-  activeChips.push({ key: 'country', label: (c as any)?.name ?? 'Country', removeHref: buildUrlWithout('country') })
+  const country = countries.find((country: any) => country.id === countryId)
+  activeChips.push({
+    key: 'country',
+    label: (country as any)?.name ?? 'Country',
+    removeHref: buildUrlWithout('country'),
+  })
 }
 if (cityId) {
-  const c = cities.find((c: any) => c.id === cityId)
-  activeChips.push({ key: 'city', label: (c as any)?.name ?? 'City', removeHref: buildUrlWithout('city') })
+  const city = cities.find((entry: any) => entry.id === cityId)
+  activeChips.push({
+    key: 'city',
+    label: (city as any)?.name ?? 'City',
+    removeHref: buildUrlWithout('city'),
+  })
 }
 if (universityId) {
-  const u = univs.find((u: any) => u.id === universityId)
-  activeChips.push({ key: 'university', label: (u as any)?.name ?? 'University', removeHref: buildUrlWithout('university') })
+  const university = universities.find((entry: any) => entry.id === universityId)
+  activeChips.push({
+    key: 'university',
+    label: (university as any)?.name ?? 'University',
+    removeHref: buildUrlWithout('university'),
+  })
 }
-if (language)     activeChips.push({ key: 'language', label: `Language: ${language}`, removeHref: buildUrlWithout('language') })
-if (studyMode)    activeChips.push({ key: 'study_mode', label: studyMode.replace(/_/g, ' '), removeHref: buildUrlWithout('study_mode') })
+if (language) activeChips.push({ key: 'language', label: `Language: ${language}`, removeHref: buildUrlWithout('language') })
+if (studyMode) activeChips.push({ key: 'study_mode', label: studyMode.replace(/_/g, ' '), removeHref: buildUrlWithout('study_mode') })
 if (deliveryMode) activeChips.push({ key: 'delivery_mode', label: deliveryMode.replace(/_/g, ' '), removeHref: buildUrlWithout('delivery_mode') })
-if (tuitionMax != null) activeChips.push({ key: 'tuition_max', label: `Max ${tuitionMax.toLocaleString()}`, removeHref: buildUrlWithout('tuition_max') })
+if (tuitionMax != null) {
+  activeChips.push({
+    key: 'tuition_max',
+    label: `Max tuition ${tuitionMax.toLocaleString()}`,
+    removeHref: buildUrlWithout('tuition_max'),
+  })
+}
 
 const activeFilterCount = activeChips.length
+const browseDegreeLevels = degreeLevels.slice(0, 5)
+const browseSubjects = subjects.slice(0, 8)
+const browseCountries = countries.slice(0, 6)
+const headlineCount = error ? '200+' : overLimit ? '200+' : resultCount.toLocaleString()
 
 const flabel = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
-const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-primary'
-const finput  = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary'
+const fselect = 'w-full rounded-[10px] border border-edge bg-surface px-3 py-2.5 text-sm text-ink focus:border-primary focus:outline-none'
+const finput = 'w-full rounded-[10px] border border-edge bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-muted focus:border-primary focus:outline-none'
 ---
 
 <style>
-  details > summary { list-style: none; }
-  details > summary::-webkit-details-marker { display: none; }
-  details[open] .chevron { transform: rotate(180deg); }
-  .chevron { transition: transform 200ms ease; }
+  details > summary {
+    list-style: none;
+  }
+
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  details[open] .chevron {
+    transform: rotate(180deg);
+  }
+
+  .chevron {
+    transition: transform 200ms ease;
+  }
 </style>
 
-<PublicLayout title="Programs — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/programs'}>
-
-  <!-- ── Page header ──────────────────────────────────────── -->
+<PublicLayout
+  title="Programs — DegreeWiki"
+  description="Browse published degree programs with tuition, language, destination, and verification details when available."
+  noindex={hasFilters}
+  canonical={SITE_URL + '/programs'}
+>
   <div class="bg-surface border-b border-edge">
-    <Container width="wide" class="py-7 sm:py-8">
-      <h1 class="text-[28px] sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
-        Search Programs
-      </h1>
-      <p class="mt-1.5 text-base text-muted">
-        Bachelor's and master's programs at universities worldwide.
-      </p>
+    <Container width="wide" class="py-8 sm:py-10">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.08em] text-primary mb-3">Program discovery</p>
+          <h1 class="text-[30px] sm:text-[38px] font-bold text-ink tracking-[-0.03em] leading-tight">
+            Find published programs with clear facts, official links, and source-aware trust signals.
+          </h1>
+          <p class="mt-3 max-w-2xl text-base sm:text-[17px] text-ink-secondary leading-relaxed">
+            Search by keyword, degree level, subject, location, language, study mode, delivery mode, or tuition.
+            When we have verification context, we surface it directly on each listing.
+          </p>
+
+          <div class="mt-5 flex flex-wrap gap-3">
+            <a
+              href="/universities"
+              class="inline-flex items-center justify-center rounded-[10px] border border-edge bg-canvas px-4 py-2.5 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary transition-colors"
+            >
+              Browse universities
+            </a>
+            <a
+              href="/guides"
+              class="inline-flex items-center justify-center rounded-[10px] border border-edge bg-canvas px-4 py-2.5 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary transition-colors"
+            >
+              Read study guides
+            </a>
+          </div>
+
+          <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3">
+              <p class="text-[22px] font-bold text-ink leading-none">{headlineCount}</p>
+              <p class="mt-1 text-xs text-muted">{hasFilters ? 'Programs in view' : 'Published programs'}</p>
+            </div>
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3">
+              <p class="text-[22px] font-bold text-ink leading-none">{countries.length.toLocaleString()}</p>
+              <p class="mt-1 text-xs text-muted">Destinations</p>
+            </div>
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3 col-span-2 sm:col-span-1">
+              <p class="text-[22px] font-bold text-ink leading-none">{degreeLevels.length.toLocaleString()}</p>
+              <p class="mt-1 text-xs text-muted">Degree levels</p>
+            </div>
+          </div>
+        </div>
+
+        <FitFinderMiniPanel class="h-full" />
+      </div>
     </Container>
   </div>
 
-  <!-- ── Main content ────────────────────────────────────── -->
   <div class="bg-canvas min-h-[60vh]">
     <Container width="wide" class="py-6 sm:py-8">
-
       <form method="get" action="/programs">
+        <div class="rounded-2xl border border-edge bg-surface p-4 sm:p-5 mb-6">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div class="relative flex-1">
+              <label for="q" class="sr-only">Search programs</label>
+              <svg
+                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"></circle>
+                <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
+              </svg>
+              <input
+                id="q"
+                name="q"
+                type="search"
+                value={q ?? ''}
+                placeholder="Search programs, universities, or fields of study"
+                class="w-full h-[46px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface text-sm text-ink placeholder:text-muted focus:border-primary focus:outline-none"
+              />
+            </div>
 
-        <!-- ── Keyword search bar ──────────────────────────── -->
-        <div class="flex gap-2.5 mb-5">
-          <div class="relative flex-1">
-            <label for="q" class="sr-only">Search programs</label>
-            <svg
-              class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
-              viewBox="0 0 16 16" fill="none" aria-hidden="true"
-            >
-              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            </svg>
-            <input
-              id="q" name="q" type="search"
-              value={q ?? ''}
-              placeholder="Search programs, fields of study…"
-              class="w-full h-[44px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface
-                     text-sm text-ink placeholder:text-muted
-                     focus:outline-none focus:border-primary"
-            />
+            <div class="flex gap-2.5">
+              <button
+                type="submit"
+                class="h-[46px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px] hover:bg-primary-hover transition-colors"
+              >
+                Search
+              </button>
+              {hasFilters && (
+                <a
+                  href="/programs"
+                  class="h-[46px] px-4 inline-flex items-center justify-center text-[13.5px] font-medium text-ink-secondary border border-edge rounded-[10px] hover:bg-canvas transition-colors"
+                >
+                  Clear all
+                </a>
+              )}
+            </div>
           </div>
-          <button
-            type="submit"
-            class="h-[44px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px]
-                   hover:bg-primary-hover transition-colors flex-none"
-          >
-            Search
-          </button>
-          {hasFilters && (
-            <a
-              href="/programs"
-              class="h-[44px] px-4 inline-flex items-center text-[13.5px] font-medium text-ink-secondary
-                     border border-edge rounded-[10px] hover:bg-[#f8fafc] transition-colors flex-none"
-            >
-              Clear all
-            </a>
+
+          <p class="mt-3 text-sm text-muted">
+            Use the filters to narrow the list, or jump in with quick browse links below if you are still exploring.
+          </p>
+
+          {activeChips.length > 0 && (
+            <div class="flex flex-wrap gap-2 mt-4" aria-label="Active filters">
+              {activeChips.map((chip) => (
+                <a
+                  href={chip.removeHref}
+                  class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border text-primary text-sm font-medium rounded-full hover:bg-[#dbe4ff] transition-colors"
+                >
+                  {chip.label}
+                  <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
+                </a>
+              ))}
+            </div>
           )}
         </div>
 
-        <!-- ── Active filter chips ─────────────────────────── -->
-        {activeChips.length > 0 && (
-          <div class="flex flex-wrap gap-2 mb-5" aria-label="Active filters">
-            {activeChips.map(chip => (
-              <a
-                href={chip.removeHref}
-                class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border
-                       text-primary text-sm font-medium rounded-full hover:bg-[#dbe4ff] transition-colors"
-              >
-                {chip.label}
-                <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
-              </a>
-            ))}
+        {!hasFilters && (
+          <div class="grid gap-4 lg:grid-cols-2 mb-6">
+            <div class="rounded-2xl border border-edge bg-surface p-4">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-3">Browse by degree level</p>
+              <div class="flex flex-wrap gap-2">
+                {browseDegreeLevels.map((degreeLevel: any) => (
+                  <a
+                    href={`/programs?degree_level=${degreeLevel.id}`}
+                    class="inline-flex items-center rounded-full border border-edge px-3 py-1.5 text-sm font-medium text-ink hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    {degreeLevel.name}
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-edge bg-surface p-4">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-3">Popular starting points</p>
+              <div class="flex flex-wrap gap-2">
+                {browseSubjects.map((subject: any) => (
+                  <a
+                    href={`/programs?subject=${subject.id}`}
+                    class="inline-flex items-center rounded-full border border-edge px-3 py-1.5 text-sm font-medium text-ink hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    {subject.name}
+                  </a>
+                ))}
+                {browseCountries.map((country: any) => (
+                  <a
+                    href={`/programs?country=${country.id}`}
+                    class="inline-flex items-center rounded-full border border-edge px-3 py-1.5 text-sm font-medium text-ink hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    {country.name}
+                  </a>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
-        <!-- ── Two-column layout ───────────────────────────── -->
         <div class="flex flex-col md:flex-row gap-5 md:gap-8">
-
-          <!-- ── Filter rail ─────────────────────────────────
-               Mobile: <details> collapsible, open by default.
-               Desktop: summary hidden, content always visible. -->
           <aside
-            class="w-full md:w-60 lg:w-64 md:flex-none md:sticky md:top-[80px] md:self-start"
+            class="w-full md:w-72 lg:w-80 md:flex-none md:sticky md:top-[88px] md:self-start"
             aria-label="Search filters"
           >
-            <details open class="bg-surface border border-edge rounded-xl overflow-hidden">
-
-              <!-- Mobile toggle (hidden on desktop) -->
+            <details open class="bg-surface border border-edge rounded-2xl overflow-hidden">
               <summary class="md:hidden flex items-center justify-between px-4 py-3 cursor-pointer select-none">
                 <span class="text-sm font-semibold text-ink">
                   Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
                 </span>
-                <svg
-                  class="chevron w-4 h-4 text-muted"
-                  viewBox="0 0 16 16" fill="none" aria-hidden="true"
-                >
-                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <svg class="chevron w-4 h-4 text-muted" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
                 </svg>
               </summary>
 
-              <!-- Desktop filter header (hidden on mobile) -->
               <div class="hidden md:flex items-center justify-between px-4 py-3 border-b border-edge-subtle">
                 <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Filters</span>
-                {hasFilters && (
-                  <a href="/programs" class="text-xs text-primary hover:underline">Clear all</a>
-                )}
+                {hasFilters && <a href="/programs" class="text-xs text-primary hover:underline">Clear all</a>}
               </div>
 
-              <!-- Filter groups -->
               <div class="p-4 flex flex-col gap-4">
-
-                <!-- Degree level -->
                 <div>
                   <label for="degree_level" class={flabel}>Degree level</label>
                   <select id="degree_level" name="degree_level" class={fselect}>
                     <option value="">All levels</option>
-                    {degreeLevels.map((d: any) => (
-                      <option value={d.id} selected={degreeLevelId === d.id}>{d.name}</option>
+                    {degreeLevels.map((degreeLevel: any) => (
+                      <option value={degreeLevel.id} selected={degreeLevelId === degreeLevel.id}>{degreeLevel.name}</option>
                     ))}
                   </select>
                 </div>
 
-                <!-- Subject -->
                 <div>
                   <label for="subject" class={flabel}>Subject</label>
                   <select id="subject" name="subject" class={fselect}>
                     <option value="">All subjects</option>
-                    {subjects.map((s: any) => (
-                      <option value={s.id} selected={subjectId === s.id}>{s.name}</option>
+                    {subjects.map((subject: any) => (
+                      <option value={subject.id} selected={subjectId === subject.id}>{subject.name}</option>
                     ))}
                   </select>
                 </div>
 
-                <!-- Country -->
                 <div>
                   <label for="country" class={flabel}>Country</label>
                   <select id="country" name="country" class={fselect}>
                     <option value="">All countries</option>
-                    {countries.map((c: any) => (
-                      <option value={c.id} selected={countryId === c.id}>{c.name}</option>
+                    {countries.map((country: any) => (
+                      <option value={country.id} selected={countryId === country.id}>{country.name}</option>
                     ))}
                   </select>
                 </div>
 
-                <!-- Language -->
                 <div>
-                  <label for="language" class={flabel}>Language of instruction</label>
+                  <label for="city" class={flabel}>City</label>
+                  <select id="city" name="city" class={fselect}>
+                    <option value="">All cities</option>
+                    {cities.map((city: any) => (
+                      <option value={city.id} selected={cityId === city.id}>{city.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="university" class={flabel}>University</label>
+                  <select id="university" name="university" class={fselect}>
+                    <option value="">All universities</option>
+                    {universities.map((university: any) => (
+                      <option value={university.id} selected={universityId === university.id}>{university.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="language" class={flabel}>Language</label>
                   <input
-                    id="language" name="language" type="text"
+                    id="language"
+                    name="language"
+                    type="text"
                     value={language ?? ''}
                     placeholder="e.g. English"
                     class={finput}
                   />
                 </div>
 
-                <!-- Study mode -->
                 <div>
                   <label for="study_mode" class={flabel}>Study mode</label>
                   <select id="study_mode" name="study_mode" class={fselect}>
                     <option value="">Any mode</option>
                     <option value="full_time" selected={studyMode === 'full_time'}>Full time</option>
                     <option value="part_time" selected={studyMode === 'part_time'}>Part time</option>
-                    <option value="online"    selected={studyMode === 'online'}>Online</option>
-                    <option value="hybrid"    selected={studyMode === 'hybrid'}>Hybrid</option>
+                    <option value="online" selected={studyMode === 'online'}>Online</option>
+                    <option value="hybrid" selected={studyMode === 'hybrid'}>Hybrid</option>
                   </select>
                 </div>
 
-                <!-- Max tuition -->
+                <div>
+                  <label for="delivery_mode" class={flabel}>Delivery mode</label>
+                  <select id="delivery_mode" name="delivery_mode" class={fselect}>
+                    <option value="">Any format</option>
+                    <option value="on_campus" selected={deliveryMode === 'on_campus'}>On campus</option>
+                    <option value="online" selected={deliveryMode === 'online'}>Online</option>
+                    <option value="hybrid" selected={deliveryMode === 'hybrid'}>Hybrid</option>
+                    <option value="distance" selected={deliveryMode === 'distance'}>Distance</option>
+                  </select>
+                </div>
+
                 <div>
                   <label for="tuition_max" class={flabel}>Max tuition</label>
                   <input
-                    id="tuition_max" name="tuition_max" type="number" min="1" step="any"
+                    id="tuition_max"
+                    name="tuition_max"
+                    type="number"
+                    min="1"
+                    step="any"
                     value={tuitionMax ?? ''}
                     placeholder="e.g. 20000"
                     class={finput}
                   />
                   <p class="text-xs text-muted mt-1">Programs without tuition data may be excluded.</p>
                 </div>
-
               </div>
 
-              <!-- Apply button -->
               <div class="px-4 pb-4">
                 <button
                   type="submit"
-                  class="w-full h-[40px] bg-primary text-white text-sm font-semibold rounded-[8px]
-                         hover:bg-primary-hover transition-colors"
+                  class="w-full h-[42px] bg-primary text-white text-sm font-semibold rounded-[10px] hover:bg-primary-hover transition-colors"
                 >
                   Apply filters
                 </button>
               </div>
-
             </details>
           </aside>
 
-          <!-- ── Results column ──────────────────────────────── -->
           <div class="flex-1 min-w-0">
-
-            <!-- Results count -->
-            <p class="text-sm text-muted mb-4">
-              {rows.length === 0 ? (
-                'No programs found'
+            <div class="flex flex-col gap-2 mb-5">
+              <h2 class="text-lg font-semibold text-ink">Program results</h2>
+              {error ? (
+                <p class="text-sm text-muted">
+                  Program listings are temporarily unavailable. Please try again shortly, or use Fit Finder for guided matching.
+                </p>
+              ) : rows.length === 0 ? (
+                <p class="text-sm text-muted">
+                  No matching programs right now. Try a broader keyword, remove a filter, or switch to guided matching.
+                </p>
               ) : overLimit ? (
-                <>
-                  <span class="font-semibold text-ink">200+</span> programs — narrow your search to see more
-                </>
+                <p class="text-sm text-muted">
+                  Showing the first <span class="font-semibold text-ink">200</span> matches. Narrow the filters to get a tighter shortlist.
+                </p>
               ) : (
-                <>
-                  <span class="font-semibold text-ink">{rows.length}</span>
-                  {rows.length === 1 ? ' program' : ' programs'} found
-                </>
+                <p class="text-sm text-muted">
+                  <span class="font-semibold text-ink">{resultCount.toLocaleString()}</span>
+                  {resultCount === 1 ? ' program matches your search.' : ' programs match your search.'}
+                </p>
               )}
-            </p>
+            </div>
 
-            <!-- Program cards -->
             {rows.length > 0 ? (
               <ul class="flex flex-col gap-4 list-none p-0 m-0">
-                {rows.map((p: any) => {
-                  const td = tuitionDisplay(p)
-                  const location = [p.cities?.name, p.countries?.name].filter(Boolean).join(', ')
+                {rows.map((program: any) => {
+                  const tuition = tuitionDisplay(program)
+                  const location = [program.cities?.name, program.countries?.name].filter(Boolean).join(', ')
+                  const verification = getVerificationInfo(program.verification_status)
                   return (
                     <li>
                       <ProgramCard
-                        href={`/programs/${p.slug}`}
-                        title={p.title}
-                        universityName={p.universities?.name ?? null}
-                        universityHref={p.universities?.slug ? `/universities/${p.universities.slug}` : null}
-                        degreeLevel={abbreviateDegree(p.degree_levels?.code, p.degree_levels?.name)}
-                        field={p.subjects?.name ?? null}
-                        countryCode={p.countries?.iso2 ?? null}
+                        href={`/programs/${program.slug}`}
+                        programId={program.id}
+                        title={program.title}
+                        universityName={program.universities?.name ?? null}
+                        universityHref={program.universities?.slug ? `/universities/${program.universities.slug}` : null}
+                        degreeLevel={abbreviateDegree(program.degree_levels?.code, program.degree_levels?.name)}
+                        field={program.subjects?.name ?? null}
+                        countryCode={program.countries?.iso2 ?? null}
                         location={location || null}
-                        language={p.language_of_instruction ?? null}
-                        tuitionDisplay={td.display}
-                        tuitionPer={td.per}
-                        logoPublicId={p.universities?.logo?.cloudinary_public_id ?? null}
-                        logoAlt={p.universities?.logo?.alt_text || p.universities?.logo?.display_name || p.universities?.name || null}
+                        duration={formatDuration(program.duration_months)}
+                        language={program.language_of_instruction ?? null}
+                        tuitionDisplay={tuition.display}
+                        tuitionPer={tuition.per}
+                        verificationLabel={verification?.label ?? null}
+                        verificationTone={verification?.tone ?? 'verified'}
+                        sourceChecked={formatShortDate(program.last_verified_at)}
+                        saved={savedProgramIds.has(program.id)}
+                        isAuthenticated={!!user}
+                        logoPublicId={program.universities?.logo?.cloudinary_public_id ?? null}
+                        logoAlt={program.universities?.logo?.alt_text || program.universities?.logo?.display_name || program.universities?.name || null}
                       />
                     </li>
                   )
                 })}
               </ul>
             ) : (
-              <!-- Empty state -->
-              <div
-                class="flex flex-col items-center justify-center py-16 px-6 text-center
-                       bg-surface border border-edge rounded-xl"
-              >
+              <div class="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-edge rounded-2xl">
                 <div class="w-12 h-12 rounded-full bg-canvas flex items-center justify-center mb-4">
                   <svg class="w-6 h-6 text-muted" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"></circle>
+                    <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
                   </svg>
                 </div>
-                {hasFilters ? (
+
+                {error ? (
+                  <Fragment>
+                    <h2 class="text-lg font-semibold text-ink mb-1.5">Program listings are temporarily unavailable</h2>
+                    <p class="text-sm text-muted mb-5 max-w-md leading-relaxed">
+                      We could not load the published directory just now. Try again shortly, or use Fit Finder to explore matching options.
+                    </p>
+                    <div class="flex flex-col sm:flex-row gap-3">
+                      <a
+                        href="/programs"
+                        class="inline-flex items-center justify-center h-[40px] px-5 border border-edge bg-surface text-sm font-semibold text-ink rounded-[9px] hover:border-primary/40 hover:text-primary transition-colors"
+                      >
+                        Reload directory
+                      </a>
+                      <a
+                        href="/fit-finder"
+                        class="inline-flex items-center justify-center h-[40px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px] hover:bg-primary-hover transition-colors"
+                      >
+                        Start Fit Finder
+                      </a>
+                    </div>
+                  </Fragment>
+                ) : hasFilters ? (
                   <Fragment>
                     <h2 class="text-lg font-semibold text-ink mb-1.5">No programs match your filters</h2>
-                    <p class="text-sm text-muted mb-5 max-w-xs leading-relaxed">
-                      Try removing some filters or broadening your search to find programs.
+                    <p class="text-sm text-muted mb-5 max-w-md leading-relaxed">
+                      Try removing a filter, broadening your keyword, or switching to Fit Finder if you want a guided shortlist instead of a strict search.
                     </p>
-                    <a
-                      href="/programs"
-                      class="inline-flex items-center h-[40px] px-5 bg-primary text-white
-                             text-sm font-semibold rounded-[8px] hover:bg-primary-hover transition-colors"
-                    >
-                      Clear all filters
-                    </a>
+                    <div class="flex flex-col sm:flex-row gap-3">
+                      <a
+                        href="/programs"
+                        class="inline-flex items-center justify-center h-[40px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px] hover:bg-primary-hover transition-colors"
+                      >
+                        Clear all filters
+                      </a>
+                      <a
+                        href="/fit-finder"
+                        class="inline-flex items-center justify-center h-[40px] px-5 border border-edge bg-surface text-sm font-semibold text-ink rounded-[9px] hover:border-primary/40 hover:text-primary transition-colors"
+                      >
+                        Use Fit Finder
+                      </a>
+                    </div>
                   </Fragment>
                 ) : (
                   <Fragment>
-                    <h2 class="text-lg font-semibold text-ink mb-1.5">No programs published yet</h2>
-                    <p class="text-sm text-muted max-w-xs leading-relaxed">
-                      We're building our database of international study programs. Check back soon.
+                    <h2 class="text-lg font-semibold text-ink mb-1.5">No published programs yet</h2>
+                    <p class="text-sm text-muted max-w-md leading-relaxed">
+                      We are still expanding the public program directory. Check back soon, or use guides and Fit Finder to keep exploring.
                     </p>
                   </Fragment>
                 )}
               </div>
             )}
-
           </div>
         </div>
-
       </form>
+
+      <div
+        id="program-compare-tray"
+        class="hidden fixed inset-x-0 bottom-0 z-40 border-t border-edge bg-surface/95 backdrop-blur px-4 py-3 shadow-[0_-12px_30px_rgba(11,31,58,0.10)]"
+        aria-live="polite"
+      >
+        <div class="mx-auto flex max-w-[1200px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Selected for comparison</p>
+            <p id="program-compare-count" class="text-sm font-semibold text-ink">0 programs selected</p>
+            <p id="program-compare-titles" class="text-xs text-ink-secondary"></p>
+            <p id="program-compare-message" class="text-xs text-muted">Select 2-4 programs. You can compare up to 4 programs.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              id="program-compare-clear"
+              type="button"
+              class="inline-flex items-center justify-center rounded-[9px] border border-edge bg-surface px-4 py-2 text-sm font-semibold text-ink-secondary hover:border-primary/40 hover:text-ink transition-colors"
+            >
+              Clear
+            </button>
+            <button
+              id="program-compare-link"
+              type="button"
+              class="inline-flex items-center justify-center rounded-[9px] bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors opacity-50 pointer-events-none"
+              aria-disabled="true"
+            >
+              Compare programs
+            </button>
+          </div>
+        </div>
+      </div>
     </Container>
   </div>
 
+  <SavedProgramEnhancement />
+
+  <script is:inline>
+    (() => {
+      const STORAGE_KEY = 'degreewiki.programCompare.ids.v1'
+      const MAX_COMPARE = 4
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      const buttons = Array.from(document.querySelectorAll('[data-compare-button]'))
+      const cards = Array.from(document.querySelectorAll('[data-compare-card]'))
+      const tray = document.getElementById('program-compare-tray')
+      const countText = document.getElementById('program-compare-count')
+      const titlesText = document.getElementById('program-compare-titles')
+      const messageText = document.getElementById('program-compare-message')
+      const compareLink = document.getElementById('program-compare-link')
+      const clearButton = document.getElementById('program-compare-clear')
+
+      if (!tray || !countText || !titlesText || !messageText || !compareLink || !clearButton || buttons.length === 0) return
+
+      const selected = readStoredSelections()
+      buttons.forEach((button) => {
+        const id = button.dataset.programId
+        const title = button.dataset.programTitle
+        const item = selected.find((entry) => entry.id === id)
+        if (item && title) item.title = title
+      })
+
+      function readStoredSelections() {
+        try {
+          const raw = window.localStorage.getItem(STORAGE_KEY)
+          const parsed = raw ? JSON.parse(raw) : []
+          if (!Array.isArray(parsed)) return []
+
+          const seen = new Set()
+          const entries = []
+          parsed.forEach((entry) => {
+            const id = typeof entry === 'string' ? entry : entry && typeof entry.id === 'string' ? entry.id : ''
+            const title = entry && typeof entry.title === 'string' ? entry.title : ''
+            if (!UUID_RE.test(id) || seen.has(id) || entries.length >= MAX_COMPARE) return
+            seen.add(id)
+            entries.push({ id, title })
+          })
+          return entries
+        } catch {
+          return []
+        }
+      }
+
+      function writeStoredSelections() {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(selected.slice(0, MAX_COMPARE)))
+        } catch {
+          /* localStorage is optional; the current page still updates. */
+        }
+      }
+
+      function selectedIds() {
+        return selected.map((entry) => entry.id).slice(0, MAX_COMPARE)
+      }
+
+      function findSelected(id) {
+        return selected.find((entry) => entry.id === id)
+      }
+
+      function removeSelected(id) {
+        const index = selected.findIndex((entry) => entry.id === id)
+        if (index >= 0) selected.splice(index, 1)
+      }
+
+      function setButtonState(button, isSelected) {
+        button.setAttribute('aria-pressed', isSelected ? 'true' : 'false')
+        button.setAttribute('aria-label', isSelected ? 'Remove from compare' : 'Add to compare')
+        button.classList.toggle('text-primary', isSelected)
+        button.classList.toggle('bg-primary-surface', isSelected)
+        button.classList.toggle('border-primary', isSelected)
+        button.classList.toggle('text-ink-secondary', !isSelected)
+        button.classList.toggle('bg-surface', !isSelected)
+        button.classList.toggle('border-edge', !isSelected)
+
+        const box = button.querySelector('[data-compare-box]')
+        const check = button.querySelector('[data-compare-check]')
+        if (box) {
+          box.classList.toggle('bg-primary', isSelected)
+          box.classList.toggle('border-primary', isSelected)
+          box.classList.toggle('bg-surface', !isSelected)
+          box.classList.toggle('border-[#cbd5e1]', !isSelected)
+        }
+        if (check) check.classList.toggle('hidden', !isSelected)
+      }
+
+      function render(message) {
+        const ids = selectedIds()
+        buttons.forEach((button) => {
+          const id = button.dataset.programId
+          if (!id) return
+          setButtonState(button, !!findSelected(id))
+        })
+
+        cards.forEach((card) => {
+          const id = card.getAttribute('data-compare-card')
+          const isSelected = !!id && !!findSelected(id)
+          card.classList.toggle('border-primary', isSelected)
+          card.classList.toggle('border-edge', !isSelected)
+          card.classList.toggle('shadow-[0_0_0_3px_rgba(29,78,216,0.12)]', isSelected)
+          card.classList.toggle('shadow-[0_1px_2px_rgba(11,31,58,0.04)]', !isSelected)
+        })
+
+        tray.classList.toggle('hidden', ids.length === 0)
+        countText.textContent = `${ids.length} ${ids.length === 1 ? 'program' : 'programs'} selected`
+        const titles = selected
+          .map((entry) => entry.title)
+          .filter((title) => title)
+          .slice(0, MAX_COMPARE)
+        titlesText.textContent = titles.length > 0 ? titles.join(' | ') : ''
+
+        if (message) {
+          messageText.textContent = message
+        } else if (ids.length === 1) {
+          messageText.textContent = 'Select at least 2 programs to compare. Add one more program to compare.'
+        } else if (ids.length >= MAX_COMPARE) {
+          messageText.textContent = 'You can compare up to 4 programs at once.'
+        } else {
+          messageText.textContent = 'Select 2-4 programs. You can compare up to 4 programs.'
+        }
+
+        if (ids.length >= 2) {
+          const params = new URLSearchParams()
+          params.set('ids', ids.join(','))
+          compareLink.dataset.href = `/programs/compare?${params.toString()}`
+          compareLink.setAttribute('aria-disabled', 'false')
+          compareLink.classList.remove('opacity-50', 'pointer-events-none')
+        } else {
+          compareLink.dataset.href = ''
+          compareLink.setAttribute('aria-disabled', 'true')
+          compareLink.classList.add('opacity-50', 'pointer-events-none')
+        }
+      }
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', (event) => {
+          const id = button.dataset.programId
+          if (!id || !UUID_RE.test(id)) return
+          event.preventDefault()
+
+          if (findSelected(id)) {
+            removeSelected(id)
+            writeStoredSelections()
+            render()
+            return
+          }
+
+          if (selected.length >= MAX_COMPARE) {
+            render('You can compare up to 4 programs. Remove one before adding another.')
+            return
+          }
+
+          selected.push({ id, title: button.dataset.programTitle || '' })
+          writeStoredSelections()
+          render()
+        })
+      })
+
+      clearButton.addEventListener('click', () => {
+        selected.splice(0, selected.length)
+        writeStoredSelections()
+        render()
+      })
+
+      compareLink.addEventListener('click', () => {
+        const href = compareLink.dataset.href
+        if (href) location.href = href
+      })
+
+      render()
+    })()
+  </script>
 </PublicLayout>
