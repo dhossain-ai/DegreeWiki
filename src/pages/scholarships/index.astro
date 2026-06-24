@@ -3,14 +3,15 @@ import PublicLayout from '../../layouts/PublicLayout.astro'
 import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
+import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
 const SCHOLARSHIP_TYPES = ['full', 'partial', 'merit', 'need_based', 'government', 'institutional', 'other'] as const
-const PROVIDER_TYPES    = ['government', 'university', 'private_foundation', 'corporate', 'ngo', 'other'] as const
-const FUNDING_TYPES     = ['full_tuition', 'partial_tuition', 'living_stipend', 'travel', 'research', 'full_funding', 'other'] as const
+const PROVIDER_TYPES = ['government', 'university', 'private_foundation', 'corporate', 'ngo', 'other'] as const
+const FUNDING_TYPES = ['full_tuition', 'partial_tuition', 'living_stipend', 'travel', 'research', 'full_funding', 'other'] as const
 const APPLICATION_TYPES = ['direct', 'university_portal', 'nomination', 'embassy', 'other'] as const
 
 function parseEnum<T extends readonly string[]>(allowed: T, raw: string | null): T[number] | undefined {
@@ -19,15 +20,15 @@ function parseEnum<T extends readonly string[]>(allowed: T, raw: string | null):
 
 const sp = Astro.url.searchParams
 
-const q               = sp.get('q')?.trim().replace(/[,()]/g, '').slice(0, 100) || undefined
+const q = sp.get('q')?.trim().replace(/[,()]/g, '').slice(0, 100) || undefined
 const scholarshipType = parseEnum(SCHOLARSHIP_TYPES, sp.get('scholarship_type'))
-const providerType    = parseEnum(PROVIDER_TYPES,    sp.get('provider_type'))
-const fundingType     = parseEnum(FUNDING_TYPES,     sp.get('funding_type'))
+const providerType = parseEnum(PROVIDER_TYPES, sp.get('provider_type'))
+const fundingType = parseEnum(FUNDING_TYPES, sp.get('funding_type'))
 const applicationType = parseEnum(APPLICATION_TYPES, sp.get('application_type'))
-const currency        = sp.get('currency')?.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 10) || undefined
-const upcomingOnly    = sp.get('deadline') === 'upcoming'
+const currency = sp.get('currency')?.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 10) || undefined
+const upcomingOnly = sp.get('deadline') === 'upcoming'
 
-const today    = new Date()
+const today = new Date()
 const todayISO = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`
 
 const hasFilters = !!(q || scholarshipType || providerType || fundingType || applicationType || currency || upcomingOnly)
@@ -35,36 +36,41 @@ const hasFilters = !!(q || scholarshipType || providerType || fundingType || app
 let query = supabase
   .from('scholarships')
   .select(
-    `id, name, slug, scholarship_type, provider_name, provider_type, funding_type, application_type, amount_min, amount_max, currency, deadline, deadline_text,
+    `id, name, slug, scholarship_type, provider_name, provider_type, funding_type, application_type,
+     amount_min, amount_max, currency, deadline, deadline_text, eligibility_summary,
+     verification_status, last_verified_at, source_confidence_score,
+     scholarship_countries(countries(name)),
+     scholarship_degree_levels(degree_levels(name)),
      logo:media_assets!scholarships_logo_id_fkey(cloudinary_public_id, alt_text, display_name)`,
     { count: 'exact' }
   )
   .eq('content_status', 'published')
   .order('deadline', { ascending: true, nullsFirst: false })
-  .order('name',     { ascending: true })
+  .order('name', { ascending: true })
   .limit(201)
 
-if (q)               query = query.or(`name.ilike.%${q}%,provider_name.ilike.%${q}%`)
+if (q) query = query.or(`name.ilike.%${q}%,provider_name.ilike.%${q}%`)
 if (scholarshipType) query = query.eq('scholarship_type', scholarshipType)
-if (providerType)    query = query.eq('provider_type', providerType)
-if (fundingType)     query = query.eq('funding_type', fundingType)
+if (providerType) query = query.eq('provider_type', providerType)
+if (fundingType) query = query.eq('funding_type', fundingType)
 if (applicationType) query = query.eq('application_type', applicationType)
-if (currency)        query = query.ilike('currency', `%${currency}%`)
-if (upcomingOnly)    query = query.gte('deadline', todayISO)
+if (currency) query = query.ilike('currency', `%${currency}%`)
+if (upcomingOnly) query = query.gte('deadline', todayISO)
 
 const { data, count, error } = await query
 if (error) console.error('scholarships list error:', error.message)
 
-const allRows   = data ?? []
+const allRows = data ?? []
 const overLimit = (count ?? allRows.length) > 200
-const rows      = allRows.slice(0, 200)
+const rows = allRows.slice(0, 200)
+const resultCount = count ?? rows.length
 
 function formatAmount(min: any, max: any, cur: string | null): string | null {
   if (min == null && max == null) return null
   const fmt = (n: any) => Number(n).toLocaleString()
   const range =
     min != null && max != null
-      ? `${fmt(min)} – ${fmt(max)}`
+      ? `${fmt(min)}–${fmt(max)}`
       : min != null ? fmt(min) : `up to ${fmt(max)}`
   return [cur, range].filter(Boolean).join(' ')
 }
@@ -79,6 +85,21 @@ function formatDeadline(d: string | null, dt: string | null): string | null {
   return dt ?? null
 }
 
+function formatShortDate(d: string | null): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function getVerificationInfo(status: string | null | undefined): { label: string; variant: 'verified' | 'neutral' } | null {
+  if (status === 'verified') return { label: 'Verified', variant: 'verified' }
+  if (status === 'partially_verified') return { label: 'Partially verified', variant: 'neutral' }
+  return null
+}
+
+function relationNames(rows: any[] | null | undefined, relation: string): string[] {
+  return (rows ?? []).map((row: any) => row?.[relation]?.name).filter(Boolean)
+}
+
 function buildUrlWithout(param: string): string {
   const params = new URLSearchParams(Astro.url.searchParams)
   params.delete(param)
@@ -88,17 +109,18 @@ function buildUrlWithout(param: string): string {
 
 type FilterChip = { key: string; label: string; removeHref: string }
 const activeChips: FilterChip[] = []
-if (q)               activeChips.push({ key: 'q',               label: `"${q}"`,                               removeHref: buildUrlWithout('q') })
+if (q) activeChips.push({ key: 'q', label: `"${q}"`, removeHref: buildUrlWithout('q') })
 if (scholarshipType) activeChips.push({ key: 'scholarship_type', label: `Type: ${formatLabel(scholarshipType)}`, removeHref: buildUrlWithout('scholarship_type') })
-if (providerType)    activeChips.push({ key: 'provider_type',    label: `Provider: ${formatLabel(providerType)}`,removeHref: buildUrlWithout('provider_type') })
-if (fundingType)     activeChips.push({ key: 'funding_type',     label: `Funding: ${formatLabel(fundingType)}`,  removeHref: buildUrlWithout('funding_type') })
-if (applicationType) activeChips.push({ key: 'application_type', label: `Via: ${formatLabel(applicationType)}`,  removeHref: buildUrlWithout('application_type') })
-if (currency)        activeChips.push({ key: 'currency',         label: `Currency: ${currency}`,                 removeHref: buildUrlWithout('currency') })
-if (upcomingOnly)    activeChips.push({ key: 'deadline',         label: 'Upcoming only',                         removeHref: buildUrlWithout('deadline') })
+if (providerType) activeChips.push({ key: 'provider_type', label: `Provider: ${formatLabel(providerType)}`, removeHref: buildUrlWithout('provider_type') })
+if (fundingType) activeChips.push({ key: 'funding_type', label: `Funding: ${formatLabel(fundingType)}`, removeHref: buildUrlWithout('funding_type') })
+if (applicationType) activeChips.push({ key: 'application_type', label: `Via: ${formatLabel(applicationType)}`, removeHref: buildUrlWithout('application_type') })
+if (currency) activeChips.push({ key: 'currency', label: `Currency: ${currency}`, removeHref: buildUrlWithout('currency') })
+if (upcomingOnly) activeChips.push({ key: 'deadline', label: 'Upcoming only', removeHref: buildUrlWithout('deadline') })
 
-const flabel  = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
-const fselect = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-primary'
-const finput  = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary'
+const flabel = 'block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1.5'
+const fselect = 'w-full rounded-[10px] border border-edge bg-surface px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-primary'
+const finput = 'w-full rounded-[10px] border border-edge bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary'
+const headlineCount = error ? '200+' : overLimit ? '200+' : resultCount.toLocaleString()
 ---
 
 <style>
@@ -108,256 +130,282 @@ const finput  = 'w-full rounded-[8px] border border-edge bg-surface px-3 py-2 te
   .chevron { transition: transform 200ms ease; }
 </style>
 
-<PublicLayout title="Scholarships — DegreeWiki" noindex={hasFilters} canonical={SITE_URL + '/scholarships'}>
-
-  <!-- Page header band -->
+<PublicLayout
+  title="Scholarships — DegreeWiki"
+  description="Browse published scholarships with provider, funding, deadline, eligibility, host-country, and verification details when available."
+  noindex={hasFilters}
+  canonical={SITE_URL + '/scholarships'}
+>
   <div class="bg-surface border-b border-edge">
-    <Container width="default" class="py-7 sm:py-8">
-      <h1 class="text-[28px] sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
-        Scholarships
-      </h1>
-      <p class="mt-1.5 text-base text-muted">
-        Find scholarships and funding opportunities for international students.
-      </p>
-    </Container>
-  </div>
-
-  <!-- Main content -->
-  <div class="bg-canvas min-h-[60vh]">
-    <Container width="default" class="py-6 sm:py-8">
-
-      <form method="get" action="/scholarships">
-
-        <!-- Keyword search bar -->
-        <div class="flex gap-2.5 mb-4">
-          <div class="relative flex-1">
-            <label for="q" class="sr-only">Search scholarships</label>
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none"
-                 viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            </svg>
-            <input
-              id="q" name="q" type="search"
-              value={q ?? ''}
-              placeholder="Search scholarships, e.g. Chevening, Gates, government merit…"
-              class="w-full h-[44px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface
-                     text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary"
-            />
-          </div>
-          <button type="submit"
-                  class="h-[44px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px]
-                         hover:bg-primary-hover transition-colors flex-none">
-            Search
-          </button>
-          {hasFilters && (
-            <a href="/scholarships"
-               class="h-[44px] px-4 inline-flex items-center text-[13.5px] font-medium text-ink-secondary
-                      border border-edge rounded-[10px] hover:bg-surface transition-colors flex-none">
-              Clear all
-            </a>
-          )}
-        </div>
-
-        <!-- Filter panel (collapsible) -->
-        <details open class="bg-surface border border-edge rounded-xl mb-4 overflow-hidden">
-          <summary class="flex items-center justify-between px-4 py-3 cursor-pointer select-none">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
-              Filters{activeChips.length > 0 ? ` (${activeChips.length})` : ''}
-            </span>
-            <svg class="chevron w-4 h-4 text-muted" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </summary>
-          <div class="border-t border-edge p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-
-            <div>
-              <label for="scholarship_type" class={flabel}>Scholarship type</label>
-              <select id="scholarship_type" name="scholarship_type" class={fselect}>
-                <option value="">Any type</option>
-                <option value="full"          selected={scholarshipType === 'full'}>Full</option>
-                <option value="partial"       selected={scholarshipType === 'partial'}>Partial</option>
-                <option value="merit"         selected={scholarshipType === 'merit'}>Merit</option>
-                <option value="need_based"    selected={scholarshipType === 'need_based'}>Need Based</option>
-                <option value="government"    selected={scholarshipType === 'government'}>Government</option>
-                <option value="institutional" selected={scholarshipType === 'institutional'}>Institutional</option>
-                <option value="other"         selected={scholarshipType === 'other'}>Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="provider_type" class={flabel}>Provider type</label>
-              <select id="provider_type" name="provider_type" class={fselect}>
-                <option value="">Any provider</option>
-                <option value="government"         selected={providerType === 'government'}>Government</option>
-                <option value="university"         selected={providerType === 'university'}>University</option>
-                <option value="private_foundation" selected={providerType === 'private_foundation'}>Private Foundation</option>
-                <option value="corporate"          selected={providerType === 'corporate'}>Corporate</option>
-                <option value="ngo"                selected={providerType === 'ngo'}>NGO</option>
-                <option value="other"              selected={providerType === 'other'}>Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="funding_type" class={flabel}>Funding type</label>
-              <select id="funding_type" name="funding_type" class={fselect}>
-                <option value="">Any funding</option>
-                <option value="full_tuition"    selected={fundingType === 'full_tuition'}>Full Tuition</option>
-                <option value="partial_tuition" selected={fundingType === 'partial_tuition'}>Partial Tuition</option>
-                <option value="living_stipend"  selected={fundingType === 'living_stipend'}>Living Stipend</option>
-                <option value="travel"          selected={fundingType === 'travel'}>Travel</option>
-                <option value="research"        selected={fundingType === 'research'}>Research</option>
-                <option value="full_funding"    selected={fundingType === 'full_funding'}>Full Funding</option>
-                <option value="other"           selected={fundingType === 'other'}>Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="application_type" class={flabel}>How to apply</label>
-              <select id="application_type" name="application_type" class={fselect}>
-                <option value="">Any method</option>
-                <option value="direct"            selected={applicationType === 'direct'}>Direct</option>
-                <option value="university_portal" selected={applicationType === 'university_portal'}>University Portal</option>
-                <option value="nomination"        selected={applicationType === 'nomination'}>Nomination</option>
-                <option value="embassy"           selected={applicationType === 'embassy'}>Embassy</option>
-                <option value="other"             selected={applicationType === 'other'}>Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="currency" class={flabel}>Currency</label>
-              <input id="currency" name="currency" type="text" value={currency ?? ''}
-                     placeholder="e.g. USD, GBP, EUR"
-                     class={finput} />
-            </div>
-
-            <div>
-              <label for="deadline" class={flabel}>Deadline</label>
-              <select id="deadline" name="deadline" class={fselect}>
-                <option value="">Any deadline</option>
-                <option value="upcoming" selected={upcomingOnly}>Upcoming only</option>
-              </select>
-            </div>
-
-            <div class="sm:col-span-2 lg:col-span-3 flex justify-end">
-              <button type="submit"
-                      class="h-[36px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px]
-                             hover:bg-primary-hover transition-colors">
-                Apply filters
-              </button>
-            </div>
-
-          </div>
-        </details>
-
-      </form>
-
-      <!-- Active filter chips -->
-      {activeChips.length > 0 && (
-        <div class="flex flex-wrap gap-2 mb-5" aria-label="Active filters">
-          {activeChips.map(chip => (
-            <a href={chip.removeHref}
-               class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border
-                      text-primary text-sm font-medium rounded-full hover:bg-primary-border transition-colors">
-              {chip.label}
-              <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
-            </a>
-          ))}
-        </div>
-      )}
-
-      <!-- Results count -->
-      {overLimit ? (
-        <p class="text-sm text-muted mb-4">
-          Showing 200 of {(count ?? 200).toLocaleString()} scholarships. Narrow your search to see more.
-        </p>
-      ) : rows.length > 0 ? (
-        <p class="text-sm text-muted mb-4">
-          {rows.length} {rows.length === 1 ? 'scholarship' : 'scholarships'} found.
-        </p>
-      ) : null}
-
-      <!-- Results -->
-      {rows.length === 0 ? (
-        <div class="text-center py-16 rounded-xl border border-edge bg-surface">
-          <p class="text-base font-medium text-ink mb-2">
-            {hasFilters ? 'No scholarships match your filters.' : 'No scholarships have been published yet.'}
+    <Container width="wide" class="py-8 sm:py-10">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.08em] text-primary mb-3">Scholarship discovery</p>
+          <h1 class="text-[30px] sm:text-[38px] font-bold text-ink tracking-[-0.03em] leading-tight">
+            Find published scholarships with funding details, deadlines, and source context.
+          </h1>
+          <p class="mt-3 max-w-2xl text-base sm:text-[17px] text-ink-secondary leading-relaxed">
+            Search by scholarship or provider, then narrow by funding type, provider type, application route, currency, or upcoming deadlines.
           </p>
-          {hasFilters && (
-            <a href="/scholarships" class="text-sm text-primary hover:text-primary-hover">
-              Clear filters and browse all
+
+          <div class="mt-5 flex flex-wrap gap-3">
+            <a href="/programs" class="inline-flex items-center justify-center rounded-[10px] bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-hover transition-colors">
+              Browse programs
             </a>
-          )}
+            <a href="/guides" class="inline-flex items-center justify-center rounded-[10px] border border-edge bg-canvas px-5 py-3 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary transition-colors">
+              Read scholarship guides
+            </a>
+          </div>
+
+          <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3">
+              <p class="text-[22px] font-bold text-ink leading-none">{headlineCount}</p>
+              <p class="mt-1 text-xs text-muted">{hasFilters ? 'Scholarships in view' : 'Published scholarships'}</p>
+            </div>
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3">
+              <p class="text-[22px] font-bold text-ink leading-none">{FUNDING_TYPES.length}</p>
+              <p class="mt-1 text-xs text-muted">Funding filters</p>
+            </div>
+            <div class="rounded-xl border border-edge bg-canvas px-4 py-3 col-span-2 sm:col-span-1">
+              <p class="text-[22px] font-bold text-ink leading-none">{PROVIDER_TYPES.length}</p>
+              <p class="mt-1 text-xs text-muted">Provider types</p>
+            </div>
+          </div>
         </div>
-      ) : (
-        <ul class="space-y-2.5">
-          {rows.map((s: any) => {
-            const amount   = formatAmount(s.amount_min, s.amount_max, s.currency)
-            const deadline = formatDeadline(s.deadline, s.deadline_text)
-            return (
-              <li class="flex gap-4 rounded-xl border border-edge bg-surface px-4 py-4
-                         hover:border-[#cbd5e1] hover:shadow-sm transition-all">
 
-                {s.logo?.cloudinary_public_id ? (
-                  <div class="flex-none w-10 h-10 rounded-md overflow-hidden border border-edge bg-surface self-start mt-0.5">
-                    <MediaImage
-                      publicId={s.logo.cloudinary_public_id}
-                      alt={s.logo.alt_text || s.logo.display_name || s.name}
-                      width={40}
-                      height={40}
-                      crop="fill"
-                      loading="lazy"
-                      class="w-full h-full object-cover"
-                    />
-                  </div>
-                ) : (
-                  <div class="flex-none w-10 h-10 rounded-md bg-surface border border-edge
-                              flex items-center justify-center text-xs font-bold text-muted self-start mt-0.5">
-                    {(s.provider_name ?? s.name).slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-
-                <div class="flex-1 min-w-0">
-                <div class="flex items-start justify-between gap-4 mb-2">
-                  <a href={`/scholarships/${s.slug}`}
-                     class="text-[15px] font-semibold text-ink hover:text-primary leading-snug">
-                    {s.name}
-                  </a>
-                  {amount && (
-                    <span class="text-sm font-semibold text-verified whitespace-nowrap shrink-0">{amount}</span>
-                  )}
-                </div>
-
-                {s.provider_name && (
-                  <p class="text-sm text-ink-secondary mb-2">{s.provider_name}</p>
-                )}
-
-                <div class="flex flex-wrap gap-1.5">
-                  {s.scholarship_type && (
-                    <Badge variant="neutral">{formatLabel(s.scholarship_type)}</Badge>
-                  )}
-                  {s.provider_type && (
-                    <Badge variant="neutral">{formatLabel(s.provider_type)}</Badge>
-                  )}
-                  {s.funding_type && (
-                    <Badge variant="info">{formatLabel(s.funding_type)}</Badge>
-                  )}
-                  {s.application_type && (
-                    <Badge variant="neutral">Via: {formatLabel(s.application_type)}</Badge>
-                  )}
-                  {deadline && (
-                    <Badge variant="deadline">Deadline: {deadline}</Badge>
-                  )}
-                </div>
-                </div>
-
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
+        <FitFinderMiniPanel class="h-full" />
+      </div>
     </Container>
   </div>
 
+  <div class="bg-canvas min-h-[60vh]">
+    <Container width="wide" class="py-6 sm:py-8">
+      <form method="get" action="/scholarships">
+        <div class="rounded-2xl border border-edge bg-surface p-4 sm:p-5 mb-6">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div class="relative flex-1">
+              <label for="q" class="sr-only">Search scholarships</label>
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"></circle>
+                <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
+              </svg>
+              <input
+                id="q"
+                name="q"
+                type="search"
+                value={q ?? ''}
+                placeholder="Search scholarships, providers, or funding routes"
+                class="w-full h-[46px] pl-[38px] pr-4 rounded-[10px] border border-edge bg-surface text-sm text-ink placeholder:text-muted focus:outline-none focus:border-primary"
+              />
+            </div>
+
+            <div class="flex gap-2.5">
+              <button type="submit" class="h-[46px] px-5 bg-primary text-white text-[13.5px] font-semibold rounded-[10px] hover:bg-primary-hover transition-colors">
+                Search
+              </button>
+              {hasFilters && (
+                <a href="/scholarships" class="h-[46px] px-4 inline-flex items-center justify-center text-[13.5px] font-medium text-ink-secondary border border-edge rounded-[10px] hover:bg-canvas transition-colors">
+                  Clear all
+                </a>
+              )}
+            </div>
+          </div>
+
+          {activeChips.length > 0 && (
+            <div class="flex flex-wrap gap-2 mt-4" aria-label="Active filters">
+              {activeChips.map(chip => (
+                <a href={chip.removeHref} class="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-surface border border-primary-border text-primary text-sm font-medium rounded-full hover:bg-primary-border transition-colors">
+                  {chip.label}
+                  <span aria-hidden="true" class="text-base leading-none opacity-60">×</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-5 md:gap-8">
+          <aside class="w-full md:w-72 lg:w-80 md:flex-none md:sticky md:top-[88px] md:self-start" aria-label="Scholarship filters">
+            <details open class="bg-surface border border-edge rounded-2xl overflow-hidden">
+              <summary class="md:hidden flex items-center justify-between px-4 py-3 cursor-pointer select-none">
+                <span class="text-sm font-semibold text-ink">Filters{activeChips.length > 0 ? ` (${activeChips.length})` : ''}</span>
+                <svg class="chevron w-4 h-4 text-muted" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+              </summary>
+
+              <div class="hidden md:flex items-center justify-between px-4 py-3 border-b border-edge-subtle">
+                <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Filters</span>
+                {hasFilters && <a href="/scholarships" class="text-xs text-primary hover:underline">Clear all</a>}
+              </div>
+
+              <div class="p-4 flex flex-col gap-4">
+                <div>
+                  <label for="scholarship_type" class={flabel}>Scholarship type</label>
+                  <select id="scholarship_type" name="scholarship_type" class={fselect}>
+                    <option value="">Any type</option>
+                    {SCHOLARSHIP_TYPES.map(type => <option value={type} selected={scholarshipType === type}>{formatLabel(type)}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="provider_type" class={flabel}>Provider type</label>
+                  <select id="provider_type" name="provider_type" class={fselect}>
+                    <option value="">Any provider</option>
+                    {PROVIDER_TYPES.map(type => <option value={type} selected={providerType === type}>{formatLabel(type)}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="funding_type" class={flabel}>Funding type</label>
+                  <select id="funding_type" name="funding_type" class={fselect}>
+                    <option value="">Any funding</option>
+                    {FUNDING_TYPES.map(type => <option value={type} selected={fundingType === type}>{formatLabel(type)}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="application_type" class={flabel}>How to apply</label>
+                  <select id="application_type" name="application_type" class={fselect}>
+                    <option value="">Any method</option>
+                    {APPLICATION_TYPES.map(type => <option value={type} selected={applicationType === type}>{formatLabel(type)}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="currency" class={flabel}>Currency</label>
+                  <input id="currency" name="currency" type="text" value={currency ?? ''} placeholder="e.g. USD, GBP, EUR" class={finput} />
+                </div>
+
+                <div>
+                  <label for="deadline" class={flabel}>Deadline</label>
+                  <select id="deadline" name="deadline" class={fselect}>
+                    <option value="">Any deadline</option>
+                    <option value="upcoming" selected={upcomingOnly}>Upcoming only</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="px-4 pb-4">
+                <button type="submit" class="w-full h-[42px] bg-primary text-white text-sm font-semibold rounded-[10px] hover:bg-primary-hover transition-colors">
+                  Apply filters
+                </button>
+              </div>
+            </details>
+          </aside>
+
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-col gap-2 mb-5">
+              <h2 class="text-lg font-semibold text-ink">Scholarship results</h2>
+              {error ? (
+                <p class="text-sm text-muted">Scholarship listings are temporarily unavailable. Please try again shortly.</p>
+              ) : rows.length === 0 ? (
+                <p class="text-sm text-muted">No scholarships match the current view.</p>
+              ) : overLimit ? (
+                <p class="text-sm text-muted">
+                  Showing the first <span class="font-semibold text-ink">200</span> scholarships. Narrow the filters to get a tighter shortlist.
+                </p>
+              ) : (
+                <p class="text-sm text-muted">
+                  <span class="font-semibold text-ink">{resultCount.toLocaleString()}</span>
+                  {resultCount === 1 ? ' scholarship matches your search.' : ' scholarships match your search.'}
+                </p>
+              )}
+            </div>
+
+            {rows.length === 0 ? (
+              <div class="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-edge rounded-2xl">
+                <h2 class="text-lg font-semibold text-ink mb-1.5">{hasFilters ? 'No scholarships match your filters' : 'No published scholarships yet'}</h2>
+                <p class="text-sm text-muted mb-5 max-w-md leading-relaxed">
+                  {hasFilters
+                    ? 'Try removing a filter, broadening your keyword, or checking program pages for university-specific funding routes.'
+                    : 'Published scholarship profiles will appear here with provider, funding, deadline, eligibility, and source context.'}
+                </p>
+                <div class="flex flex-col sm:flex-row gap-3">
+                  {hasFilters && (
+                    <a href="/scholarships" class="inline-flex items-center justify-center h-[40px] px-5 bg-primary text-white text-sm font-semibold rounded-[9px] hover:bg-primary-hover transition-colors">
+                      Clear all filters
+                    </a>
+                  )}
+                  <a href="/fit-finder" class="inline-flex items-center justify-center h-[40px] px-5 border border-edge bg-surface text-sm font-semibold text-ink rounded-[9px] hover:border-primary/40 hover:text-primary transition-colors">
+                    Start Fit Finder
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <ul class="space-y-4">
+                {rows.map((s: any) => {
+                  const amount = formatAmount(s.amount_min, s.amount_max, s.currency)
+                  const deadline = formatDeadline(s.deadline, s.deadline_text)
+                  const hostCountries = relationNames(s.scholarship_countries, 'countries').slice(0, 3)
+                  const degreeLevels = relationNames(s.scholarship_degree_levels, 'degree_levels').slice(0, 3)
+                  const verification = getVerificationInfo(s.verification_status)
+                  const sourceChecked = formatShortDate(s.last_verified_at)
+                  return (
+                    <li class="rounded-xl border border-edge bg-surface p-5 hover:border-[#cbd5e1] hover:shadow-sm transition-all">
+                      <div class="flex flex-col gap-4 sm:flex-row">
+                        {s.logo?.cloudinary_public_id ? (
+                          <div class="flex-none w-14 h-14 rounded-[10px] overflow-hidden border border-edge bg-surface self-start">
+                            <MediaImage publicId={s.logo.cloudinary_public_id} alt={s.logo.alt_text || s.logo.display_name || s.name} width={56} height={56} crop="fill" loading="lazy" class="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div class="flex-none w-14 h-14 rounded-[10px] bg-surface border border-edge flex items-center justify-center text-sm font-bold text-muted self-start">
+                            {(s.provider_name ?? s.name).slice(0, 2).toUpperCase()}
+                          </div>
+                        )}
+
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-start justify-between gap-4 mb-2">
+                            <div>
+                              <a href={`/scholarships/${s.slug}`} class="text-[18px] font-semibold text-ink hover:text-primary leading-snug tracking-[-0.01em]">
+                                {s.name}
+                              </a>
+                              {s.provider_name && <p class="text-sm text-ink-secondary mt-1">{s.provider_name}</p>}
+                            </div>
+                            {amount && <span class="hidden sm:inline-flex text-sm font-semibold text-verified whitespace-nowrap shrink-0">{amount}</span>}
+                          </div>
+
+                          {amount && <p class="sm:hidden text-sm font-semibold text-verified mb-2">{amount}</p>}
+
+                          <div class="flex flex-wrap gap-1.5 mb-3">
+                            {s.scholarship_type && <Badge variant="neutral">{formatLabel(s.scholarship_type)}</Badge>}
+                            {s.provider_type && <Badge variant="neutral">{formatLabel(s.provider_type)}</Badge>}
+                            {s.funding_type && <Badge variant="info">{formatLabel(s.funding_type)}</Badge>}
+                            {s.application_type && <Badge variant="neutral">Via: {formatLabel(s.application_type)}</Badge>}
+                            {deadline && <Badge variant="deadline">Deadline: {deadline}</Badge>}
+                            {verification && <Badge variant={verification.variant}>{verification.label}</Badge>}
+                            {sourceChecked && <Badge variant="neutral">Source checked {sourceChecked}</Badge>}
+                          </div>
+
+                          <dl class="grid gap-3 sm:grid-cols-3 border-t border-edge-subtle pt-3">
+                            <div>
+                              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">Host country</dt>
+                              <dd class="mt-1 text-sm font-medium text-ink">{hostCountries.length > 0 ? hostCountries.join(', ') : 'Not listed'}</dd>
+                            </div>
+                            <div>
+                              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">Degree level</dt>
+                              <dd class="mt-1 text-sm font-medium text-ink">{degreeLevels.length > 0 ? degreeLevels.join(', ') : 'Not listed'}</dd>
+                            </div>
+                            <div>
+                              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">Eligibility</dt>
+                              <dd class="mt-1 text-sm text-ink-secondary line-clamp-2">{s.eligibility_summary || 'Not listed'}</dd>
+                            </div>
+                          </dl>
+
+                          <div class="mt-4 flex flex-wrap gap-3">
+                            <a href={`/scholarships/${s.slug}`} class="inline-flex items-center justify-center rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors">
+                              View details
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      </form>
+    </Container>
+  </div>
 </PublicLayout>
