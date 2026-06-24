@@ -1,0 +1,193 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import ProgramCard from '../../components/public/cards/ProgramCard.astro'
+import SavedProgramEnhancement from '../../components/public/SavedProgramEnhancement.astro'
+import { userHasAdminRole } from '../../lib/auth/dashboard'
+import { createClient } from '../../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: { user } } = await supabase.auth.getUser()
+if (!user) {
+  return Astro.redirect('/login?redirect=/account/saved-programs')
+}
+
+if (await userHasAdminRole(supabase)) {
+  return Astro.redirect('/admin')
+}
+
+type SavedProgram = {
+  savedAt: string
+  program: any
+}
+
+let savedPrograms: SavedProgram[] = []
+let pageState: 'list' | 'empty' | 'error' = 'empty'
+
+const { data: savedRows, error: savedError } = await supabase
+  .from('saved_items')
+  .select('entity_id, created_at')
+  .eq('user_id', user.id)
+  .eq('entity_type', 'program')
+  .order('created_at', { ascending: false })
+
+if (savedError) {
+  console.error('saved programs: saved_items list error:', savedError.message)
+  pageState = 'error'
+} else {
+  const savedProgramIds = (savedRows ?? []).map((row: any) => row.entity_id).filter(Boolean)
+
+  if (savedProgramIds.length > 0) {
+    const { data: programRows, error: programError } = await supabase
+      .from('programs')
+      .select(`
+        id, title, slug, duration_months,
+        language_of_instruction,
+        tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+        verification_status, last_verified_at,
+        universities(
+          name, slug,
+          logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)
+        ),
+        degree_levels(name, code),
+        countries(name, iso2),
+        cities(name),
+        subjects!programs_primary_subject_id_fkey(name)
+      `)
+      .eq('content_status', 'published')
+      .in('id', savedProgramIds)
+
+    if (programError) {
+      console.error('saved programs: programs list error:', programError.message)
+      pageState = 'error'
+    } else {
+      const programById = new Map((programRows ?? []).map((program: any) => [program.id, program]))
+      savedPrograms = (savedRows ?? []).flatMap((row: any) => {
+        const program = programById.get(row.entity_id)
+        return program ? [{ savedAt: row.created_at, program }] : []
+      })
+      pageState = savedPrograms.length > 0 ? 'list' : 'empty'
+    }
+  }
+}
+
+function abbreviateDegree(code: string | null | undefined, name: string | null | undefined): string | null {
+  if (!code && !name) return null
+  const c = (code ?? '').toLowerCase()
+  const n = (name ?? '').toLowerCase()
+  if (c === 'phd' || c === 'doctorate' || n.includes('phd') || n.includes('doctor')) return 'PhD'
+  if (c === 'mba' || n.includes('mba')) return 'MBA'
+  if (c === 'master' || n.includes('master')) return 'MSc'
+  if (c === 'bachelor' || n.includes('bachelor')) return 'BSc'
+  if (c === 'postgraduate' || n.includes('postgraduate')) return 'PG'
+  if (name) return name.split(' ')[0] ?? null
+  return null
+}
+
+function formatDuration(months: number | null | undefined): string | null {
+  if (!months) return null
+  if (months === 12) return '1 year'
+  if (months % 12 === 0) return `${months / 12} years`
+  return `${months} months`
+}
+
+function formatShortDate(d: string | null | undefined): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function tuitionDisplay(p: any): { display: string | null; per: string | null } {
+  const min = p.tuition_min_amount
+  const max = p.tuition_max_amount
+  if (min == null && max == null) return { display: null, per: null }
+  const cur = (p.tuition_currency ?? '').toUpperCase()
+  const sym = cur === 'EUR' ? '€' : cur === 'USD' ? '$' : cur === 'GBP' ? '£' : ''
+  const prefix = sym || (cur ? `${cur} ` : '')
+  const fmt = (n: number) => `${prefix}${Number(n).toLocaleString()}`
+  const display = min != null && max != null && min !== max ? `${fmt(min)}-${fmt(max)}` : fmt(min ?? max)
+  const per = p.tuition_period?.replace(/_/g, ' ') ?? 'per year'
+  return { display, per }
+}
+
+function getVerificationInfo(status: string | null | undefined): { label: string; tone: 'verified' | 'neutral' } | null {
+  if (status === 'verified') return { label: 'Verified', tone: 'verified' }
+  if (status === 'partially_verified') return { label: 'Partially verified', tone: 'neutral' }
+  return null
+}
+---
+<PublicLayout title="Saved Programs - DegreeWiki" noindex={true}>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="max-w-3xl mb-6">
+      <a href="/account" class="text-sm text-gray-500 hover:text-gray-700">&larr; Back to dashboard</a>
+      <h1 class="mt-4 text-2xl font-bold text-gray-900 mb-1">Saved programs</h1>
+      <p class="text-sm text-gray-500">Programs you saved from DegreeWiki, newest first.</p>
+    </div>
+
+    <div class="flex flex-wrap gap-3 mb-7">
+      <a href="/programs" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+        Browse programs
+      </a>
+      <a href="/fit-finder" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+        Run Fit Finder
+      </a>
+    </div>
+
+    {pageState === 'error' ? (
+      <div class="max-w-2xl border border-red-100 rounded-lg p-6 bg-red-50">
+        <h2 class="text-base font-semibold text-red-900 mb-2">Could not load saved programs</h2>
+        <p class="text-sm text-red-800">Please try again shortly.</p>
+      </div>
+    ) : pageState === 'empty' ? (
+      <div class="max-w-2xl border border-gray-200 rounded-lg p-6 bg-gray-50">
+        <h2 class="text-base font-semibold text-gray-900 mb-2">No saved programs yet</h2>
+        <p class="text-sm text-gray-600 mb-4">
+          Save published programs while browsing, then return here to review them from your dashboard.
+        </p>
+        <a href="/programs" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Browse programs
+        </a>
+      </div>
+    ) : (
+      <ul class="flex flex-col gap-4 list-none p-0 m-0">
+        {savedPrograms.map(({ savedAt, program }) => {
+          const tuition = tuitionDisplay(program)
+          const location = [program.cities?.name, program.countries?.name].filter(Boolean).join(', ')
+          const verification = getVerificationInfo(program.verification_status)
+          return (
+            <li>
+              <p class="mb-2 text-xs text-gray-500">Saved {formatShortDate(savedAt)}</p>
+              <ProgramCard
+                href={`/programs/${program.slug}`}
+                programId={program.id}
+                title={program.title}
+                universityName={program.universities?.name ?? null}
+                universityHref={program.universities?.slug ? `/universities/${program.universities.slug}` : null}
+                degreeLevel={abbreviateDegree(program.degree_levels?.code, program.degree_levels?.name)}
+                field={program.subjects?.name ?? null}
+                countryCode={program.countries?.iso2 ?? null}
+                location={location || null}
+                duration={formatDuration(program.duration_months)}
+                language={program.language_of_instruction ?? null}
+                tuitionDisplay={tuition.display}
+                tuitionPer={tuition.per}
+                verificationLabel={verification?.label ?? null}
+                verificationTone={verification?.tone ?? 'verified'}
+                sourceChecked={formatShortDate(program.last_verified_at)}
+                saved={true}
+                isAuthenticated={true}
+                logoPublicId={program.universities?.logo?.cloudinary_public_id ?? null}
+                logoAlt={program.universities?.logo?.alt_text || program.universities?.logo?.display_name || program.universities?.name || null}
+              />
+            </li>
+          )
+        })}
+      </ul>
+    )}
+  </div>
+
+  <SavedProgramEnhancement />
+</PublicLayout>
