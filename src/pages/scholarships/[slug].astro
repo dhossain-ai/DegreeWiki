@@ -4,6 +4,9 @@ import Container from '../../components/ui/Container.astro'
 import Badge from '../../components/ui/Badge.astro'
 import SourceBox from '../../components/public/SourceBox.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
+import FitFinderMiniPanel from '../../components/public/FitFinderMiniPanel.astro'
+import ProgramCard from '../../components/public/cards/ProgramCard.astro'
+import SavedProgramEnhancement from '../../components/public/SavedProgramEnhancement.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 import { getPublicId, getAlt, getOgImageUrl } from '../../lib/public/media'
@@ -23,6 +26,11 @@ const { data: scholarship } = await supabase
     verification_status, last_verified_at, source_confidence_score, updated_at,
     seo_title, seo_description,
     canonical_url, og_title, og_description,
+    scholarship_countries(countries(name)),
+    scholarship_universities(universities(name, slug, content_status)),
+    scholarship_subjects(subjects(name)),
+    scholarship_degree_levels(degree_levels(name, code)),
+    scholarship_eligible_nationalities(eligibility_type, notes, countries(name)),
     logo:media_assets!scholarships_logo_id_fkey(cloudinary_public_id, alt_text, display_name),
     cover_image:media_assets!scholarships_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name),
     og_image:media_assets!scholarships_og_image_id_fkey(cloudinary_public_id, alt_text, display_name)
@@ -38,15 +46,15 @@ if (!scholarship) {
 const s = scholarship as any
 
 const VERIFICATION_MAP: Record<string, { label: string; variant: 'verified' | 'neutral' }> = {
-  verified:           { label: 'Verified',           variant: 'verified' },
-  partially_verified: { label: 'Partially Verified', variant: 'neutral'  },
-  source_conflict:    { label: 'Under Review',       variant: 'neutral'  },
-  outdated:           { label: 'Under Review',       variant: 'neutral'  },
-  needs_review:       { label: 'Under Review',       variant: 'neutral'  },
+  verified: { label: 'Verified', variant: 'verified' },
+  partially_verified: { label: 'Partially verified', variant: 'neutral' },
+  source_conflict: { label: 'Under review', variant: 'neutral' },
+  outdated: { label: 'May need updating', variant: 'neutral' },
+  needs_review: { label: 'Needs review', variant: 'neutral' },
 }
 const verInfo = VERIFICATION_MAP[s.verification_status] ?? null
 
-function formatLabel(value: string | null): string | null {
+function formatLabel(value: string | null | undefined): string | null {
   if (!value) return null
   return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
@@ -55,228 +63,411 @@ function formatAmount(): string | null {
   if (s.amount_min == null && s.amount_max == null) return null
   const fmt = (n: any) => Number(n).toLocaleString()
   const range = s.amount_min != null && s.amount_max != null
-    ? `${fmt(s.amount_min)} – ${fmt(s.amount_max)}`
+    ? `${fmt(s.amount_min)}–${fmt(s.amount_max)}`
     : s.amount_min != null ? fmt(s.amount_min) : `up to ${fmt(s.amount_max)}`
   return [s.currency, range].filter(Boolean).join(' ')
 }
 
-function formatDate(d: string | null): string | null {
+function formatDate(d: string | null | undefined): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-const amount         = formatAmount()
-const deadline       = formatDate(s.deadline) ?? s.deadline_text ?? null
+function formatShortDate(d: string | null | undefined): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function relationNames(rows: any[] | null | undefined, relation: string): string[] {
+  return (rows ?? []).map((row: any) => row?.[relation]?.name).filter(Boolean)
+}
+
+function abbreviateDegree(code: string | null | undefined, name: string | null | undefined): string | null {
+  if (!code && !name) return null
+  const c = (code ?? '').toLowerCase()
+  const n = (name ?? '').toLowerCase()
+  if (c === 'phd' || c === 'doctorate' || n.includes('phd') || n.includes('doctor')) return 'PhD'
+  if (c === 'mba' || n.includes('mba')) return 'MBA'
+  if (c === 'master' || n.includes('master')) return 'MSc'
+  if (c === 'bachelor' || n.includes('bachelor')) return 'BSc'
+  if (c === 'postgraduate' || n.includes('postgraduate')) return 'PG'
+  return name ?? null
+}
+
+function formatDuration(months: number | null | undefined): string | null {
+  if (!months) return null
+  if (months === 12) return '1 year'
+  if (months % 12 === 0) return `${months / 12} years`
+  return `${months} months`
+}
+
+function moneyPrefix(currency: string | null | undefined): string {
+  const cur = (currency ?? '').toUpperCase()
+  if (cur === 'EUR') return '€'
+  if (cur === 'USD') return '$'
+  if (cur === 'GBP') return '£'
+  return cur ? `${cur} ` : ''
+}
+
+function tuitionDisplay(p: any): { display: string | null; per: string | null } {
+  const min = p.tuition_min_amount
+  const max = p.tuition_max_amount
+  if (min == null && max == null) return { display: null, per: null }
+  const fmt = (n: number) => `${moneyPrefix(p.tuition_currency)}${Number(n).toLocaleString()}`
+  const display = min != null && max != null && min !== max ? `${fmt(min)}–${fmt(max)}` : fmt(min ?? max)
+  const per = p.tuition_period ? `per ${p.tuition_period.replace(/_/g, ' ')}` : 'per year'
+  return { display, per }
+}
+
+const amount = formatAmount()
+const deadline = formatDate(s.deadline) ?? s.deadline_text ?? null
 const lastVerifiedAt = formatDate(s.last_verified_at)
-const pageTitle      = s.seo_title || s.name
-const pageDesc       = s.seo_description || s.eligibility_summary || undefined
-const canonical      = s.canonical_url || `${SITE_URL}/scholarships/${slug}`
-const ogTitle        = s.og_title || pageTitle
-const ogDesc         = s.og_description || pageDesc
-const updatedAt      = formatDate(s.updated_at)
+const lastVerifiedShort = formatShortDate(s.last_verified_at)
+const pageTitle = s.seo_title || s.name
+const pageDesc = s.seo_description || s.eligibility_summary || [s.provider_name, amount].filter(Boolean).join(' · ') || undefined
+const canonical = s.canonical_url || `${SITE_URL}/scholarships/${slug}`
+const ogTitle = s.og_title || pageTitle
+const ogDesc = s.og_description || pageDesc
+const updatedAt = formatDate(s.updated_at)
 
-const cloudName     = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
-const logoPublicId  = getPublicId(s.logo)
-const logoAlt       = getAlt(s.logo, s.provider_name ?? s.name)
+const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
+const logoPublicId = getPublicId(s.logo)
+const logoAlt = getAlt(s.logo, s.provider_name ?? s.name)
 const coverPublicId = getPublicId(s.cover_image)
-const coverAlt      = getAlt(s.cover_image, s.name)
-const ogImageUrl    = getOgImageUrl(cloudName, s.og_image, s.cover_image ?? s.logo)
----
-<PublicLayout title={`${pageTitle} — DegreeWiki`} description={pageDesc} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDesc} ogImage={ogImageUrl ?? undefined}>
+const coverAlt = getAlt(s.cover_image, s.name)
+const ogImageUrl = getOgImageUrl(cloudName, s.og_image, s.cover_image ?? s.logo)
 
-  <!-- Page header band -->
+const hostCountries = relationNames(s.scholarship_countries, 'countries')
+const subjects = relationNames(s.scholarship_subjects, 'subjects')
+const degreeLevels = relationNames(s.scholarship_degree_levels, 'degree_levels')
+const universities = (s.scholarship_universities ?? [])
+  .map((row: any) => row?.universities)
+  .filter((university: any) => university?.content_status === 'published')
+const nationalityRows = s.scholarship_eligible_nationalities ?? []
+const hasMainContent = !!(s.overview || s.eligibility_summary || s.coverage_notes || (s.deadline_text && s.deadline))
+
+const { data: linkedProgramRows, error: linkedProgramsError } = await supabase
+  .from('scholarship_programs')
+  .select(`
+    programs(
+      id, title, slug, content_status, duration_months, language_of_instruction,
+      tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+      verification_status, last_verified_at,
+      universities(
+        name, slug,
+        logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)
+      ),
+      degree_levels(name, code),
+      countries(name, iso2),
+      cities(name),
+      subjects!programs_primary_subject_id_fkey(name)
+    )
+  `)
+  .eq('scholarship_id', s.id)
+  .limit(3)
+
+if (linkedProgramsError) console.error('scholarship linked programs error:', linkedProgramsError.message)
+const linkedPrograms = (linkedProgramRows ?? [])
+  .map((row: any) => row.programs)
+  .filter((program: any) => program?.id && program.content_status === 'published')
+---
+<PublicLayout
+  title={`${pageTitle} — DegreeWiki`}
+  description={pageDesc}
+  canonical={canonical}
+  ogTitle={ogTitle}
+  ogDescription={ogDesc}
+  ogImage={ogImageUrl ?? undefined}
+>
   <div class="bg-surface border-b border-edge">
-    <Container width="narrow" class="py-7 sm:py-8">
-      <a href="/scholarships"
-         class="inline-flex items-center gap-1 text-sm text-primary hover:text-primary-hover mb-4">
+    <Container width="wide" class="py-7 sm:py-9">
+      <a href="/scholarships" class="inline-flex items-center gap-1 text-sm text-primary hover:text-primary-hover mb-5">
         ← All Scholarships
       </a>
 
-      <div class="flex items-start gap-4 mb-3">
-        {logoPublicId && (
-          <div class="flex-none w-14 h-14 rounded-xl overflow-hidden border border-edge bg-surface">
-            <MediaImage
-              publicId={logoPublicId}
-              alt={logoAlt}
-              width={80}
-              height={80}
-              crop="fill"
-              loading="eager"
-              class="w-full h-full object-cover"
-            />
-          </div>
-        )}
-        <div class="min-w-0">
-          {s.provider_name && (
-            <p class="text-sm text-muted mb-1">{s.provider_name}</p>
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div class="flex items-start gap-4">
+          {logoPublicId ? (
+            <div class="flex-none w-16 h-16 rounded-xl overflow-hidden border border-edge bg-surface">
+              <MediaImage publicId={logoPublicId} alt={logoAlt} width={96} height={96} crop="fill" loading="eager" class="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div class="flex-none w-16 h-16 rounded-xl bg-surface border border-edge flex items-center justify-center text-base font-bold text-muted">
+              {(s.provider_name ?? s.name).slice(0, 2).toUpperCase()}
+            </div>
           )}
-          <h1 class="text-2xl sm:text-3xl font-bold text-ink tracking-[-0.02em] leading-tight">
-            {s.name}
-          </h1>
-        </div>
-      </div>
 
-      <div class="flex flex-wrap items-center gap-2">
-        {verInfo && (
-          <Badge variant={verInfo.variant}>{verInfo.label}</Badge>
-        )}
-        {s.scholarship_type && (
-          <Badge variant="neutral">{formatLabel(s.scholarship_type)}</Badge>
-        )}
-        {amount && (
-          <Badge variant="scholarship">{amount}</Badge>
-        )}
+          <div class="min-w-0">
+            {s.provider_name && <p class="text-sm text-muted mb-1">{s.provider_name}</p>}
+            <h1 class="text-[30px] sm:text-[38px] font-bold text-ink tracking-[-0.03em] leading-tight">{s.name}</h1>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              {verInfo && <Badge variant={verInfo.variant}>{verInfo.label}</Badge>}
+              {s.scholarship_type && <Badge variant="neutral">{formatLabel(s.scholarship_type)}</Badge>}
+              {amount && <Badge variant="scholarship">{amount}</Badge>}
+              {deadline && <Badge variant="deadline">Deadline: {deadline}</Badge>}
+              {lastVerifiedShort && <Badge variant="neutral">Source checked {lastVerifiedShort}</Badge>}
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-edge bg-canvas p-5">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-3">Apply and verify</p>
+          <div class="flex flex-col gap-3">
+            {s.application_url && (
+              <a href={s.application_url} target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-white text-sm font-semibold rounded-[10px] hover:bg-primary-hover transition-colors">
+                Apply now ↗
+              </a>
+            )}
+            {s.official_url && (
+              <a href={s.official_url} target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-edge bg-surface text-ink-secondary text-sm font-semibold rounded-[10px] hover:border-primary/40 hover:text-ink transition-colors">
+                Official scholarship page ↗
+              </a>
+            )}
+            {s.provider_url && !s.official_url && (
+              <a href={s.provider_url} target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-edge bg-surface text-ink-secondary text-sm font-semibold rounded-[10px] hover:border-primary/40 hover:text-ink transition-colors">
+                Provider website ↗
+              </a>
+            )}
+            {!s.application_url && !s.official_url && !s.provider_url && (
+              <p class="text-sm text-muted">Official links are not published for this scholarship yet.</p>
+            )}
+            <p class="text-xs text-muted leading-relaxed">
+              Always confirm eligibility, funding coverage, and deadlines directly with the scholarship provider before applying.
+            </p>
+          </div>
+        </div>
       </div>
     </Container>
   </div>
 
   {coverPublicId && (
-    <div class="bg-canvas">
-      <Container width="narrow" class="pt-6">
-        <MediaImage
-          publicId={coverPublicId}
-          alt={coverAlt}
-          width={1200}
-          height={500}
-          crop="fill"
-          loading="eager"
-          class="w-full rounded-xl object-cover"
-        />
+    <div class="bg-canvas border-b border-edge">
+      <Container width="wide" class="pt-6">
+        <MediaImage publicId={coverPublicId} alt={coverAlt} width={1600} height={640} crop="fill" loading="eager" class="w-full rounded-2xl object-cover" />
       </Container>
     </div>
   )}
 
-  <!-- Main content -->
   <div class="bg-canvas">
-    <Container width="narrow" class="py-7 sm:py-8">
+    <Container width="wide" class="py-7 sm:py-8">
+      <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div>
+          {hasMainContent ? (
+            <div class="space-y-7">
+              {s.overview && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-3">Overview</h2>
+                  <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.overview}</p>
+                </section>
+              )}
 
-      <!-- Key facts panel -->
-      <div class="bg-surface border border-edge rounded-xl p-5 mb-7">
-        <h2 class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-4">
-          Scholarship details
-        </h2>
-        <dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          {s.scholarship_type && (
-            <div>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Type</dt>
-              <dd class="text-sm font-medium text-ink">{formatLabel(s.scholarship_type)}</dd>
+              {s.eligibility_summary && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-3">Eligibility</h2>
+                  <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.eligibility_summary}</p>
+                </section>
+              )}
+
+              {s.coverage_notes && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-3">Funding coverage</h2>
+                  <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.coverage_notes}</p>
+                </section>
+              )}
+
+              {s.deadline_text && s.deadline && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-3">Deadline notes</h2>
+                  <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.deadline_text}</p>
+                </section>
+              )}
+
+              {(hostCountries.length > 0 || degreeLevels.length > 0 || subjects.length > 0 || universities.length > 0 || nationalityRows.length > 0) && (
+                <section class="rounded-2xl border border-edge bg-surface p-5">
+                  <h2 class="text-lg font-semibold text-ink mb-4">Applies to</h2>
+                  <dl class="grid gap-4 sm:grid-cols-2">
+                    {hostCountries.length > 0 && (
+                      <div class="rounded-xl border border-edge-subtle bg-canvas px-4 py-3">
+                        <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Host countries</dt>
+                        <dd class="text-sm font-medium text-ink">{hostCountries.join(', ')}</dd>
+                      </div>
+                    )}
+                    {degreeLevels.length > 0 && (
+                      <div class="rounded-xl border border-edge-subtle bg-canvas px-4 py-3">
+                        <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Degree levels</dt>
+                        <dd class="text-sm font-medium text-ink">{degreeLevels.join(', ')}</dd>
+                      </div>
+                    )}
+                    {subjects.length > 0 && (
+                      <div class="rounded-xl border border-edge-subtle bg-canvas px-4 py-3">
+                        <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Subjects</dt>
+                        <dd class="text-sm font-medium text-ink">{subjects.join(', ')}</dd>
+                      </div>
+                    )}
+                    {universities.length > 0 && (
+                      <div class="rounded-xl border border-edge-subtle bg-canvas px-4 py-3">
+                        <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Universities</dt>
+                        <dd class="text-sm font-medium text-ink">
+                          {universities.map((university: any, index: number) => (
+                            <>
+                              {index > 0 && ', '}
+                              {university.slug ? (
+                                <a href={`/universities/${university.slug}`} class="hover:text-primary">{university.name}</a>
+                              ) : university.name}
+                            </>
+                          ))}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+
+                  {nationalityRows.length > 0 && (
+                    <div class="mt-4 rounded-xl border border-edge-subtle bg-canvas px-4 py-3">
+                      <p class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-2">Nationality notes</p>
+                      <ul class="space-y-1.5">
+                        {nationalityRows.slice(0, 8).map((row: any) => (
+                          <li class="text-sm text-ink-secondary">
+                            <span class="font-medium text-ink">{row.countries?.name ?? 'Nationality'}</span>
+                            {row.eligibility_type && ` · ${formatLabel(row.eligibility_type)}`}
+                            {row.notes && ` · ${row.notes}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
+          ) : (
+            <div class="rounded-2xl border border-edge bg-surface p-6">
+              <h2 class="text-lg font-semibold text-ink mb-2">Published scholarship information</h2>
+              <p class="text-sm text-muted leading-relaxed">
+                This scholarship is live, but detailed public notes have not been added yet. Use the official scholarship or provider page to verify eligibility, funding coverage, and deadlines.
+              </p>
             </div>
           )}
-          {s.funding_type && (
-            <div>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Funding</dt>
-              <dd class="text-sm font-medium text-ink">{formatLabel(s.funding_type)}</dd>
-            </div>
-          )}
-          {s.provider_name && (
-            <div>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Provider</dt>
-              <dd class="text-sm font-medium text-ink">{s.provider_name}</dd>
-            </div>
-          )}
-          {s.provider_type && (
-            <div>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Provider type</dt>
-              <dd class="text-sm font-medium text-ink">{formatLabel(s.provider_type)}</dd>
-            </div>
-          )}
-          {s.application_type && (
-            <div>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">How to apply</dt>
-              <dd class="text-sm font-medium text-ink">{formatLabel(s.application_type)}</dd>
-            </div>
-          )}
-          {amount && (
-            <div>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Amount</dt>
-              <dd class="text-sm font-semibold text-verified">{amount}</dd>
-            </div>
-          )}
-          {deadline && (
-            <div class={s.deadline ? 'sm:col-span-2' : undefined}>
-              <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-0.5">Deadline</dt>
-              <dd class="text-sm font-medium text-deadline">{deadline}</dd>
-            </div>
-          )}
-        </dl>
+
+          {updatedAt && <p class="text-xs text-muted mt-6">Last updated: {updatedAt}</p>}
+
+          <a href="/scholarships" class="inline-flex mt-6 text-sm text-primary hover:text-primary-hover">
+            ← All Scholarships
+          </a>
+        </div>
+
+        <aside class="space-y-5 lg:sticky lg:top-[88px] lg:self-start">
+          <div class="rounded-2xl border border-edge bg-surface p-5">
+            <h2 class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-4">Key facts</h2>
+            <dl class="space-y-3">
+              {s.provider_name && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Provider</dt>
+                  <dd class="text-sm font-medium text-ink">{s.provider_name}</dd>
+                </div>
+              )}
+              {s.provider_type && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Provider type</dt>
+                  <dd class="text-sm font-medium text-ink">{formatLabel(s.provider_type)}</dd>
+                </div>
+              )}
+              {s.scholarship_type && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Scholarship type</dt>
+                  <dd class="text-sm font-medium text-ink">{formatLabel(s.scholarship_type)}</dd>
+                </div>
+              )}
+              {s.funding_type && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Funding type</dt>
+                  <dd class="text-sm font-medium text-ink">{formatLabel(s.funding_type)}</dd>
+                </div>
+              )}
+              {amount && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Amount</dt>
+                  <dd class="text-sm font-semibold text-verified">{amount}</dd>
+                </div>
+              )}
+              {deadline && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Deadline</dt>
+                  <dd class="text-sm font-medium text-deadline">{deadline}</dd>
+                </div>
+              )}
+              {s.application_type && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">How to apply</dt>
+                  <dd class="text-sm font-medium text-ink">{formatLabel(s.application_type)}</dd>
+                </div>
+              )}
+              {hostCountries.length > 0 && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Host countries</dt>
+                  <dd class="text-sm font-medium text-ink">{hostCountries.join(', ')}</dd>
+                </div>
+              )}
+              {lastVerifiedAt && (
+                <div>
+                  <dt class="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted mb-1">Last verified</dt>
+                  <dd class="text-sm font-medium text-ink">{lastVerifiedAt}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+
+          <SourceBox
+            verificationStatus={s.verification_status}
+            lastVerifiedAt={lastVerifiedAt}
+            officialUrl={s.official_url ?? s.provider_url ?? null}
+            sourceConfidenceScore={s.source_confidence_score ?? null}
+          />
+
+          <FitFinderMiniPanel />
+        </aside>
       </div>
-
-      <!-- Overview -->
-      {s.overview && (
-        <div class="mb-6">
-          <h2 class="text-lg font-semibold text-ink mb-2">Overview</h2>
-          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.overview}</p>
-        </div>
-      )}
-
-      <!-- Eligibility -->
-      {s.eligibility_summary && (
-        <div class="mb-6">
-          <h2 class="text-lg font-semibold text-ink mb-2">Eligibility</h2>
-          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.eligibility_summary}</p>
-        </div>
-      )}
-
-      <!-- Coverage -->
-      {s.coverage_notes && (
-        <div class="mb-6">
-          <h2 class="text-lg font-semibold text-ink mb-2">What's Covered</h2>
-          <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap">{s.coverage_notes}</p>
-        </div>
-      )}
-
-      <!-- Deadline notes -->
-      {s.deadline_text && s.deadline && (
-        <div class="mb-6">
-          <h2 class="text-lg font-semibold text-ink mb-2">Deadline Notes</h2>
-          <p class="text-sm text-ink-secondary">{s.deadline_text}</p>
-        </div>
-      )}
-
-      <!-- CTA buttons -->
-      {(s.application_url || s.official_url || s.provider_url) && (
-        <div class="mt-2 mb-7 flex flex-col sm:flex-row gap-3">
-          {s.application_url && (
-            <a href={s.application_url} target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-white
-                      text-sm font-semibold rounded-[9px] hover:bg-primary-hover transition-colors">
-              Apply Now ↗
-            </a>
-          )}
-          {s.official_url && (
-            <a href={s.official_url} target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-edge bg-surface
-                      text-ink-secondary text-sm font-medium rounded-[9px] hover:border-primary/40 hover:text-ink transition-colors">
-              Official Scholarship Page ↗
-            </a>
-          )}
-          {s.provider_url && !s.official_url && (
-            <a href={s.provider_url} target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-edge bg-surface
-                      text-ink-secondary text-sm font-medium rounded-[9px] hover:border-primary/40 hover:text-ink transition-colors">
-              Provider Website ↗
-            </a>
-          )}
-        </div>
-      )}
-
-      <!-- Source & verification -->
-      <SourceBox
-        verificationStatus={s.verification_status}
-        lastVerifiedAt={lastVerifiedAt}
-        officialUrl={s.official_url ?? s.provider_url ?? null}
-        sourceConfidenceScore={s.source_confidence_score ?? null}
-      />
-
-      {updatedAt && (
-        <p class="text-xs text-muted mb-6">Last updated: {updatedAt}</p>
-      )}
-
-      <a href="/scholarships" class="text-sm text-primary hover:text-primary-hover">
-        ← All Scholarships
-      </a>
-
     </Container>
   </div>
 
+  {linkedPrograms.length > 0 && (
+    <div class="border-t border-edge bg-surface">
+      <Container width="wide" class="py-8 sm:py-10">
+        <h2 class="text-lg font-semibold text-ink mb-4">Linked published programs</h2>
+        <div class="flex flex-col gap-4">
+          {linkedPrograms.map((program: any) => {
+            const tuition = tuitionDisplay(program)
+            return (
+              <ProgramCard
+                href={`/programs/${program.slug}`}
+                programId={program.id}
+                title={program.title}
+                universityName={program.universities?.name ?? null}
+                universityHref={program.universities?.slug ? `/universities/${program.universities.slug}` : null}
+                degreeLevel={abbreviateDegree(program.degree_levels?.code, program.degree_levels?.name)}
+                field={program.subjects?.name ?? null}
+                countryCode={program.countries?.iso2 ?? null}
+                location={[program.cities?.name, program.countries?.name].filter(Boolean).join(', ') || null}
+                duration={formatDuration(program.duration_months)}
+                language={program.language_of_instruction ?? null}
+                tuitionDisplay={tuition.display}
+                tuitionPer={tuition.per}
+                verificationLabel={
+                  program.verification_status === 'verified'
+                    ? 'Verified'
+                    : program.verification_status === 'partially_verified'
+                      ? 'Partially verified'
+                      : null
+                }
+                verificationTone={program.verification_status === 'partially_verified' ? 'neutral' : 'verified'}
+                sourceChecked={formatShortDate(program.last_verified_at)}
+                logoPublicId={program.universities?.logo?.cloudinary_public_id ?? null}
+                logoAlt={program.universities?.logo?.alt_text || program.universities?.logo?.display_name || program.universities?.name || null}
+              />
+            )
+          })}
+        </div>
+      </Container>
+    </div>
+  )}
+
+  <SavedProgramEnhancement />
 </PublicLayout>
