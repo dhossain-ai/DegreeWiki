@@ -1,0 +1,317 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import Container from '../../components/ui/Container.astro'
+import { createClient } from '../../lib/supabase/server'
+import { SITE_URL } from '../../lib/site'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const NOT_LISTED = 'Not listed.'
+
+const rawIdParts = (Astro.url.searchParams.get('ids') ?? '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean)
+const validLookingIds = rawIdParts.filter((id) => UUID_RE.test(id))
+const requestedIds = Array.from(new Set(validLookingIds.slice(0, 4)))
+
+let programs: any[] = []
+let loadFailed = false
+
+if (requestedIds.length > 0) {
+  const { data, error } = await supabase
+    .from('programs')
+    .select(`
+      id, title, slug,
+      duration_months, study_mode, delivery_mode, language_of_instruction,
+      tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
+      application_url, official_url,
+      verification_status, last_verified_at,
+      universities(name, slug),
+      degree_levels(name, code),
+      countries(name, iso2),
+      cities(name),
+      subjects!programs_primary_subject_id_fkey(name)
+    `)
+    .eq('content_status', 'published')
+    .in('id', requestedIds)
+
+  if (error) {
+    loadFailed = true
+    console.error('program compare load error:', error.message)
+  } else {
+    const rows = data ?? []
+    programs = requestedIds
+      .map((id) => rows.find((program: any) => program.id === id))
+      .filter(Boolean)
+  }
+}
+
+const foundIds = programs.map((program: any) => program.id)
+const { data: intakesData, error: intakesError } = foundIds.length > 0
+  ? await supabase
+      .from('program_intakes')
+      .select('program_id, intake_name, intake_month, intake_year, application_deadline_date, deadline_text, is_rolling')
+      .in('program_id', foundIds)
+      .order('application_deadline_date', { ascending: true, nullsFirst: false })
+      .limit(20)
+  : { data: [], error: null }
+
+if (intakesError) console.error('program compare intakes error:', intakesError.message)
+
+const intakeByProgramId = new Map<string, any>()
+for (const intake of intakesData ?? []) {
+  if (!intakeByProgramId.has(intake.program_id)) intakeByProgramId.set(intake.program_id, intake)
+}
+
+const missingPublishedCount = Math.max(0, requestedIds.length - programs.length)
+const ignoredInvalidCount = Math.max(0, rawIdParts.length - validLookingIds.length)
+const ignoredTooMany = validLookingIds.length > 4
+const hasIgnoredIds = missingPublishedCount > 0 || ignoredInvalidCount > 0 || ignoredTooMany
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+function listed(value: string | null | undefined): string {
+  const text = value?.trim()
+  return text ? text : NOT_LISTED
+}
+
+function formatDuration(months: number | null | undefined): string {
+  if (!months) return NOT_LISTED
+  if (months === 12) return '1 year'
+  if (months % 12 === 0) return `${months / 12} years`
+  return `${months} months`
+}
+
+function formatMode(value: string | null | undefined): string {
+  return value ? value.replace(/_/g, ' ') : NOT_LISTED
+}
+
+function moneyPrefix(currency: string | null | undefined): string {
+  const cur = (currency ?? '').toUpperCase()
+  if (cur === 'EUR') return '€'
+  if (cur === 'USD') return '$'
+  if (cur === 'GBP') return '£'
+  return cur ? `${cur} ` : ''
+}
+
+function formatTuition(program: any): string {
+  const min = program.tuition_min_amount
+  const max = program.tuition_max_amount
+  if (min == null && max == null) return NOT_LISTED
+  const fmt = (n: number) => `${moneyPrefix(program.tuition_currency)}${Number(n).toLocaleString()}`
+  const amount = min != null && max != null && min !== max ? `${fmt(min)}-${fmt(max)}` : fmt(min ?? max)
+  const period = program.tuition_period ? program.tuition_period.replace(/_/g, ' ') : 'per year'
+  return `${amount} ${period}`
+}
+
+function formatDate(value: string | null | undefined): string | null {
+  if (!value) return null
+  return new Date(value).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function formatIntake(programId: string): string {
+  const intake = intakeByProgramId.get(programId)
+  if (!intake) return NOT_LISTED
+  const monthLabel = typeof intake.intake_month === 'number'
+    ? MONTH_NAMES[intake.intake_month - 1] ?? null
+    : null
+  const intakeLabel = intake.intake_name
+    || [monthLabel, intake.intake_year ? String(intake.intake_year) : null].filter(Boolean).join(' ')
+  const deadline = intake.is_rolling
+    ? 'Rolling admissions'
+    : formatDate(intake.application_deadline_date) ?? intake.deadline_text ?? null
+  return [intakeLabel || null, deadline].filter(Boolean).join(' · ') || NOT_LISTED
+}
+
+function formatVerification(status: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    verified: 'Verified',
+    partially_verified: 'Partially verified',
+    source_conflict: 'Under review',
+    outdated: 'May need updating',
+    needs_review: 'Needs review',
+    unverified: 'Not yet verified',
+  }
+  return status ? labels[status] ?? status.replace(/_/g, ' ') : NOT_LISTED
+}
+
+function formatLocation(program: any): string {
+  return listed([program.cities?.name, program.countries?.name].filter(Boolean).join(', '))
+}
+
+const rows = [
+  { label: 'University', value: (program: any) => listed(program.universities?.name) },
+  { label: 'Country / city', value: formatLocation },
+  { label: 'Degree level', value: (program: any) => listed(program.degree_levels?.name) },
+  { label: 'Subject', value: (program: any) => listed(program.subjects?.name) },
+  { label: 'Tuition', value: formatTuition },
+  { label: 'Duration', value: (program: any) => formatDuration(program.duration_months) },
+  { label: 'Language', value: (program: any) => listed(program.language_of_instruction) },
+  { label: 'Study mode', value: (program: any) => formatMode(program.study_mode) },
+  { label: 'Delivery mode', value: (program: any) => formatMode(program.delivery_mode) },
+  { label: 'Deadline / intake', value: (program: any) => formatIntake(program.id) },
+  { label: 'Verification', value: (program: any) => formatVerification(program.verification_status) },
+]
+---
+
+<PublicLayout
+  title="Compare Programs - DegreeWiki"
+  description="Compare published DegreeWiki programs side by side."
+  canonical={SITE_URL + '/programs/compare'}
+  noindex
+>
+  <div class="bg-surface border-b border-edge">
+    <Container width="wide" class="py-8 sm:py-10">
+      <a href="/programs" class="inline-flex text-sm text-primary hover:text-primary-hover mb-5">
+        ← Back to programs
+      </a>
+      <p class="text-xs font-semibold uppercase tracking-[0.08em] text-primary mb-3">Program compare</p>
+      <h1 class="text-[30px] sm:text-[38px] font-bold text-ink tracking-[-0.03em] leading-tight">
+        Compare published programs side by side.
+      </h1>
+      <p class="mt-3 max-w-2xl text-base sm:text-[17px] text-ink-secondary leading-relaxed">
+        Review tuition, duration, location, study format, deadlines, verification status, and official links using public published data only.
+      </p>
+    </Container>
+  </div>
+
+  <div class="bg-canvas min-h-[60vh]">
+    <Container width="wide" class="py-7 sm:py-8">
+      {loadFailed ? (
+        <div class="rounded-2xl border border-edge bg-surface p-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">Comparison is temporarily unavailable</h2>
+          <p class="text-sm text-muted">Please try again shortly or return to the programs directory.</p>
+        </div>
+      ) : programs.length === 0 ? (
+        <div class="rounded-2xl border border-edge bg-surface p-6">
+          <h2 class="text-lg font-semibold text-ink mb-2">No valid published programs found.</h2>
+          <p class="text-sm text-muted mb-5">
+            Invalid, unpublished, or unavailable program IDs may have been ignored. Select 2-4 programs from the directory to create a comparison.
+          </p>
+          <a
+            href="/programs"
+            class="inline-flex items-center justify-center rounded-[9px] bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors"
+          >
+            Browse programs
+          </a>
+        </div>
+      ) : (
+        <div class="space-y-5">
+          {programs.length === 1 && (
+            <div class="rounded-2xl border border-edge bg-surface p-6">
+              <h2 class="text-lg font-semibold text-ink mb-2">1 program selected. Add one more program to compare.</h2>
+              <p class="text-sm text-muted mb-5">
+                You can compare 2-4 published programs side by side. The selected program is shown below so you can keep your place.
+              </p>
+              <a
+                href="/programs"
+                class="inline-flex items-center justify-center rounded-[9px] bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors"
+              >
+                Browse programs to add another
+              </a>
+            </div>
+          )}
+
+          {hasIgnoredIds && (
+            <div class="rounded-xl border border-edge bg-surface px-4 py-3 text-sm text-muted">
+              {ignoredInvalidCount > 0 && <span>Invalid program IDs were ignored. </span>}
+              {missingPublishedCount > 0 && <span>Some selected IDs are unpublished or were not found, so they are not shown. </span>}
+              {ignoredTooMany && <span>Only the first 4 valid program IDs are compared.</span>}
+            </div>
+          )}
+
+          <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {programs.map((program: any) => (
+              <article class="rounded-2xl border border-edge bg-surface p-5">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-2">
+                  {listed(program.degree_levels?.name)}
+                </p>
+                <h2 class="text-lg font-semibold text-ink leading-tight">
+                  <a href={`/programs/${program.slug}`} class="hover:text-primary transition-colors">
+                    {program.title}
+                  </a>
+                </h2>
+                <p class="mt-2 text-sm text-muted">{listed(program.universities?.name)}</p>
+                <div class="mt-4 flex flex-col gap-2">
+                  {program.application_url && (
+                    <a
+                      href={program.application_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center justify-center rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors"
+                    >
+                      Apply ↗
+                    </a>
+                  )}
+                  {program.official_url && (
+                    <a
+                      href={program.official_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center justify-center rounded-[9px] border border-edge bg-surface px-4 py-2 text-sm font-semibold text-ink-secondary hover:border-primary/40 hover:text-ink transition-colors"
+                    >
+                      Official page ↗
+                    </a>
+                  )}
+                  {!program.application_url && !program.official_url && (
+                    <p class="text-xs text-muted">Official/application links: Not listed.</p>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div class="overflow-x-auto rounded-2xl border border-edge bg-surface">
+            <table class="min-w-full divide-y divide-edge-subtle text-sm">
+              <thead class="bg-canvas">
+                <tr>
+                  <th scope="col" class="w-44 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+                    Field
+                  </th>
+                  {programs.map((program: any) => (
+                    <th scope="col" class="min-w-[220px] px-4 py-3 text-left text-sm font-semibold text-ink">
+                      {program.title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-edge-subtle">
+                {rows.map((row) => (
+                  <tr>
+                    <th scope="row" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.05em] text-muted align-top">
+                      {row.label}
+                    </th>
+                    {programs.map((program: any) => (
+                      <td class="px-4 py-3 text-ink-secondary align-top">
+                        {row.value(program)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Container>
+  </div>
+</PublicLayout>
