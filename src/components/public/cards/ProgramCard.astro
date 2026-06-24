@@ -30,13 +30,19 @@ interface Props {
   deadlineNote?: string | null
   scholarshipAvailable?: boolean
   verified?: boolean
+  verificationLabel?: string | null
+  verificationTone?: 'verified' | 'neutral'
   /** Human-readable date when source was last checked, e.g. "18 Jun 2026" */
   sourceChecked?: string | null
   /** Formatted tuition string, e.g. "€15,300" */
   tuitionDisplay?: string | null
   /** e.g. "per year" */
   tuitionPer?: string | null
+  /** Program UUID used by anonymous public compare links/enhancement */
+  programId?: string | null
   saved?: boolean
+  isAuthenticated?: boolean
+  loginHref?: string | null
   comparing?: boolean
   class?: string
   /** University logo Cloudinary public ID — replaces monogram when set */
@@ -63,10 +69,15 @@ const {
   deadlineNote = null,
   scholarshipAvailable = false,
   verified = false,
+  verificationLabel = null,
+  verificationTone = 'verified',
   sourceChecked = null,
   tuitionDisplay = null,
   tuitionPer = null,
+  programId = null,
   saved = false,
+  isAuthenticated = false,
+  loginHref = null,
   comparing = false,
   class: className = '',
   logoPublicId = null,
@@ -85,13 +96,19 @@ const displayMonogram: string | null = monogram
         .slice(0, 4)
     : null)
 
-const hasBadges = scholarshipAvailable || verified || !!sourceChecked || (deadlineSoon && !!deadlineNote)
+const resolvedVerificationLabel = verificationLabel ?? (verified ? 'Verified' : null)
+const resolvedVerificationTone = resolvedVerificationLabel ? verificationTone : null
+const hasBadges = scholarshipAvailable || !!resolvedVerificationLabel || !!sourceChecked || (deadlineSoon && !!deadlineNote)
 const hasDataRow = !!(duration || language || intake || deadline)
 
 /* Card border + shadow changes when selected for compare. */
 const cardState = comparing
   ? 'border-primary shadow-[0_0_0_3px_rgba(29,78,216,0.12)]'
   : 'border-edge shadow-[0_1px_2px_rgba(11,31,58,0.04)]'
+
+const compareHref = programId ? `/programs/compare?ids=${encodeURIComponent(programId)}` : '/programs/compare'
+const currentPath = `${Astro.url.pathname}${Astro.url.search}`
+const saveLoginHref = loginHref ?? `/login?redirect=${encodeURIComponent(currentPath)}`
 ---
 
 <article
@@ -102,6 +119,7 @@ const cardState = comparing
     cardState,
     className,
   ].join(' ')}
+  data-compare-card={programId ?? undefined}
 >
 
   {/* ── Logo or monogram block ─────────────────────── */}
@@ -210,14 +228,26 @@ const cardState = comparing
             Scholarship available
           </span>
         )}
-        {verified && (
-          <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-verified bg-surface border border-verified-border px-2 py-1 rounded-md">
-            <span class="flex-none w-[14px] h-[14px] rounded-full bg-verified inline-flex items-center justify-center">
+        {resolvedVerificationLabel && (
+          <span
+            class={[
+              'inline-flex items-center gap-1.5 text-xs font-semibold border px-2 py-1 rounded-md',
+              resolvedVerificationTone === 'neutral'
+                ? 'text-ink-secondary bg-surface border-edge'
+                : 'text-verified bg-surface border-verified-border',
+            ].join(' ')}
+          >
+            <span
+              class={[
+                'flex-none w-[14px] h-[14px] rounded-full inline-flex items-center justify-center',
+                resolvedVerificationTone === 'neutral' ? 'bg-ink/15' : 'bg-verified',
+              ].join(' ')}
+            >
               <svg class="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none" aria-hidden="true">
                 <path d="M1 4l2 2.5L7 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </span>
-            Verified
+            {resolvedVerificationLabel}
           </span>
         )}
         {sourceChecked && (
@@ -260,7 +290,7 @@ const cardState = comparing
         View details
       </a>
       <div class="flex gap-2 w-full">
-        {/* Save button — visual state only; JS interactivity added in Phase 55C */}
+        {/* Save button — persisted for signed-in users through /api/saved-items/program. */}
         <button
           type="button"
           class={[
@@ -270,7 +300,14 @@ const cardState = comparing
               ? 'text-primary bg-primary-surface border-primary'
               : 'text-ink-secondary bg-surface border-edge hover:border-[#cbd5e1] hover:bg-[#f8fafc]',
           ].join(' ')}
-          aria-label={saved ? 'Remove from saved' : 'Save program'}
+          aria-pressed={saved ? 'true' : 'false'}
+          aria-label={saved ? 'Remove from saved programs' : 'Save program'}
+          title={isAuthenticated ? undefined : 'Sign in to save programs'}
+          data-save-program-button={programId ?? undefined}
+          data-program-id={programId ?? undefined}
+          data-saved={saved ? 'true' : 'false'}
+          data-save-authenticated={isAuthenticated ? 'true' : 'false'}
+          data-save-login-href={saveLoginHref}
         >
           <svg
             class="flex-none"
@@ -280,15 +317,15 @@ const cardState = comparing
             stroke-width="1.5"
             stroke-linejoin="round"
             aria-hidden="true"
+            data-save-icon
           >
             <path d="M0.75 0.75h7.5v10.5l-3.75-2.7-3.75 2.7V0.75z"/>
           </svg>
-          {saved ? 'Saved' : 'Save'}
+          <span data-save-label>{saved ? 'Saved' : 'Save'}</span>
         </button>
 
-        {/* Compare button — visual state only; JS interactivity added in Phase 55C */}
-        <button
-          type="button"
+        <a
+          href={compareHref}
           class={[
             'flex-1 inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold',
             'rounded-lg px-3 py-2 border transition-all',
@@ -296,6 +333,10 @@ const cardState = comparing
               ? 'text-primary bg-primary-surface border-primary'
               : 'text-ink-secondary bg-surface border-edge hover:border-[#cbd5e1] hover:bg-[#f8fafc]',
           ].join(' ')}
+          data-compare-button={programId ?? undefined}
+          data-program-id={programId ?? undefined}
+          data-program-title={programId ? title : undefined}
+          aria-pressed={comparing ? 'true' : 'false'}
           aria-label={comparing ? 'Remove from compare' : 'Add to compare'}
         >
           <span
@@ -303,15 +344,20 @@ const cardState = comparing
               'flex-none w-[15px] h-[15px] rounded inline-flex items-center justify-center border transition-colors',
               comparing ? 'bg-primary border-primary' : 'bg-surface border-[#cbd5e1]',
             ].join(' ')}
+            data-compare-box={programId ?? undefined}
           >
-            {comparing && (
-              <svg class="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-                <path d="M1 4l2 2.5L7 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            )}
+            <svg
+              class={['w-2 h-2 text-white', comparing ? '' : 'hidden'].join(' ')}
+              viewBox="0 0 8 8"
+              fill="none"
+              aria-hidden="true"
+              data-compare-check={programId ?? undefined}
+            >
+              <path d="M1 4l2 2.5L7 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </span>
           Compare
-        </button>
+        </a>
       </div>
     </div>
   </div>
