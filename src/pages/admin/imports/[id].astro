@@ -56,6 +56,39 @@ if (batchError || !batch) {
 
 const b = batch as BatchRow
 
+type VisibleEntityType = 'universities' | 'programs' | 'scholarships' | 'articles'
+type VisibleStatusFilter = 'all' | 'pending' | 'validated' | 'needs_review' | 'approved' | 'rejected' | 'skipped' | 'merged' | 'error'
+
+const FILTERABLE_ENTITY_TYPES: readonly VisibleEntityType[] = ['universities', 'programs', 'scholarships', 'articles']
+const FILTERABLE_STATUS_OPTIONS: readonly VisibleStatusFilter[] = [
+  'all', 'pending', 'validated', 'needs_review', 'approved', 'rejected', 'skipped', 'merged', 'error',
+]
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 20
+const FLASH_QUERY_KEYS = ['mergeWarning', 'imported', 'warned', 'failed', 'quality', 'bulkAction', 'bulkSuccess', 'bulkFailed'] as const
+
+function buildBatchHref(
+  batchId: string,
+  currentSearchParams: URLSearchParams,
+  updates: Record<string, string | number | null | undefined> = {},
+): string {
+  const params = new URLSearchParams(currentSearchParams)
+  for (const key of FLASH_QUERY_KEYS) {
+    params.delete(key)
+  }
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null || value === undefined || value === '') {
+      params.delete(key)
+    } else {
+      params.set(key, String(value))
+    }
+  }
+
+  const query = params.toString()
+  return query ? `/admin/imports/${batchId}?${query}` : `/admin/imports/${batchId}`
+}
+
 type DataSourceRow = { source_url: string; source_title: string | null; source_type: string }
 let dataSource: DataSourceRow | null = null
 if (b.data_source_id) {
@@ -110,6 +143,7 @@ let mergeError: string | null = null
 let mergeWarningPost: string | null = null
 let setMatchError: string | null = null
 let bulkImportError: string | null = null
+let bulkReviewError: string | null = null
 let qualityError: string | null = null
 const BATCH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -368,6 +402,8 @@ async function importResearchPack(jsonInput: string): Promise<
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData()
   const postAction = fd.get('_action')?.toString() ?? ''
+  const redirectToBatch = (updates: Record<string, string | number | null | undefined> = {}) =>
+    Astro.redirect(buildBatchHref(b.id, Astro.url.searchParams, updates))
 
   if (postAction === 'review') {
     const result = await applyReviewAction(supabase, {
@@ -379,9 +415,76 @@ if (Astro.request.method === 'POST') {
       reviewerUserId: user.id,
     })
     if (result.ok) {
-      return Astro.redirect(`/admin/imports/${b.id}`)
+      return redirectToBatch()
     }
     reviewError = result.error
+  } else if (postAction === 'bulk_review') {
+    const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+    const rawAction = fd.get('review_action')?.toString().trim() ?? ''
+    const visibleRowIdSet = new Set(
+      fd.getAll('visible_row_ids')
+        .map(value => value.toString().trim())
+        .filter(value => BATCH_UUID_RE.test(value)),
+    )
+    const selectedRowIds = [
+      ...new Set(
+        fd.getAll('row_ids')
+          .map(value => value.toString().trim())
+          .filter(value => BATCH_UUID_RE.test(value)),
+      ),
+    ]
+
+    if (!(FILTERABLE_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
+      bulkReviewError = 'Invalid entity type for bulk review.'
+    } else if (!['approve', 'reject', 'skip', 'reset'].includes(rawAction)) {
+      bulkReviewError = 'Invalid bulk review action.'
+    } else if (selectedRowIds.length === 0) {
+      bulkReviewError = 'Select at least one visible row first.'
+    } else if (visibleRowIdSet.size === 0) {
+      bulkReviewError = 'This bulk action requires visible rows from the current page.'
+    } else if (selectedRowIds.some(rowId => !visibleRowIdSet.has(rowId))) {
+      bulkReviewError = 'Bulk actions can apply only to rows visible on the current page.'
+    } else {
+      if (rawEntityType === 'universities') {
+        const { data: selectedUniversityRows } = await supabase
+          .from('staging_universities')
+          .select('id, raw_data')
+          .in('id', selectedRowIds)
+          .eq('import_batch_id', b.id)
+
+        const helperSelected = ((selectedUniversityRows ?? []) as Array<{ id: string; raw_data: Record<string, unknown> | null }>)
+          .some((row) => row.raw_data?.helper_kind === 'program_import_selected_university')
+
+        if (helperSelected) {
+          bulkReviewError = 'Program-import helper university rows cannot be changed through bulk review.'
+        }
+      }
+
+      if (!bulkReviewError) {
+        let successCount = 0
+        let failedCount = 0
+
+        for (const rowId of selectedRowIds) {
+          const result = await applyReviewAction(supabase, {
+            entityType: rawEntityType,
+            rowId,
+            batchId: b.id,
+            action: rawAction,
+            reviewNotes: '',
+            reviewerUserId: user.id,
+          })
+
+          if (result.ok) successCount += 1
+          else failedCount += 1
+        }
+
+        return redirectToBatch({
+          bulkAction: rawAction,
+          bulkSuccess: successCount,
+          bulkFailed: failedCount,
+        })
+      }
+    }
   } else if (postAction === 'merge') {
     const confirm = fd.get('confirm')?.toString().trim()
     if (confirm !== 'yes') {
@@ -404,9 +507,9 @@ if (Astro.request.method === 'POST') {
         })
         if (result.ok) {
           if (result.warning) {
-            return Astro.redirect(`/admin/imports/${b.id}?mergeWarning=${encodeURIComponent(result.warning)}`)
+            return redirectToBatch({ mergeWarning: result.warning })
           }
-          return Astro.redirect(`/admin/imports/${b.id}`)
+          return redirectToBatch()
         }
         mergeError = result.error
       }
@@ -426,10 +529,12 @@ if (Astro.request.method === 'POST') {
           bulkImportError = researchPackResult.error
         } else {
           const autoQualityCount = await runAutoQualityAfterImport(researchPackResult.inserted)
-          const qualityQs = autoQualityCount >= 0 ? `&quality=${autoQualityCount}` : ''
-          return Astro.redirect(
-            `/admin/imports/${b.id}?imported=${researchPackResult.inserted}&warned=${researchPackResult.warned}&failed=${researchPackResult.failed}${qualityQs}`,
-          )
+          return redirectToBatch({
+            imported: researchPackResult.inserted,
+            warned: researchPackResult.warned,
+            failed: researchPackResult.failed,
+            quality: autoQualityCount >= 0 ? autoQualityCount : null,
+          })
         }
       }
     } else if (!(VALID_ENTITY_TYPES as readonly string[]).includes(rawEntityType)) {
@@ -723,10 +828,12 @@ if (Astro.request.method === 'POST') {
           }
         }
 
-        const qualityQs = autoQualityCount >= 0 ? `&quality=${autoQualityCount}` : ''
-        return Astro.redirect(
-          `/admin/imports/${b.id}?imported=${inserted}&warned=${warned}&failed=${failed}${qualityQs}`,
-        )
+            return redirectToBatch({
+              imported: inserted,
+              warned,
+              failed,
+              quality: autoQualityCount >= 0 ? autoQualityCount : null,
+            })
       }
     }
   } else if (postAction === 'run_quality_checks') {
@@ -803,10 +910,10 @@ if (Astro.request.method === 'POST') {
           console.error('[run_quality_checks] insert failed:', insertErr.code)
           qualityError = 'Failed to save quality warnings. Please try again.'
         } else {
-          return Astro.redirect(`/admin/imports/${b.id}?quality=${allWarnings.length}`)
+          return redirectToBatch({ quality: allWarnings.length })
         }
       } else {
-        return Astro.redirect(`/admin/imports/${b.id}?quality=0`)
+        return redirectToBatch({ quality: 0 })
       }
     } catch (err) {
       console.error('[run_quality_checks] error:', err instanceof Error ? err.message : String(err))
@@ -855,7 +962,7 @@ if (Astro.request.method === 'POST') {
             console.error('[set_match_university_id] staging update failed:', linkErr.code, linkErr.message)
             setMatchError = 'Failed to link staging row to production university. Please try again.'
           } else {
-            return Astro.redirect(`/admin/imports/${b.id}`)
+            return redirectToBatch()
           }
         }
       }
@@ -900,7 +1007,7 @@ if (Astro.request.method === 'POST') {
             console.error('[set_match_scholarship_id] update failed:', scholLinkErr.code)
             setMatchError = 'Failed to link staging row to production scholarship. Please try again.'
           } else {
-            return Astro.redirect(`/admin/imports/${b.id}`)
+            return redirectToBatch()
           }
         }
       }
@@ -945,7 +1052,7 @@ if (Astro.request.method === 'POST') {
             console.error('[set_match_article_id] update failed:', artLinkErr.code)
             setMatchError = 'Failed to link staging row to production article. Please try again.'
           } else {
-            return Astro.redirect(`/admin/imports/${b.id}`)
+            return redirectToBatch()
           }
         }
       }
@@ -1090,7 +1197,7 @@ if (Astro.request.method === 'POST') {
             if (b.import_status === 'pending') {
               await supabase.from('import_batches').update({ import_status: 'needs_review' }).eq('id', b.id)
             }
-            return Astro.redirect(`/admin/imports/${b.id}`)
+            return redirectToBatch()
           }
         }
       }
@@ -1108,6 +1215,15 @@ const bulkSummary = importedParam !== null
       imported: Math.max(0, parseInt(importedParam, 10) || 0),
       warned: Math.max(0, parseInt(Astro.url.searchParams.get('warned') ?? '0', 10) || 0),
       failed: Math.max(0, parseInt(Astro.url.searchParams.get('failed') ?? '0', 10) || 0),
+    }
+  : null
+
+const bulkReviewActionParam = Astro.url.searchParams.get('bulkAction')
+const bulkReviewSummary = bulkReviewActionParam
+  ? {
+      action: bulkReviewActionParam,
+      success: Math.max(0, parseInt(Astro.url.searchParams.get('bulkSuccess') ?? '0', 10) || 0),
+      failed: Math.max(0, parseInt(Astro.url.searchParams.get('bulkFailed') ?? '0', 10) || 0),
     }
   : null
 
@@ -1136,6 +1252,8 @@ type StagingProgram = {
   id: string
   extracted_title: string | null
   extracted_degree_level_code: string | null
+  extracted_language: string | null
+  extracted_tuition_amount: number | null
   staging_university_id: string | null
   match_program_id: string | null
   import_status: string
@@ -1195,39 +1313,50 @@ const showUniversities = batchType === 'universities' || batchType === 'mixed'
 const showPrograms = batchType === 'programs' || batchType === 'mixed'
 const showScholarships = batchType === 'scholarships' || batchType === 'mixed'
 const showArticles = batchType === 'articles' || batchType === 'mixed'
+type StagingStatusRow = { id: string; import_status: string }
 
-const [uniResult, progResult, scholResult, artResult, errResult] = await Promise.all([
+const visibleEntityOptions = FILTERABLE_ENTITY_TYPES.filter((entity) =>
+  entity === 'universities' ? showUniversities
+    : entity === 'programs' ? showPrograms
+    : entity === 'scholarships' ? showScholarships
+    : showArticles,
+)
+
+const rawStatusFilter = Astro.url.searchParams.get('status')?.trim() ?? 'all'
+const selectedStatusFilter = (FILTERABLE_STATUS_OPTIONS as readonly string[]).includes(rawStatusFilter)
+  ? rawStatusFilter as VisibleStatusFilter
+  : 'all'
+const rawPageSize = parseInt(Astro.url.searchParams.get('pageSize') ?? '', 10)
+const selectedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize as 10 | 20 | 50 | 100)
+  ? rawPageSize as 10 | 20 | 50 | 100
+  : DEFAULT_PAGE_SIZE
+const requestedPage = Math.max(1, parseInt(Astro.url.searchParams.get('page') ?? '1', 10) || 1)
+
+const [uniMetaResult, progStatusResult, scholStatusResult, artStatusResult, errResult] = await Promise.all([
   showUniversities
     ? supabase
         .from('staging_universities')
         .select('id, extracted_name, extracted_country_code, extracted_official_url, match_university_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
         .eq('import_batch_id', id)
         .order('created_at', { ascending: false })
-        .limit(50)
     : Promise.resolve({ data: [] }),
   showPrograms
     ? supabase
         .from('staging_programs')
-        .select('id, extracted_title, extracted_degree_level_code, staging_university_id, match_program_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, import_status')
         .eq('import_batch_id', id)
-        .order('created_at', { ascending: false })
-        .limit(50)
     : Promise.resolve({ data: [] }),
   showScholarships
     ? supabase
         .from('staging_scholarships')
-        .select('id, extracted_name, extracted_amount, match_scholarship_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, import_status')
         .eq('import_batch_id', id)
-        .order('created_at', { ascending: false })
-        .limit(50)
     : Promise.resolve({ data: [] }),
   showArticles
     ? supabase
         .from('staging_articles')
-        .select('id, extracted_title, extracted_slug, extracted_category, match_article_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at')
+        .select('id, import_status')
         .eq('import_batch_id', id)
-        .order('created_at', { ascending: false })
-        .limit(50)
     : Promise.resolve({ data: [] }),
   supabase
     .from('staging_errors')
@@ -1237,11 +1366,90 @@ const [uniResult, progResult, scholResult, artResult, errResult] = await Promise
     .limit(100),
 ])
 
-const stagingUniversities = (uniResult.data ?? []) as StagingUniversity[]
-const stagingPrograms = (progResult.data ?? []) as StagingProgram[]
-const stagingScholarships = (scholResult.data ?? []) as StagingScholarship[]
-const stagingArticles = (artResult.data ?? []) as StagingArticle[]
+const stagingUniversities = (uniMetaResult.data ?? []) as StagingUniversity[]
+const allProgramStatusRows = (progStatusResult.data ?? []) as StagingStatusRow[]
+const allScholarshipStatusRows = (scholStatusResult.data ?? []) as StagingStatusRow[]
+const allArticleStatusRows = (artStatusResult.data ?? []) as StagingStatusRow[]
 const stagingErrors = (errResult.data ?? []) as StagingError[]
+
+const entityCounts: Record<VisibleEntityType, number> = {
+  universities: stagingUniversities.length,
+  programs: allProgramStatusRows.length,
+  scholarships: allScholarshipStatusRows.length,
+  articles: allArticleStatusRows.length,
+}
+
+const defaultEntity: VisibleEntityType =
+  showPrograms && entityCounts.programs > 0
+    ? 'programs'
+    : visibleEntityOptions.find((entity) => entityCounts[entity] > 0)
+      ?? visibleEntityOptions[0]
+      ?? 'programs'
+
+const rawEntityFilter = Astro.url.searchParams.get('entity')?.trim() ?? ''
+const activeEntity = visibleEntityOptions.includes(rawEntityFilter as VisibleEntityType)
+  ? rawEntityFilter as VisibleEntityType
+  : defaultEntity
+
+async function fetchVisibleEntityRows(page: number) {
+  const from = (page - 1) * selectedPageSize
+  const to = from + selectedPageSize - 1
+
+  if (activeEntity === 'universities') {
+    let query = supabase
+      .from('staging_universities')
+      .select('id, extracted_name, extracted_country_code, extracted_official_url, match_university_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at', { count: 'exact' })
+      .eq('import_batch_id', id)
+    if (selectedStatusFilter !== 'all') query = query.eq('import_status', selectedStatusFilter)
+    return query.order('created_at', { ascending: false }).range(from, to)
+  }
+
+  if (activeEntity === 'programs') {
+    let query = supabase
+      .from('staging_programs')
+      .select('id, extracted_title, extracted_degree_level_code, extracted_language, extracted_tuition_amount, staging_university_id, match_program_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at', { count: 'exact' })
+      .eq('import_batch_id', id)
+    if (selectedStatusFilter !== 'all') query = query.eq('import_status', selectedStatusFilter)
+    return query.order('created_at', { ascending: false }).range(from, to)
+  }
+
+  if (activeEntity === 'scholarships') {
+    let query = supabase
+      .from('staging_scholarships')
+      .select('id, extracted_name, extracted_amount, match_scholarship_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at', { count: 'exact' })
+      .eq('import_batch_id', id)
+    if (selectedStatusFilter !== 'all') query = query.eq('import_status', selectedStatusFilter)
+    return query.order('created_at', { ascending: false }).range(from, to)
+  }
+
+  let query = supabase
+    .from('staging_articles')
+    .select('id, extracted_title, extracted_slug, extracted_category, match_article_id, import_status, review_notes, reviewed_by_user_id, reviewed_at, raw_data, created_at', { count: 'exact' })
+    .eq('import_batch_id', id)
+  if (selectedStatusFilter !== 'all') query = query.eq('import_status', selectedStatusFilter)
+  return query.order('created_at', { ascending: false }).range(from, to)
+}
+
+const initialVisibleRowsResult = await fetchVisibleEntityRows(requestedPage)
+const filteredRowCount = initialVisibleRowsResult.count ?? 0
+const totalPages = Math.max(1, Math.ceil(filteredRowCount / selectedPageSize))
+const currentPage = Math.min(requestedPage, totalPages)
+const visibleRowsResult = currentPage === requestedPage
+  ? initialVisibleRowsResult
+  : await fetchVisibleEntityRows(currentPage)
+
+const visibleUniversities = activeEntity === 'universities'
+  ? (visibleRowsResult.data ?? []) as StagingUniversity[]
+  : []
+const visiblePrograms = activeEntity === 'programs'
+  ? (visibleRowsResult.data ?? []) as StagingProgram[]
+  : []
+const visibleScholarships = activeEntity === 'scholarships'
+  ? (visibleRowsResult.data ?? []) as StagingScholarship[]
+  : []
+const visibleArticles = activeEntity === 'articles'
+  ? (visibleRowsResult.data ?? []) as StagingArticle[]
+  : []
 
 const programImportHelperRows = stagingUniversities.filter((row) => isProgramImportHelperRow(row.raw_data))
 const helperUniversityRowIds = new Set(programImportHelperRows.map((row) => row.id))
@@ -1301,8 +1509,8 @@ const helperSourceMismatch = (
 type ProgEligibility = { canMerge: true } | { canMerge: false; reason: string }
 const progEligibility = new Map<string, ProgEligibility>()
 
-if (stagingPrograms.length > 0) {
-  const mergeCandidates = stagingPrograms.filter(
+if (visiblePrograms.length > 0) {
+  const mergeCandidates = visiblePrograms.filter(
     r => r.import_status === 'approved' && !r.match_program_id
   )
   const stagingUniIds = [...new Set(
@@ -1346,15 +1554,15 @@ if (stagingPrograms.length > 0) {
   }
 }
 
-const actionableStaged = actionableUniversityRows.length + stagingPrograms.length + stagingScholarships.length + stagingArticles.length
+const actionableStaged = actionableUniversityRows.length + allProgramStatusRows.length + allScholarshipStatusRows.length + allArticleStatusRows.length
 const helperUniversityCount = programImportHelperRows.length
 
 // Status counts derived from already-fetched arrays — no extra queries.
 const allStagedStatuses = [
   ...actionableUniversityRows.map(r => r.import_status),
-  ...stagingPrograms.map(r => r.import_status),
-  ...stagingScholarships.map(r => r.import_status),
-  ...stagingArticles.map(r => r.import_status),
+  ...allProgramStatusRows.map(r => r.import_status),
+  ...allScholarshipStatusRows.map(r => r.import_status),
+  ...allArticleStatusRows.map(r => r.import_status),
 ]
 const statusCounts = {
   awaitingReview: allStagedStatuses.filter(s => s === 'pending' || s === 'validated').length,
@@ -1367,21 +1575,23 @@ const statusCounts = {
 const qualityIssueCount = stagingErrors.filter(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match').length
 const validationWarningCount = stagingErrors.filter(e => e.error_type === 'validation_warning').length
 const qualityChecksRun = stagingErrors.some(e => e.error_type === 'same_batch_duplicate' || e.error_type === 'possible_production_match')
-const entityCounts = {
-  universities: stagingUniversities.length,
-  programs: stagingPrograms.length,
-  scholarships: stagingScholarships.length,
-  articles: stagingArticles.length,
-}
-
-// Detect possible display truncation: each entity table is limited to 50 rows.
-const DISPLAY_LIMIT = 50
-const mayBeTruncated = (
-  (showUniversities && stagingUniversities.length === DISPLAY_LIMIT) ||
-  (showPrograms && stagingPrograms.length === DISPLAY_LIMIT) ||
-  (showScholarships && stagingScholarships.length === DISPLAY_LIMIT) ||
-  (showArticles && stagingArticles.length === DISPLAY_LIMIT)
-)
+const issuesMayBeTruncated = stagingErrors.length === 100
+const visibleRowIds =
+  activeEntity === 'universities' ? visibleUniversities.map((row) => row.id)
+    : activeEntity === 'programs' ? visiblePrograms.map((row) => row.id)
+    : activeEntity === 'scholarships' ? visibleScholarships.map((row) => row.id)
+    : visibleArticles.map((row) => row.id)
+const visibleRowCount = visibleRowIds.length
+const pageStart = filteredRowCount === 0 ? 0 : ((currentPage - 1) * selectedPageSize) + 1
+const pageEnd = filteredRowCount === 0 ? 0 : pageStart + visibleRowCount - 1
+const activeEntityLabel =
+  activeEntity === 'universities' ? 'universities'
+    : activeEntity === 'programs' ? 'programs'
+    : activeEntity === 'scholarships' ? 'scholarships'
+    : 'articles'
+const currentFilterPath = buildBatchHref(b.id, Astro.url.searchParams)
+const buildFilterHref = (updates: Record<string, string | number | null | undefined> = {}) =>
+  buildBatchHref(b.id, Astro.url.searchParams, updates)
 
 // Guidance message for "what to do next" banner.
 let nextStepMessage = ''
@@ -1408,6 +1618,12 @@ const ERROR_TYPE_LABEL: Record<string, string> = {
   validation_warning: 'Validation warning',
   same_batch_duplicate: 'Duplicate in this batch',
   possible_production_match: 'Possible existing record',
+}
+const REVIEW_ACTION_LABEL: Record<string, string> = {
+  approve: 'approved',
+  reject: 'rejected',
+  skip: 'skipped',
+  reset: 'reset',
 }
 
 const INPUT_CLS = 'block w-full rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
@@ -1538,6 +1754,91 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     </div>
   </div>
 
+  <div class="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-4">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div class="space-y-3">
+        {visibleEntityOptions.length > 1 && (
+          <div class="flex flex-wrap gap-2">
+            {visibleEntityOptions.map((entity) => (
+              <a
+                href={buildFilterHref({ entity, page: 1 })}
+                class={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${
+                  activeEntity === entity
+                    ? 'border-blue-600 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {entity}
+                <span class="ml-1.5 text-[11px] text-gray-400">{entityCounts[entity]}</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        <form method="get" class="flex flex-wrap items-end gap-3">
+          {visibleEntityOptions.length > 1 && <input type="hidden" name="entity" value={activeEntity} />}
+          <div>
+            <label for="status" class="mb-1 block text-xs font-medium text-gray-600">Status</label>
+            <select id="status" name="status" class={INPUT_CLS}>
+              {FILTERABLE_STATUS_OPTIONS.map((option) => (
+                <option value={option} selected={selectedStatusFilter === option}>
+                  {option === 'all' ? 'All statuses' : option}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label for="pageSize" class="mb-1 block text-xs font-medium text-gray-600">Page size</label>
+            <select id="pageSize" name="pageSize" class={INPUT_CLS}>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option value={size} selected={selectedPageSize === size}>{size}</option>
+              ))}
+            </select>
+          </div>
+          <input type="hidden" name="page" value="1" />
+          <button
+            type="submit"
+            class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Apply
+          </button>
+          <a
+            href={`/admin/imports/${b.id}`}
+            class="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Clear
+          </a>
+        </form>
+      </div>
+
+      <div class="text-sm text-gray-500">
+        Showing {pageStart}-{pageEnd} of {filteredRowCount} {activeEntityLabel}
+        {selectedStatusFilter !== 'all' && ` with status "${selectedStatusFilter}"`}.
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
+      <p class="text-xs text-gray-500">
+        Active view: <span class="font-medium text-gray-700">{activeEntity}</span> · Bulk actions can affect only rows selected on this page.
+      </p>
+      <div class="flex items-center gap-2">
+        <a
+          href={buildFilterHref({ page: currentPage > 1 ? currentPage - 1 : 1 })}
+          class={`rounded border px-3 py-1.5 text-sm ${currentPage > 1 ? 'border-gray-300 text-gray-700 hover:bg-gray-50' : 'border-gray-200 text-gray-300 pointer-events-none'}`}
+        >
+          Previous
+        </a>
+        <span class="text-sm text-gray-500">Page {currentPage} of {totalPages}</span>
+        <a
+          href={buildFilterHref({ page: currentPage < totalPages ? currentPage + 1 : totalPages })}
+          class={`rounded border px-3 py-1.5 text-sm ${currentPage < totalPages ? 'border-gray-300 text-gray-700 hover:bg-gray-50' : 'border-gray-200 text-gray-300 pointer-events-none'}`}
+        >
+          Next
+        </a>
+      </div>
+    </div>
+  </div>
+
   {detectedMatchedUniversityId && detectedMatchedUniversityName && (
     <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1597,6 +1898,12 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     </div>
   )}
 
+  {bulkReviewError && (
+    <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      Bulk review failed: {bulkReviewError}
+    </div>
+  )}
+
   {mergeError && (
     <div class="mb-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
       Merge failed: {mergeError}
@@ -1623,6 +1930,15 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
         ? <span class="text-red-700">, {bulkSummary.failed} failed to insert.</span>
         : '.'}
       {bulkSummary.warned > 0 && ' Check the Staging Errors section below for details.'}
+    </div>
+  )}
+
+  {bulkReviewSummary && (
+    <div class="mb-4 rounded-md bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+      Bulk review {REVIEW_ACTION_LABEL[bulkReviewSummary.action] ?? bulkReviewSummary.action}: {bulkReviewSummary.success} row{bulkReviewSummary.success !== 1 ? 's' : ''} updated.
+      {bulkReviewSummary.failed > 0
+        ? <span class="text-amber-700"> {bulkReviewSummary.failed} row{bulkReviewSummary.failed !== 1 ? 's' : ''} could not be updated.</span>
+        : ''}
     </div>
   )}
 
@@ -1990,19 +2306,53 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     <p class="text-sm text-gray-500 py-2">No staged records or errors for this batch yet.</p>
   ) : null}
 
-  {mayBeTruncated && (
+  {issuesMayBeTruncated && (
     <div class="mb-4 px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800">
-      Some rows may not be shown — the display limit is {DISPLAY_LIMIT} rows per entity type. If this batch has more rows than shown, open new batches for the remaining data or contact an admin.
+      Only the newest 100 staging issues are shown below. Row pagination now applies to staged rows, but the issues table remains capped for safety in this phase.
     </div>
   )}
 
-  {showUniversities && stagingUniversities.length > 0 && (
+  {activeEntity === 'universities' && (
     <div class="mb-6">
-      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Universities ({stagingUniversities.length})</h2>
+      <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-base font-semibold text-gray-800">Staged Universities</h2>
+          <p class="mt-1 text-sm text-gray-500">
+            {filteredRowCount === 0
+              ? 'No universities match the current filters.'
+              : `Showing ${pageStart}-${pageEnd} of ${filteredRowCount} universities.`}
+          </p>
+        </div>
+        {visibleUniversities.length > 0 && (
+          <form id="bulk-review-form" method="POST" action={currentFilterPath} class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="_action" value="bulk_review" />
+            <input type="hidden" name="entity_type" value="universities" />
+            {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
+            <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
+              <option value="approve">Approve selected</option>
+              <option value="reject">Reject selected</option>
+              <option value="skip">Skip selected</option>
+              <option value="reset">Reset selected</option>
+            </select>
+            <button type="button" data-select-visible class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Select visible
+            </button>
+            <button type="button" data-clear-selection class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Clear selection
+            </button>
+            <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              Apply to selected
+            </button>
+            <span data-selection-count class="text-xs text-gray-500">0 selected</span>
+          </form>
+        )}
+      </div>
+      {visibleUniversities.length > 0 ? (
       <div class="overflow-x-auto rounded-lg border border-gray-200">
         <table class="w-full text-sm text-left">
           <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
+              <th class="px-4 py-3">Select</th>
               <th class="px-4 py-3">Name</th>
               <th class="px-4 py-3">Country</th>
               <th class="px-4 py-3">URL</th>
@@ -2013,8 +2363,19 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             </tr>
           </thead>
           <tbody>
-            {stagingUniversities.map(row => (
+            {visibleUniversities.map(row => (
               <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3">
+                  <input
+                    form="bulk-review-form"
+                    type="checkbox"
+                    name="row_ids"
+                    value={row.id}
+                    data-visible-row-checkbox
+                    disabled={isProgramImportHelperRow(row.raw_data) || row.import_status === 'merged' || row.import_status === 'processing' || row.import_status === 'error'}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                </td>
                 <td class="px-4 py-3 text-gray-700">{row.extracted_name ?? <span class="text-gray-400">—</span>}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">{row.extracted_country_code ?? '—'}</td>
                 <td class="px-4 py-3 text-xs max-w-[160px] truncate">
@@ -2136,16 +2497,55 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
           </tbody>
         </table>
       </div>
+      ) : (
+        <div class="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
+          No universities match the current filters.
+        </div>
+      )}
     </div>
   )}
 
-  {showPrograms && stagingPrograms.length > 0 && (
+  {activeEntity === 'programs' && (
     <div class="mb-6">
-      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Programs ({stagingPrograms.length})</h2>
+      <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-base font-semibold text-gray-800">Staged Programs</h2>
+          <p class="mt-1 text-sm text-gray-500">
+            {filteredRowCount === 0
+              ? 'No programs match the current filters.'
+              : `Showing ${pageStart}-${pageEnd} of ${filteredRowCount} programs.`}
+          </p>
+        </div>
+        {visiblePrograms.length > 0 && (
+          <form id="bulk-review-form" method="POST" action={currentFilterPath} class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="_action" value="bulk_review" />
+            <input type="hidden" name="entity_type" value="programs" />
+            {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
+            <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
+              <option value="approve">Approve selected</option>
+              <option value="reject">Reject selected</option>
+              <option value="skip">Skip selected</option>
+              <option value="reset">Reset selected</option>
+            </select>
+            <button type="button" data-select-visible class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Select visible
+            </button>
+            <button type="button" data-clear-selection class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Clear selection
+            </button>
+            <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              Apply to selected
+            </button>
+            <span data-selection-count class="text-xs text-gray-500">0 selected</span>
+          </form>
+        )}
+      </div>
+      {visiblePrograms.length > 0 ? (
       <div class="overflow-x-auto rounded-lg border border-gray-200">
         <table class="w-full text-sm text-left">
           <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
+              <th class="px-4 py-3">Select</th>
               <th class="px-4 py-3">Title</th>
               <th class="px-4 py-3">University</th>
               <th class="px-4 py-3">Degree Level</th>
@@ -2156,8 +2556,19 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             </tr>
           </thead>
           <tbody>
-            {stagingPrograms.map(row => (
+            {visiblePrograms.map(row => (
               <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3">
+                  <input
+                    form="bulk-review-form"
+                    type="checkbox"
+                    name="row_ids"
+                    value={row.id}
+                    data-visible-row-checkbox
+                    disabled={row.import_status === 'merged' || row.import_status === 'processing' || row.import_status === 'error'}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                </td>
                 <td class="px-4 py-3 text-gray-700">{row.extracted_title ?? <span class="text-gray-400">—</span>}</td>
                 <td class="px-4 py-3 text-xs text-gray-500">
                   {row.staging_university_id
@@ -2238,8 +2649,18 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                 </td>
                 <td class="px-4 py-3">
                   <details class="text-xs">
-                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">show</summary>
-                    <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[240px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">preview</summary>
+                    <div class="mt-1 space-y-1 rounded bg-gray-50 p-2 text-xs text-gray-600 max-w-[260px]">
+                      <p><span class="font-medium text-gray-700">Language:</span> {String(row.raw_data.language_of_instruction ?? row.raw_data.language ?? row.extracted_language ?? '—')}</p>
+                      <p><span class="font-medium text-gray-700">Tuition:</span> {String(row.raw_data.tuition_min_amount ?? row.raw_data.tuition_amount ?? row.extracted_tuition_amount ?? '—')}</p>
+                      <p><span class="font-medium text-gray-700">Deadline:</span> {String(row.raw_data.deadline ?? row.raw_data.application_deadline ?? '—')}</p>
+                      <p class="break-all"><span class="font-medium text-gray-700">Official URL:</span> {String(row.raw_data.official_program_url ?? row.raw_data.official_url ?? '—')}</p>
+                      <p class="break-all"><span class="font-medium text-gray-700">Application URL:</span> {String(row.raw_data.official_application_url ?? row.raw_data.application_url ?? '—')}</p>
+                    </div>
+                    <details class="mt-2">
+                      <summary class="cursor-pointer text-gray-400 hover:text-gray-600">raw JSON</summary>
+                      <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[260px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                    </details>
                   </details>
                 </td>
               </tr>
@@ -2247,16 +2668,55 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
           </tbody>
         </table>
       </div>
+      ) : (
+        <div class="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
+          No programs match the current filters.
+        </div>
+      )}
     </div>
   )}
 
-  {showScholarships && stagingScholarships.length > 0 && (
+  {activeEntity === 'scholarships' && (
     <div class="mb-6">
-      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Scholarships ({stagingScholarships.length})</h2>
+      <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-base font-semibold text-gray-800">Staged Scholarships</h2>
+          <p class="mt-1 text-sm text-gray-500">
+            {filteredRowCount === 0
+              ? 'No scholarships match the current filters.'
+              : `Showing ${pageStart}-${pageEnd} of ${filteredRowCount} scholarships.`}
+          </p>
+        </div>
+        {visibleScholarships.length > 0 && (
+          <form id="bulk-review-form" method="POST" action={currentFilterPath} class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="_action" value="bulk_review" />
+            <input type="hidden" name="entity_type" value="scholarships" />
+            {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
+            <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
+              <option value="approve">Approve selected</option>
+              <option value="reject">Reject selected</option>
+              <option value="skip">Skip selected</option>
+              <option value="reset">Reset selected</option>
+            </select>
+            <button type="button" data-select-visible class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Select visible
+            </button>
+            <button type="button" data-clear-selection class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Clear selection
+            </button>
+            <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              Apply to selected
+            </button>
+            <span data-selection-count class="text-xs text-gray-500">0 selected</span>
+          </form>
+        )}
+      </div>
+      {visibleScholarships.length > 0 ? (
       <div class="overflow-x-auto rounded-lg border border-gray-200">
         <table class="w-full text-sm text-left">
           <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
+              <th class="px-4 py-3">Select</th>
               <th class="px-4 py-3">Name</th>
               <th class="px-4 py-3">Amount</th>
               <th class="px-4 py-3">Status</th>
@@ -2266,8 +2726,19 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             </tr>
           </thead>
           <tbody>
-            {stagingScholarships.map(row => (
+            {visibleScholarships.map(row => (
               <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3">
+                  <input
+                    form="bulk-review-form"
+                    type="checkbox"
+                    name="row_ids"
+                    value={row.id}
+                    data-visible-row-checkbox
+                    disabled={row.import_status === 'merged' || row.import_status === 'processing' || row.import_status === 'error'}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                </td>
                 <td class="px-4 py-3 text-gray-700">{row.extracted_name ?? <span class="text-gray-400">—</span>}</td>
                 <td class="px-4 py-3 text-xs text-gray-500">{row.extracted_amount != null ? String(row.extracted_amount) : '—'}</td>
                 <td class="px-4 py-3">
@@ -2377,16 +2848,55 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
           </tbody>
         </table>
       </div>
+      ) : (
+        <div class="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
+          No scholarships match the current filters.
+        </div>
+      )}
     </div>
   )}
 
-  {showArticles && stagingArticles.length > 0 && (
+  {activeEntity === 'articles' && (
     <div class="mb-6">
-      <h2 class="text-base font-semibold text-gray-800 mb-3">Staged Articles ({stagingArticles.length})</h2>
+      <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-base font-semibold text-gray-800">Staged Articles</h2>
+          <p class="mt-1 text-sm text-gray-500">
+            {filteredRowCount === 0
+              ? 'No articles match the current filters.'
+              : `Showing ${pageStart}-${pageEnd} of ${filteredRowCount} articles.`}
+          </p>
+        </div>
+        {visibleArticles.length > 0 && (
+          <form id="bulk-review-form" method="POST" action={currentFilterPath} class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="_action" value="bulk_review" />
+            <input type="hidden" name="entity_type" value="articles" />
+            {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
+            <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
+              <option value="approve">Approve selected</option>
+              <option value="reject">Reject selected</option>
+              <option value="skip">Skip selected</option>
+              <option value="reset">Reset selected</option>
+            </select>
+            <button type="button" data-select-visible class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Select visible
+            </button>
+            <button type="button" data-clear-selection class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Clear selection
+            </button>
+            <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              Apply to selected
+            </button>
+            <span data-selection-count class="text-xs text-gray-500">0 selected</span>
+          </form>
+        )}
+      </div>
+      {visibleArticles.length > 0 ? (
       <div class="overflow-x-auto rounded-lg border border-gray-200">
         <table class="w-full text-sm text-left">
           <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
+              <th class="px-4 py-3">Select</th>
               <th class="px-4 py-3">Title</th>
               <th class="px-4 py-3">Slug</th>
               <th class="px-4 py-3">Category</th>
@@ -2397,8 +2907,19 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             </tr>
           </thead>
           <tbody>
-            {stagingArticles.map(row => (
+            {visibleArticles.map(row => (
               <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+                <td class="px-4 py-3">
+                  <input
+                    form="bulk-review-form"
+                    type="checkbox"
+                    name="row_ids"
+                    value={row.id}
+                    data-visible-row-checkbox
+                    disabled={row.import_status === 'merged' || row.import_status === 'processing' || row.import_status === 'error'}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                </td>
                 <td class="px-4 py-3 text-gray-700">{row.extracted_title ?? <span class="text-gray-400">—</span>}</td>
                 <td class="px-4 py-3 text-xs text-gray-500 font-mono">{row.extracted_slug ?? '—'}</td>
                 <td class="px-4 py-3 text-xs text-gray-500">{row.extracted_category ?? '—'}</td>
@@ -2509,6 +3030,11 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
           </tbody>
         </table>
       </div>
+      ) : (
+        <div class="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
+          No articles match the current filters.
+        </div>
+      )}
     </div>
   )}
 
@@ -2691,6 +3217,48 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
       noteEl.textContent = 'Preview does not save data. Final validation happens after import.';
       noteEl.style.color = '#9ca3af';
     });
+  }
+
+  var bulkForm = document.getElementById('bulk-review-form');
+  if (bulkForm) {
+    var rowCheckboxes = bulkForm.ownerDocument.querySelectorAll('[data-visible-row-checkbox]');
+    var selectVisibleBtn = bulkForm.querySelector('[data-select-visible]');
+    var clearSelectionBtn = bulkForm.querySelector('[data-clear-selection]');
+    var selectionCount = bulkForm.querySelector('[data-selection-count]');
+
+    function updateSelectionCount() {
+      if (!selectionCount) return;
+      var checked = 0;
+      rowCheckboxes.forEach(function (checkbox) {
+        if (checkbox.checked) checked += 1;
+      });
+      selectionCount.textContent = checked + ' selected';
+    }
+
+    if (selectVisibleBtn) {
+      selectVisibleBtn.addEventListener('click', function () {
+        rowCheckboxes.forEach(function (checkbox) {
+          if (checkbox.disabled) return;
+          checkbox.checked = true;
+        });
+        updateSelectionCount();
+      });
+    }
+
+    if (clearSelectionBtn) {
+      clearSelectionBtn.addEventListener('click', function () {
+        rowCheckboxes.forEach(function (checkbox) {
+          checkbox.checked = false;
+        });
+        updateSelectionCount();
+      });
+    }
+
+    rowCheckboxes.forEach(function (checkbox) {
+      checkbox.addEventListener('change', updateSelectionCount);
+    });
+
+    updateSelectionCount();
   }
 })();
   </script>
