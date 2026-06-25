@@ -7,8 +7,8 @@ Last updated: 2026-06-26
 
 ## Current Phase
 
-Phase 66C1 - Import Batch Pagination + Bulk Approve - complete.
-`/admin/imports/[id]` now uses URL-driven staged-row review controls with `entity`, `status`, `page`, and `pageSize`, defaults to the programs view when a batch contains staged programs, and pages visible staged rows with server-side Supabase range/count queries instead of the old fixed 50-row display cap. The batch detail page now supports visible-row checkboxes, safe client-side select-visible / clear-selection helpers, and bulk review for selected visible rows only (`approve`, `reject`, `skip`, `reset`) while preserving existing per-row review and merge flows. Program rows also gained a quick preview block for language, tuition, deadline, and key URLs ahead of raw JSON. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, no direct production writes beyond existing per-row merge behavior, no `mergeProgram()` semantic change, and no bulk merge/publish yet.
+Phase 66C2 - Import Batch Bulk Merge + Publish + Mark All Actions - complete.
+`/admin/imports/[id]` now adds a batch-actions panel on the staged-row view with explicit all-matching confirmation for hidden-page actions. Admins can approve all matching rows in the current batch/entity/status filter, bulk merge selected visible approved program rows, bulk merge all approved program rows in the current batch/filter with confirmation, and bulk publish merged draft/in-review production programs linked to that batch as public but still unverified. Every bulk action is re-queried server-side, scoped by `import_batch_id`, keeps helper university rows and blocked statuses out of all-matching approval, preserves existing per-row review/merge flows, and leaves `verification_status` plus `last_verified_at` untouched during bulk publish. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no `mergeProgram()` semantic change.
 
 Current branch / git status note:
 - Branch: `main`
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 66C2: import batch bulk merge + publish + mark-all actions; `/admin/imports/[id]` now adds a batch-actions panel with server-validated all-matching approval, selected-visible bulk program merge, all-matching approved-program merge, and confirmed bulk publish for linked merged draft/in-review programs only. Bulk publish updates public workflow fields only, keeps verification manual, and does not touch `last_verified_at`. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no `mergeProgram()` semantic change.
 - Phase 66C1: import batch pagination + bulk approve; `/admin/imports/[id]` now supports URL-driven staged-row filters for entity, status, page, and page size, uses paged staged-row queries instead of rendering every visible entity section at once, preserves review context through POST redirects, adds visible-row selection with safe select-visible / clear-selection helpers, and adds bulk review actions for selected visible rows only (`approve`, `reject`, `skip`, `reset`). Program rows now expose a lightweight preview of language, tuition, deadline, and official/application URLs before raw JSON. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, no `mergeProgram()` semantic change, and no bulk merge/publish implementation in this phase.
 - Phase 66B: import hub + program import staging UX; `/admin/imports` now promotes a dedicated program-import path while preserving generic batch creation. `/admin/imports/programs` requires one production university, accepts pasted JSON or browser-read local `.json` text, previews supported shapes client-side, reparses server-side, creates a mixed import batch plus a helper staging-university row linked to the selected production university, stages programs for review, and redirects to the batch detail page. `/admin/imports/[id]` now surfaces detected matched-university context, entity counts, row outcome counts, helper-row awareness, and a direct review-next link to `/admin/programs?university=<id>&status=draft&sort=newest` when the university can be detected. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no production program writes from the import page.
 
@@ -79,12 +80,12 @@ Current branch / git status note:
 - CSV import and persistent uploaded-file import storage remain deferred to a future import-focused phase. Phase 66B adds browser-local `.json` file loading for the dedicated program import page only.
 - Mixed-batch research pack staging import is still supported, and Phase 58E adds a separate local direct-draft production import script for trusted packs.
 - Fields without production columns, such as `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform `notes`, remain preserved in staging `raw_data`.
-- Bulk merge and bulk publish/verify flows, persistent saved admin filters, and broader admin review workflow storage remain deferred.
+- Bulk verify flows, persistent saved admin filters, and broader admin review workflow storage remain deferred.
 
 ## Immediate Next Phases
 
 - Expand the option-based import hub with additional dedicated entity flows if needed.
-- Bulk merge and batch-scoped bulk publish for import-reviewed programs remain the next import-workflow follow-up.
+- Batch-scoped bulk verify for import-reviewed programs remains deferred by design; current bulk publish intentionally leaves verification manual.
 - CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D; local browser-read `.json` support now exists only for program staging).
 - Article junction table wiring (article_countries, article_subjects, article_degree_levels) in the admin form — deferred from Phase 59.
 - Continue admin permission boundary hardening.
