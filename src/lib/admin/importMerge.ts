@@ -2,9 +2,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type MergeEntityType = 'universities' | 'scholarships' | 'articles' | 'programs'
 export type MergeAction = 'create_new' | 'update_existing'
+export type MergeStatusFilter = 'all' | 'pending' | 'validated' | 'needs_review' | 'approved' | 'rejected' | 'skipped' | 'merged' | 'error'
 
 const CREATE_NEW_TYPES: readonly MergeEntityType[] = ['universities', 'scholarships', 'articles', 'programs']
 const UPDATE_EXISTING_TYPES: readonly string[] = ['universities', 'scholarships', 'articles']
+const VALID_MERGE_STATUS_FILTERS: readonly MergeStatusFilter[] = [
+  'all', 'pending', 'validated', 'needs_review', 'approved', 'rejected', 'skipped', 'merged', 'error',
+]
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -993,4 +997,196 @@ async function mergeProgram(
   }
 
   return sourceWarning ? { ok: true, productionId, warning: sourceWarning } : { ok: true, productionId }
+}
+
+export async function bulkMergeApprovedPrograms(
+  supabase: SupabaseClient,
+  params: {
+    batchId: string
+    rowIds?: string[]
+    statusFilter?: string
+  }
+): Promise<
+  | { ok: true; merged: number; skipped: number; failed: number; warned: number }
+  | { ok: false; error: string }
+> {
+  const { batchId, rowIds, statusFilter = 'all' } = params
+
+  if (!UUID_RE.test(batchId)) {
+    return { ok: false, error: 'Invalid batch ID.' }
+  }
+  if (!(VALID_MERGE_STATUS_FILTERS as readonly string[]).includes(statusFilter)) {
+    return { ok: false, error: 'Invalid status filter.' }
+  }
+
+  const uniqueRowIds = [...new Set((rowIds ?? []).map((rowId) => rowId.trim()))]
+  if (uniqueRowIds.some((rowId) => !UUID_RE.test(rowId))) {
+    return { ok: false, error: 'Invalid staged row ID.' }
+  }
+
+  let query = supabase
+    .from('staging_programs')
+    .select('id, import_status, match_program_id')
+    .eq('import_batch_id', batchId)
+
+  if (uniqueRowIds.length > 0) {
+    query = query.in('id', uniqueRowIds)
+  } else if (statusFilter !== 'all') {
+    query = query.eq('import_status', statusFilter)
+  }
+
+  const { data: stagedRows, error: fetchError } = await query
+
+  if (fetchError) {
+    return { ok: false, error: 'Failed to load staged programs for bulk merge.' }
+  }
+
+  const rows = (stagedRows ?? []) as Array<{
+    id: string
+    import_status: string
+    match_program_id: string | null
+  }>
+
+  const foundRowIds = new Set(rows.map((row) => row.id))
+  let merged = 0
+  let skipped = 0
+  let failed = uniqueRowIds.length > 0
+    ? uniqueRowIds.filter((rowId) => !foundRowIds.has(rowId)).length
+    : 0
+  let warned = 0
+
+  for (const row of rows) {
+    if (row.import_status !== 'approved' || row.match_program_id) {
+      skipped += 1
+      continue
+    }
+
+    const result = await mergeApprovedRow(supabase, {
+      entityType: 'programs',
+      rowId: row.id,
+      batchId,
+      action: 'create_new',
+    })
+
+    if (!result.ok) {
+      failed += 1
+      continue
+    }
+
+    merged += 1
+    if (result.warning) warned += 1
+  }
+
+  return { ok: true, merged, skipped, failed, warned }
+}
+
+export async function bulkPublishMergedPrograms(
+  supabase: SupabaseClient,
+  params: {
+    batchId: string
+    statusFilter?: string
+  }
+): Promise<
+  | { ok: true; published: number; skipped: number; failed: number }
+  | { ok: false; error: string }
+> {
+  const { batchId, statusFilter = 'all' } = params
+
+  if (!UUID_RE.test(batchId)) {
+    return { ok: false, error: 'Invalid batch ID.' }
+  }
+  if (!(VALID_MERGE_STATUS_FILTERS as readonly string[]).includes(statusFilter)) {
+    return { ok: false, error: 'Invalid status filter.' }
+  }
+
+  let query = supabase
+    .from('staging_programs')
+    .select('id, import_status, match_program_id')
+    .eq('import_batch_id', batchId)
+
+  if (statusFilter !== 'all') {
+    query = query.eq('import_status', statusFilter)
+  }
+
+  const { data: stagedRows, error: fetchError } = await query
+
+  if (fetchError) {
+    return { ok: false, error: 'Failed to load merged staged programs for publishing.' }
+  }
+
+  const rows = (stagedRows ?? []) as Array<{
+    id: string
+    import_status: string
+    match_program_id: string | null
+  }>
+
+  const targetProgramIds: string[] = []
+  const seenProgramIds = new Set<string>()
+  let skipped = 0
+
+  for (const row of rows) {
+    if (row.import_status !== 'merged' || !row.match_program_id) {
+      skipped += 1
+      continue
+    }
+    if (seenProgramIds.has(row.match_program_id)) {
+      skipped += 1
+      continue
+    }
+
+    seenProgramIds.add(row.match_program_id)
+    targetProgramIds.push(row.match_program_id)
+  }
+
+  if (targetProgramIds.length === 0) {
+    return { ok: true, published: 0, skipped, failed: 0 }
+  }
+
+  const { data: productionPrograms, error: productionFetchError } = await supabase
+    .from('programs')
+    .select('id, content_status')
+    .in('id', targetProgramIds)
+
+  if (productionFetchError) {
+    return { ok: false, error: 'Failed to load linked production programs.' }
+  }
+
+  const productionById = new Map(
+    ((productionPrograms ?? []) as Array<{ id: string; content_status: string }>)
+      .map((program) => [program.id, program])
+  )
+
+  let published = 0
+  let failed = 0
+
+  for (const programId of targetProgramIds) {
+    const program = productionById.get(programId)
+
+    if (!program) {
+      failed += 1
+      continue
+    }
+
+    if (program.content_status !== 'draft' && program.content_status !== 'in_review') {
+      skipped += 1
+      continue
+    }
+
+    const { error: updateError } = await supabase
+      .from('programs')
+      .update({
+        content_status: 'published',
+        indexing_status: 'index',
+      })
+      .eq('id', programId)
+
+    if (updateError) {
+      failed += 1
+      continue
+    }
+
+    published += 1
+  }
+
+  return { ok: true, published, skipped, failed }
 }
