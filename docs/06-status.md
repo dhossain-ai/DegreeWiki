@@ -3,16 +3,16 @@
 > AI agent reading rule:
 > Read this active status file first for current context. Do not read archived status/history files unless the current task explicitly needs older phase details. For old phase details, use `docs/archive/README.md` to choose the smallest relevant archive file.
 
-Last updated: 2026-06-24
+Last updated: 2026-06-25
 
 ## Current Phase
 
-Phase 64 - Public University + Scholarship UX Bundle - complete.
-Public university and scholarship discovery/detail pages now use the improved public product layout patterns from programs/guides: wider information-first headers, stronger filters and empty states, source-aware trust signals, key facts, official action panels, Fit Finder CTAs, media rendering, and cheap related published program samples where existing relationships support them. `/universities` now surfaces verification and bounded published program counts for visible universities; `/universities/[slug]` now has a sticky key-facts/source rail and related published programs. `/scholarships` now surfaces provider, funding, host-country, degree-level, eligibility, deadline, and verification details in richer cards; `/scholarships/[slug]` now shows relationship-backed host countries, universities, subjects, degree levels, nationality notes, official/apply actions, and linked published programs. No migration, no new dependency, no unsafe HTML APIs, no service role, no admin/import/AI changes.
+Phase 65A - Admin Program Review Filters - complete.
+`/admin/programs` now supports GET-driven review filters for title search, university, status, degree level, subject, optional country, and created-date sort so bulk-import review can continue university-by-university without losing context. The page shows a result count, clearer empty states, status badges, and compact review hints for missing official links or tuition. Program edit links now carry a safe `returnTo` list URL, and the edit page preserves that context through Back, Cancel, Save, and add-source actions. No migration, no new dependency, no unsafe HTML APIs, no service role, no admin auth/RLS changes, and no import/staging architecture changes.
 
 Current branch / git status note:
 - Branch: `main`
-- Working tree contains uncommitted Phase 64 source/docs changes pending review.
+- Working tree contains uncommitted Phase 65A source/docs changes pending review.
 
 ## Current Product Summary
 
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 65A: admin program review filters; `/admin/programs` now uses GET query params for title, university, status, degree level, subject, optional country, and newest/oldest sort; selected filters remain visible after apply; clear resets to `/admin/programs`; result count and safer empty states were added; list rows now show compact missing-official-link / missing-tuition hints; edit links carry safe `returnTo` context, and the edit page preserves that context on Back, Cancel, Save, and add-source redirects. No migration, no new dependency, no unsafe HTML APIs, no service role, and no admin/import architecture changes.
 - Phase 64: public university and scholarship UX bundle; `/universities` has a stronger discovery header, program-search/Fit Finder paths, location filters in a sticky rail, richer university cards with media, verification, source dates, official links, and bounded published program counts. `/universities/[slug]` now uses a wide detail layout with an action panel, cover/logo media, sticky key facts, SourceBox, Fit Finder, empty-detail fallback, and related published programs. `/scholarships` now has a stronger discovery header, sticky filters, richer scholarship cards with provider/funding/deadline/eligibility/host-country/degree-level/source context, and better empty states. `/scholarships/[slug]` now has an apply/verify panel, key facts, SourceBox, Fit Finder, relationship-backed applies-to sections, nationality notes, and linked published programs filtered to published records before rendering. No migration, no new dependency, no unsafe HTML APIs, no service role, and no admin/import/AI changes.
 - Phase 63: saved programs MVP; uses existing `saved_items` owner-only RLS table, adds authenticated `/api/saved-items/program` POST/DELETE, validates published programs before saving, wires ProgramCard/home/program listing/program detail save states, and adds `/account/saved-programs`. No migration, no new dependency, no service role, no RLS bypass, and no admin/import/AI changes.
 - Phase 62C: program compare UX fix; `/programs` compare buttons now behave as JS-enhanced toggles into a local tray, the tray shows selected count/title context and activates "Compare programs" only with 2-4 programs, selection remains capped at 4, `/programs/compare` now handles exactly one valid published program with a helpful "Add one more program to compare" state, zero valid IDs with a "No valid published programs found" state, invalid UUIDs safely ignored, and missing fields rendered as `Not listed.`. No migrations, no new dependencies, no unsafe HTML APIs, no service role, and no admin/import/AI changes.
