@@ -19,6 +19,18 @@ export type ResearchPackParseResult =
       nonObjectCount: number
     }
 
+export type ProgramImportSourceShape = 'array' | 'programs_object' | 'research_pack'
+
+export type ProgramImportParseResult =
+  | { ok: false; error: string }
+  | {
+      ok: true
+      rows: BulkParsedRow[]
+      nonObjectCount: number
+      sourceShape: ProgramImportSourceShape
+      sourceUniversity: BulkParsedRow | null
+    }
+
 export const MAX_BULK_ROWS = 100
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -140,6 +152,34 @@ function mapArticle(item: Record<string, unknown>): BulkParsedRow {
   }
 }
 
+function parseProgramArray(
+  items: unknown[],
+): { ok: true; rows: BulkParsedRow[]; nonObjectCount: number } | { ok: false; error: string } {
+  if (items.length === 0) {
+    return { ok: false, error: 'Programs array must include at least one program.' }
+  }
+
+  if (items.length > MAX_BULK_ROWS) {
+    return {
+      ok: false,
+      error: `Maximum ${MAX_BULK_ROWS} programs per import. Received ${items.length}.`,
+    }
+  }
+
+  const rows: BulkParsedRow[] = []
+  let nonObjectCount = 0
+
+  for (const item of items) {
+    if (!isPlainObject(item)) {
+      nonObjectCount++
+      continue
+    }
+    rows.push(mapProgram(item))
+  }
+
+  return { ok: true, rows, nonObjectCount }
+}
+
 /**
  * Parses a JSON array string into per-entity staged row fields.
  *
@@ -254,5 +294,58 @@ export function parseResearchPackJson(input: string): ResearchPackParseResult {
     university: mapUniversity(parsed.university),
     programs,
     nonObjectCount,
+  }
+}
+
+export function parseProgramImportJson(input: string): ProgramImportParseResult {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return { ok: false, error: 'Input is empty. Paste program JSON first.' }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return { ok: false, error: 'Input is not valid JSON.' }
+  }
+
+  if (Array.isArray(parsed)) {
+    const result = parseProgramArray(parsed)
+    if (!result.ok) return result
+    return {
+      ok: true,
+      rows: result.rows,
+      nonObjectCount: result.nonObjectCount,
+      sourceShape: 'array',
+      sourceUniversity: null,
+    }
+  }
+
+  if (!isPlainObject(parsed)) {
+    return {
+      ok: false,
+      error: 'Supported shapes are a raw program array, { programs: [...] }, or { university: {...}, programs: [...] }.',
+    }
+  }
+
+  if (!Array.isArray(parsed.programs)) {
+    return {
+      ok: false,
+      error: 'Supported object shapes must include a programs array.',
+    }
+  }
+
+  const result = parseProgramArray(parsed.programs)
+  if (!result.ok) return result
+
+  const sourceUniversity = isPlainObject(parsed.university) ? mapUniversity(parsed.university) : null
+
+  return {
+    ok: true,
+    rows: result.rows,
+    nonObjectCount: result.nonObjectCount,
+    sourceShape: sourceUniversity ? 'research_pack' : 'programs_object',
+    sourceUniversity,
   }
 }
