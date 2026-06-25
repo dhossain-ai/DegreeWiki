@@ -1,7 +1,7 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import { CONTENT_STATUS_BADGE, VERIFICATION_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -9,81 +9,293 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
 
-const [articlesResult, categoriesResult] = await Promise.all([
-  supabase
-    .from('articles')
-    .select('id, title, slug, content_status, article_category_id, published_at, created_at')
-    .order('created_at', { ascending: false })
-    .limit(100),
-  supabase
-    .from('article_categories')
-    .select('id, name'),
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'updated', label: 'Recently updated' },
+  { value: 'title', label: 'Title (A-Z)' },
+] as const
+
+const formatEnumLabel = (value: string) =>
+  value
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+
+const params = Astro.url.searchParams
+const searchTerm = params.get('q')?.trim() ?? ''
+const rawCategoryId = params.get('category')?.trim() ?? ''
+const rawStatus = params.get('status')?.trim() ?? ''
+const rawVerification = params.get('verification')?.trim() ?? ''
+const rawAuthorId = params.get('author')?.trim() ?? ''
+const selectedSort = SORT_OPTIONS.some(option => option.value === params.get('sort'))
+  ? (params.get('sort') as (typeof SORT_OPTIONS)[number]['value'])
+  : 'newest'
+
+const [categoriesRes, authorsRes] = await Promise.all([
+  supabase.from('article_categories').select('id, name').order('display_order', { ascending: true }),
+  supabase.from('user_profiles').select('id, display_name').order('display_name', { ascending: true }),
 ])
 
+type CategoryOption = { id: string; name: string }
+type AuthorOption = { id: string; display_name: string | null }
 type ArticleRow = {
   id: string
   title: string
   slug: string
+  summary: string | null
   content_status: string
+  verification_status: string
   article_category_id: string | null
-  published_at: string | null
+  author_user_id: string | null
+  seo_title: string | null
+  seo_description: string | null
+  data_completeness_score: number
+  source_confidence_score: number
   created_at: string
+  updated_at: string
+  article_categories: { name: string } | null
+  author: { display_name: string | null } | null
 }
-type CategoryRow = { id: string; name: string }
 
-const rows = (articlesResult.data ?? []) as ArticleRow[]
-const loadError = articlesResult.error
+const categories = (categoriesRes.data ?? []) as CategoryOption[]
+const authors = (authorsRes.data ?? []) as AuthorOption[]
 
-const categoryMap = new Map<string, string>(
-  ((categoriesResult.data ?? []) as CategoryRow[]).map(c => [c.id, c.name])
-)
+const validCategoryIds = new Set(categories.map(option => option.id))
+const validAuthorIds = new Set(authors.map(option => option.id))
+
+const selectedCategoryId = validCategoryIds.has(rawCategoryId) ? rawCategoryId : ''
+const selectedStatus = CONTENT_STATUS_OPTIONS.includes(rawStatus as (typeof CONTENT_STATUS_OPTIONS)[number])
+  ? rawStatus
+  : ''
+const selectedVerification = VERIFICATION_OPTIONS.includes(rawVerification as (typeof VERIFICATION_OPTIONS)[number])
+  ? rawVerification
+  : ''
+const selectedAuthorId = validAuthorIds.has(rawAuthorId) ? rawAuthorId : ''
+
+let articlesQuery = supabase
+  .from('articles')
+  .select(
+    `id, title, slug, summary, content_status, verification_status, article_category_id, author_user_id,
+     seo_title, seo_description, data_completeness_score, source_confidence_score,
+     created_at, updated_at, article_categories(name), author:user_profiles!articles_author_user_id_fkey(display_name)`,
+    { count: 'exact' }
+  )
+
+if (searchTerm) articlesQuery = articlesQuery.ilike('title', `%${searchTerm}%`)
+if (selectedCategoryId) articlesQuery = articlesQuery.eq('article_category_id', selectedCategoryId)
+if (selectedStatus) articlesQuery = articlesQuery.eq('content_status', selectedStatus)
+if (selectedVerification) articlesQuery = articlesQuery.eq('verification_status', selectedVerification)
+if (selectedAuthorId) articlesQuery = articlesQuery.eq('author_user_id', selectedAuthorId)
+
+if (selectedSort === 'title') {
+  articlesQuery = articlesQuery.order('title', { ascending: true })
+} else if (selectedSort === 'updated') {
+  articlesQuery = articlesQuery
+    .order('updated_at', { ascending: false })
+    .order('title', { ascending: true })
+} else {
+  articlesQuery = articlesQuery
+    .order('created_at', { ascending: selectedSort === 'oldest' })
+    .order('title', { ascending: true })
+}
+
+const articlesRes = await articlesQuery
+const rows = (articlesRes.data ?? []) as ArticleRow[]
+const totalCount = articlesRes.count ?? rows.length
+const error = articlesRes.error
+
+const authorLabel = (author: AuthorOption | { id?: string; display_name: string | null }) =>
+  author.display_name?.trim() || `User ${(author.id ?? '').slice(0, 8)}`
+
+const activeFilterCount = [
+  searchTerm,
+  selectedCategoryId,
+  selectedStatus,
+  selectedVerification,
+  selectedAuthorId,
+  selectedSort === 'newest' ? '' : selectedSort,
+].filter(Boolean).length
+
+const currentListPath = Astro.url.search ? `${Astro.url.pathname}${Astro.url.search}` : ''
+const buildEditHref = (id: string) =>
+  currentListPath
+    ? `/admin/articles/${id}?returnTo=${encodeURIComponent(currentListPath)}`
+    : `/admin/articles/${id}`
+
+const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
 ---
 <AdminLayout title="Articles — DegreeWiki Admin" activePath="/admin/articles" userEmail={user.email ?? ''}>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-bold text-gray-900">Articles</h1>
-    <a href="/admin/articles/new"
-      class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+  <div class="flex items-center justify-between mb-6 gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">Articles</h1>
+      <p class="text-sm text-gray-500 mt-1">Filter drafts and published guides by category, author, and verification while keeping edit context in the URL.</p>
+    </div>
+    <a href="/admin/articles/new" class="shrink-0 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
       + New Article
     </a>
   </div>
 
-  {loadError ? (
-    <p class="text-sm text-red-600 py-4">Could not load data.</p>
-  ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No articles found. <a href="/admin/articles/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
-  ) : (
-    <div class="overflow-x-auto rounded-lg border border-gray-200">
+  <div class={filterCardClass}>
+    <form method="get" class="space-y-4">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="md:col-span-2">
+          <label for="q" class="block text-sm font-medium text-gray-700 mb-1">Search title</label>
+          <input
+            id="q"
+            name="q"
+            type="search"
+            value={searchTerm}
+            placeholder="Search articles by title"
+            class={inputClass}
+          />
+        </div>
+
+        <div>
+          <label for="category" class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+          <select id="category" name="category" class={selectClass}>
+            <option value="">All categories</option>
+            {categories.map(option => (
+              <option value={option.id} selected={selectedCategoryId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="author" class="block text-sm font-medium text-gray-700 mb-1">Author</label>
+          <select id="author" name="author" class={selectClass}>
+            <option value="">All authors</option>
+            {authors.map(option => (
+              <option value={option.id} selected={selectedAuthorId === option.id}>{authorLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+          <select id="status" name="status" class={selectClass}>
+            <option value="">All statuses</option>
+            {CONTENT_STATUS_OPTIONS.map(option => (
+              <option value={option} selected={selectedStatus === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="verification" class="block text-sm font-medium text-gray-700 mb-1">Verification</label>
+          <select id="verification" name="verification" class={selectClass}>
+            <option value="">All verification states</option>
+            {VERIFICATION_OPTIONS.map(option => (
+              <option value={option} selected={selectedVerification === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="sort" class="block text-sm font-medium text-gray-700 mb-1">Sort</label>
+          <select id="sort" name="sort" class={selectClass}>
+            {SORT_OPTIONS.map(option => (
+              <option value={option.value} selected={selectedSort === option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="submit" class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+          Apply filters
+        </button>
+        <a href="/admin/articles" class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+          Clear
+        </a>
+        <p class="text-sm text-gray-500">
+          Showing {totalCount.toLocaleString()} {totalCount === 1 ? 'article' : 'articles'}
+        </p>
+      </div>
+    </form>
+  </div>
+
+  {error && (
+    <p class="text-sm text-red-600 py-4">Could not load articles right now.</p>
+  )}
+
+  {!error && totalCount === 0 && (
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6">
+      <p class="text-sm text-gray-600">
+        {activeFilterCount > 0 ? 'No articles match the current filters.' : 'No articles found yet.'}
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        {activeFilterCount > 0 && (
+          <a href="/admin/articles" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+        )}
+        <a href="/admin/articles/new" class="text-sm text-blue-600 hover:underline">Add a new article</a>
+      </div>
+    </div>
+  )}
+
+  {!error && rows.length > 0 && (
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
       <table class="w-full text-sm text-left">
         <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
           <tr>
             <th class="px-4 py-3">Title</th>
-            <th class="px-4 py-3">Slug</th>
             <th class="px-4 py-3">Category</th>
+            <th class="px-4 py-3">Author</th>
             <th class="px-4 py-3">Status</th>
-            <th class="px-4 py-3">Published At</th>
-            <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3">Verification</th>
+            <th class="px-4 py-3">Updated</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
           {rows.map(row => (
-            <tr class="border-b border-gray-100 hover:bg-gray-50">
-              <td class="px-4 py-3 font-medium text-gray-900">{row.title}</td>
-              <td class="px-4 py-3 text-gray-500 font-mono text-xs">{row.slug}</td>
-              <td class="px-4 py-3 text-gray-600 text-xs">
-                {row.article_category_id ? (categoryMap.get(row.article_category_id) ?? '—') : '—'}
+            <tr class="border-b border-gray-100 align-top hover:bg-gray-50">
+              <td class="px-4 py-3">
+                <div class="font-medium text-gray-900">{row.title}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                  <span class="font-mono">{row.slug}</span>
+                  {!row.summary?.trim() && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing summary</span>
+                  )}
+                  {!row.seo_title?.trim() && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing SEO title</span>
+                  )}
+                  {!row.seo_description?.trim() && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing SEO description</span>
+                  )}
+                  {row.data_completeness_score < 60 && (
+                    <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low completeness</span>
+                  )}
+                  {row.source_confidence_score < 50 && (
+                    <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low confidence</span>
+                  )}
+                </div>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-600">{row.article_categories?.name ?? '—'}</td>
+              <td class="px-4 py-3 text-xs text-gray-600">
+                {row.author_user_id ? (row.author?.display_name?.trim() || `User ${row.author_user_id.slice(0, 8)}`) : 'Unassigned'}
               </td>
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
-                  {row.content_status}
+                  {formatEnumLabel(row.content_status)}
                 </span>
               </td>
-              <td class="px-4 py-3 text-gray-400 text-xs">
-                {row.published_at ? new Date(row.published_at).toLocaleDateString() : '—'}
+              <td class="px-4 py-3">
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${VERIFICATION_STATUS_BADGE[row.verification_status] ?? FALLBACK_BADGE}`}>
+                  {formatEnumLabel(row.verification_status)}
+                </span>
               </td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3 text-xs text-gray-500">
+                <div>{new Date(row.updated_at).toLocaleDateString()}</div>
+                <div class="mt-1 text-gray-400">Created {new Date(row.created_at).toLocaleDateString()}</div>
+              </td>
               <td class="px-4 py-3 text-right">
-                <a href={`/admin/articles/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+                <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
               </td>
             </tr>
           ))}
