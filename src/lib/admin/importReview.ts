@@ -11,7 +11,7 @@ const VALID_REVIEW_ACTIONS: readonly ReviewAction[] = [
   'approve', 'reject', 'skip', 'reset',
 ]
 
-const BLOCKED_STATUSES = new Set(['processing', 'error'])
+const BLOCKED_STATUSES = new Set(['processing', 'error', 'merged'])
 
 const STAGING_TABLE: Record<ReviewEntityType, string> = {
   universities: 'staging_universities',
