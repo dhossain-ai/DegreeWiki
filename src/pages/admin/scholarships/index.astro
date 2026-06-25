@@ -1,7 +1,7 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import { CONTENT_STATUS_BADGE, VERIFICATION_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -9,68 +9,360 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
 
-const { data, error } = await supabase
-  .from('scholarships')
-  .select('id, name, slug, content_status, scholarship_type, deadline, created_at')
-  .order('created_at', { ascending: false })
-  .limit(100)
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const FUNDING_TYPE_OPTIONS = ['full_tuition', 'partial_tuition', 'living_stipend', 'travel', 'research', 'full_funding', 'other'] as const
+const DEADLINE_FILTER_OPTIONS = [
+  { value: '', label: 'Any deadline' },
+  { value: 'upcoming', label: 'Upcoming only' },
+  { value: 'past', label: 'Past due' },
+  { value: 'missing', label: 'Missing deadline' },
+] as const
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'deadline', label: 'Nearest deadline' },
+  { value: 'name', label: 'Name (A-Z)' },
+] as const
 
+const formatEnumLabel = (value: string) =>
+  value
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+
+const formatDateValue = (value: string | null) =>
+  value ? new Date(value).toLocaleDateString() : '—'
+
+const params = Astro.url.searchParams
+const searchTerm = params.get('q')?.trim() ?? ''
+const providerTerm = params.get('provider')?.trim() ?? ''
+const rawCountryId = params.get('country')?.trim() ?? ''
+const rawStatus = params.get('status')?.trim() ?? ''
+const rawVerification = params.get('verification')?.trim() ?? ''
+const rawFundingType = params.get('funding_type')?.trim() ?? ''
+const selectedDeadlineFilter = DEADLINE_FILTER_OPTIONS.some(option => option.value === params.get('deadline'))
+  ? (params.get('deadline') ?? '')
+  : ''
+const selectedSort = SORT_OPTIONS.some(option => option.value === params.get('sort'))
+  ? (params.get('sort') as (typeof SORT_OPTIONS)[number]['value'])
+  : 'newest'
+
+const [countriesRes] = await Promise.all([
+  supabase.from('countries').select('id, name').order('name', { ascending: true }),
+])
+
+type CountryOption = { id: string; name: string }
+type ScholarshipCountryRow = {
+  country_id: string
+  countries: { name: string } | null
+}
 type ScholarshipRow = {
   id: string
   name: string
   slug: string
-  content_status: string
+  provider_name: string | null
   scholarship_type: string | null
+  funding_type: string | null
   deadline: string | null
+  deadline_text: string | null
+  official_url: string | null
+  application_url: string | null
+  coverage_notes: string | null
+  amount_min: number | null
+  amount_max: number | null
+  content_status: string
+  verification_status: string
+  data_completeness_score: number
+  source_confidence_score: number
   created_at: string
+  scholarship_countries: ScholarshipCountryRow[] | null
 }
-const rows = (data ?? []) as ScholarshipRow[]
+
+const countries = (countriesRes.data ?? []) as CountryOption[]
+const validCountryIds = new Set(countries.map(option => option.id))
+const selectedCountryId = validCountryIds.has(rawCountryId) ? rawCountryId : ''
+const selectedStatus = CONTENT_STATUS_OPTIONS.includes(rawStatus as (typeof CONTENT_STATUS_OPTIONS)[number])
+  ? rawStatus
+  : ''
+const selectedVerification = VERIFICATION_OPTIONS.includes(rawVerification as (typeof VERIFICATION_OPTIONS)[number])
+  ? rawVerification
+  : ''
+const selectedFundingType = FUNDING_TYPE_OPTIONS.includes(rawFundingType as (typeof FUNDING_TYPE_OPTIONS)[number])
+  ? rawFundingType
+  : ''
+
+const countryRelationSelect = selectedCountryId
+  ? 'scholarship_countries!inner(country_id, countries(name))'
+  : 'scholarship_countries(country_id, countries(name))'
+
+let scholarshipsQuery = supabase
+  .from('scholarships')
+  .select(
+    `id, name, slug, provider_name, scholarship_type, funding_type, deadline, deadline_text,
+     official_url, application_url, coverage_notes, amount_min, amount_max,
+     content_status, verification_status, data_completeness_score, source_confidence_score,
+     created_at, ${countryRelationSelect}`,
+    { count: 'exact' }
+  )
+
+if (searchTerm) scholarshipsQuery = scholarshipsQuery.ilike('name', `%${searchTerm}%`)
+if (providerTerm) scholarshipsQuery = scholarshipsQuery.ilike('provider_name', `%${providerTerm}%`)
+if (selectedCountryId) scholarshipsQuery = scholarshipsQuery.eq('scholarship_countries.country_id', selectedCountryId)
+if (selectedStatus) scholarshipsQuery = scholarshipsQuery.eq('content_status', selectedStatus)
+if (selectedVerification) scholarshipsQuery = scholarshipsQuery.eq('verification_status', selectedVerification)
+if (selectedFundingType) scholarshipsQuery = scholarshipsQuery.eq('funding_type', selectedFundingType)
+
+const todayIso = new Date().toISOString().slice(0, 10)
+if (selectedDeadlineFilter === 'upcoming') scholarshipsQuery = scholarshipsQuery.gte('deadline', todayIso)
+if (selectedDeadlineFilter === 'past') scholarshipsQuery = scholarshipsQuery.lt('deadline', todayIso)
+if (selectedDeadlineFilter === 'missing') scholarshipsQuery = scholarshipsQuery.is('deadline', null)
+
+if (selectedSort === 'name') {
+  scholarshipsQuery = scholarshipsQuery.order('name', { ascending: true })
+} else if (selectedSort === 'deadline') {
+  scholarshipsQuery = scholarshipsQuery
+    .order('deadline', { ascending: true, nullsFirst: false })
+    .order('name', { ascending: true })
+} else {
+  scholarshipsQuery = scholarshipsQuery
+    .order('created_at', { ascending: selectedSort === 'oldest' })
+    .order('name', { ascending: true })
+}
+
+const scholarshipsRes = await scholarshipsQuery
+const rows = (scholarshipsRes.data ?? []) as ScholarshipRow[]
+const totalCount = scholarshipsRes.count ?? rows.length
+const error = scholarshipsRes.error
+
+const relationNames = (relationRows: ScholarshipCountryRow[] | null | undefined) =>
+  (relationRows ?? [])
+    .map(row => row.countries?.name ?? '')
+    .filter(Boolean)
+
+const activeFilterCount = [
+  searchTerm,
+  providerTerm,
+  selectedCountryId,
+  selectedStatus,
+  selectedVerification,
+  selectedFundingType,
+  selectedDeadlineFilter,
+  selectedSort === 'newest' ? '' : selectedSort,
+].filter(Boolean).length
+
+const currentListPath = Astro.url.search ? `${Astro.url.pathname}${Astro.url.search}` : ''
+const buildEditHref = (id: string) =>
+  currentListPath
+    ? `/admin/scholarships/${id}?returnTo=${encodeURIComponent(currentListPath)}`
+    : `/admin/scholarships/${id}`
+
+const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
 ---
 <AdminLayout title="Scholarships — DegreeWiki Admin" activePath="/admin/scholarships" userEmail={user.email ?? ''}>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-bold text-gray-900">Scholarships</h1>
-    <a href="/admin/scholarships/new"
-      class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+  <div class="flex items-center justify-between mb-6 gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">Scholarships</h1>
+      <p class="text-sm text-gray-500 mt-1">Use quick filters for provider, funding, deadlines, and review state while triaging scholarship records.</p>
+    </div>
+    <a href="/admin/scholarships/new" class="shrink-0 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
       + New Scholarship
     </a>
   </div>
 
-  {error ? (
-    <p class="text-sm text-red-600 py-4">Could not load data.</p>
-  ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No scholarships found. <a href="/admin/scholarships/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
-  ) : (
-    <div class="overflow-x-auto rounded-lg border border-gray-200">
+  <div class={filterCardClass}>
+    <form method="get" class="space-y-4">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="md:col-span-2">
+          <label for="q" class="block text-sm font-medium text-gray-700 mb-1">Search name</label>
+          <input
+            id="q"
+            name="q"
+            type="search"
+            value={searchTerm}
+            placeholder="Search scholarships by name"
+            class={inputClass}
+          />
+        </div>
+
+        <div>
+          <label for="provider" class="block text-sm font-medium text-gray-700 mb-1">Provider name</label>
+          <input
+            id="provider"
+            name="provider"
+            type="search"
+            value={providerTerm}
+            placeholder="Search providers"
+            class={inputClass}
+          />
+        </div>
+
+        <div>
+          <label for="country" class="block text-sm font-medium text-gray-700 mb-1">Country</label>
+          <select id="country" name="country" class={selectClass}>
+            <option value="">All countries</option>
+            {countries.map(option => (
+              <option value={option.id} selected={selectedCountryId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+          <select id="status" name="status" class={selectClass}>
+            <option value="">All statuses</option>
+            {CONTENT_STATUS_OPTIONS.map(option => (
+              <option value={option} selected={selectedStatus === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="verification" class="block text-sm font-medium text-gray-700 mb-1">Verification</label>
+          <select id="verification" name="verification" class={selectClass}>
+            <option value="">All verification states</option>
+            {VERIFICATION_OPTIONS.map(option => (
+              <option value={option} selected={selectedVerification === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="funding_type" class="block text-sm font-medium text-gray-700 mb-1">Funding type</label>
+          <select id="funding_type" name="funding_type" class={selectClass}>
+            <option value="">All funding types</option>
+            {FUNDING_TYPE_OPTIONS.map(option => (
+              <option value={option} selected={selectedFundingType === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="deadline" class="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+          <select id="deadline" name="deadline" class={selectClass}>
+            {DEADLINE_FILTER_OPTIONS.map(option => (
+              <option value={option.value} selected={selectedDeadlineFilter === option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="sort" class="block text-sm font-medium text-gray-700 mb-1">Sort</label>
+          <select id="sort" name="sort" class={selectClass}>
+            {SORT_OPTIONS.map(option => (
+              <option value={option.value} selected={selectedSort === option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="submit" class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+          Apply filters
+        </button>
+        <a href="/admin/scholarships" class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+          Clear
+        </a>
+        <p class="text-sm text-gray-500">
+          Showing {totalCount.toLocaleString()} {totalCount === 1 ? 'scholarship' : 'scholarships'}
+        </p>
+      </div>
+    </form>
+  </div>
+
+  {error && (
+    <p class="text-sm text-red-600 py-4">Could not load scholarships right now.</p>
+  )}
+
+  {!error && totalCount === 0 && (
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6">
+      <p class="text-sm text-gray-600">
+        {activeFilterCount > 0 ? 'No scholarships match the current filters.' : 'No scholarships found yet.'}
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        {activeFilterCount > 0 && (
+          <a href="/admin/scholarships" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+        )}
+        <a href="/admin/scholarships/new" class="text-sm text-blue-600 hover:underline">Add a new scholarship</a>
+      </div>
+    </div>
+  )}
+
+  {!error && rows.length > 0 && (
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
       <table class="w-full text-sm text-left">
         <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
           <tr>
             <th class="px-4 py-3">Name</th>
-            <th class="px-4 py-3">Slug</th>
-            <th class="px-4 py-3">Type</th>
+            <th class="px-4 py-3">Provider</th>
             <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">Verification</th>
             <th class="px-4 py-3">Deadline</th>
             <th class="px-4 py-3">Created</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(row => (
-            <tr class="border-b border-gray-100 hover:bg-gray-50">
-              <td class="px-4 py-3 font-medium text-gray-900">{row.name}</td>
-              <td class="px-4 py-3 text-gray-500 font-mono text-xs">{row.slug}</td>
-              <td class="px-4 py-3 text-gray-600 text-xs">{row.scholarship_type ?? '—'}</td>
-              <td class="px-4 py-3">
-                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
-                  {row.content_status}
-                </span>
-              </td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{row.deadline ?? '—'}</td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
-              <td class="px-4 py-3 text-right">
-                <a href={`/admin/scholarships/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
-              </td>
-            </tr>
-          ))}
+          {rows.map(row => {
+            const hostCountries = relationNames(row.scholarship_countries)
+            const hasFundingDetails = row.amount_min !== null || row.amount_max !== null || !!row.coverage_notes?.trim()
+            return (
+              <tr class="border-b border-gray-100 align-top hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <div class="font-medium text-gray-900">{row.name}</div>
+                  <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                    <span class="font-mono">{row.slug}</span>
+                    {row.scholarship_type && <span>{formatEnumLabel(row.scholarship_type)}</span>}
+                    {!row.official_url && (
+                      <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing official link</span>
+                    )}
+                    {!row.application_url && (
+                      <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing apply link</span>
+                    )}
+                    {!hasFundingDetails && (
+                      <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing funding details</span>
+                    )}
+                    {!row.deadline && !row.deadline_text && (
+                      <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing deadline</span>
+                    )}
+                    {row.data_completeness_score < 60 && (
+                      <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low completeness</span>
+                    )}
+                    {row.source_confidence_score < 50 && (
+                      <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low confidence</span>
+                    )}
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">
+                  <div>{row.provider_name ?? '—'}</div>
+                  <div class="mt-1 text-gray-400">
+                    {hostCountries.length > 0 ? hostCountries.slice(0, 2).join(', ') : 'Global / not set'}
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
+                    {formatEnumLabel(row.content_status)}
+                  </span>
+                </td>
+                <td class="px-4 py-3">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${VERIFICATION_STATUS_BADGE[row.verification_status] ?? FALLBACK_BADGE}`}>
+                    {formatEnumLabel(row.verification_status)}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500">
+                  <div>{formatDateValue(row.deadline)}</div>
+                  {row.deadline_text && <div class="mt-1 text-gray-400">{row.deadline_text}</div>}
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-3 text-right">
+                  <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
