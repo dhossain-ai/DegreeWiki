@@ -1,7 +1,7 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import { CONTENT_STATUS_BADGE, VERIFICATION_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -9,64 +9,290 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
 
-const { data, error } = await supabase
-  .from('universities')
-  .select('id, name, slug, content_status, verification_status, data_completeness_score, created_at')
-  .order('created_at', { ascending: false })
-  .limit(100)
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const VERIFICATION_OPTIONS = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'name', label: 'Name (A-Z)' },
+] as const
 
+const formatEnumLabel = (value: string) =>
+  value
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+
+const params = Astro.url.searchParams
+const searchTerm = params.get('q')?.trim() ?? ''
+const rawCountryId = params.get('country')?.trim() ?? ''
+const rawCityId = params.get('city')?.trim() ?? ''
+const rawStatus = params.get('status')?.trim() ?? ''
+const rawVerification = params.get('verification')?.trim() ?? ''
+const selectedSort = SORT_OPTIONS.some(option => option.value === params.get('sort'))
+  ? (params.get('sort') as (typeof SORT_OPTIONS)[number]['value'])
+  : 'newest'
+
+const [countriesRes, citiesRes] = await Promise.all([
+  supabase.from('countries').select('id, name').order('name', { ascending: true }),
+  supabase.from('cities').select('id, name, country_id').order('name', { ascending: true }),
+])
+
+type CountryOption = { id: string; name: string }
+type CityOption = { id: string; name: string; country_id: string }
 type UniversityRow = {
   id: string
   name: string
   slug: string
+  country_id: string
+  city_id: string | null
+  official_url: string | null
   content_status: string
   verification_status: string
   data_completeness_score: number
+  source_confidence_score: number
+  logo_id: string | null
+  cover_image_id: string | null
   created_at: string
 }
-const rows = (data ?? []) as UniversityRow[]
+
+const countries = (countriesRes.data ?? []) as CountryOption[]
+const cities = (citiesRes.data ?? []) as CityOption[]
+
+const validCountryIds = new Set(countries.map(option => option.id))
+const cityMap = new Map(cities.map(option => [option.id, option]))
+const validCityIds = new Set(cities.map(option => option.id))
+
+const selectedCountryId = validCountryIds.has(rawCountryId) ? rawCountryId : ''
+const selectedCityId =
+  validCityIds.has(rawCityId) && (!selectedCountryId || cityMap.get(rawCityId)?.country_id === selectedCountryId)
+    ? rawCityId
+    : ''
+const selectedStatus = CONTENT_STATUS_OPTIONS.includes(rawStatus as (typeof CONTENT_STATUS_OPTIONS)[number])
+  ? rawStatus
+  : ''
+const selectedVerification = VERIFICATION_OPTIONS.includes(rawVerification as (typeof VERIFICATION_OPTIONS)[number])
+  ? rawVerification
+  : ''
+
+let universitiesQuery = supabase
+  .from('universities')
+  .select(
+    'id, name, slug, country_id, city_id, official_url, content_status, verification_status, data_completeness_score, source_confidence_score, logo_id, cover_image_id, created_at',
+    { count: 'exact' }
+  )
+
+if (searchTerm) universitiesQuery = universitiesQuery.ilike('name', `%${searchTerm}%`)
+if (selectedCountryId) universitiesQuery = universitiesQuery.eq('country_id', selectedCountryId)
+if (selectedCityId) universitiesQuery = universitiesQuery.eq('city_id', selectedCityId)
+if (selectedStatus) universitiesQuery = universitiesQuery.eq('content_status', selectedStatus)
+if (selectedVerification) universitiesQuery = universitiesQuery.eq('verification_status', selectedVerification)
+
+if (selectedSort === 'name') {
+  universitiesQuery = universitiesQuery.order('name', { ascending: true })
+} else {
+  universitiesQuery = universitiesQuery
+    .order('created_at', { ascending: selectedSort === 'oldest' })
+    .order('name', { ascending: true })
+}
+
+const universitiesRes = await universitiesQuery
+const rows = (universitiesRes.data ?? []) as UniversityRow[]
+const totalCount = universitiesRes.count ?? rows.length
+const error = universitiesRes.error
+
+const countryMap = new Map(countries.map(option => [option.id, option.name]))
+const visibleCities = selectedCountryId
+  ? cities.filter(option => option.country_id === selectedCountryId)
+  : cities
+
+const activeFilterCount = [
+  searchTerm,
+  selectedCountryId,
+  selectedCityId,
+  selectedStatus,
+  selectedVerification,
+  selectedSort === 'newest' ? '' : selectedSort,
+].filter(Boolean).length
+
+const currentListPath = Astro.url.search ? `${Astro.url.pathname}${Astro.url.search}` : ''
+const buildEditHref = (id: string) =>
+  currentListPath
+    ? `/admin/universities/${id}?returnTo=${encodeURIComponent(currentListPath)}`
+    : `/admin/universities/${id}`
+
+const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
 ---
 <AdminLayout title="Universities — DegreeWiki Admin" activePath="/admin/universities" userEmail={user.email ?? ''}>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-bold text-gray-900">Universities</h1>
-    <a href="/admin/universities/new" class="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+  <div class="flex items-center justify-between mb-6 gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">Universities</h1>
+      <p class="text-sm text-gray-500 mt-1">Filter by location, review state, and verification to work through university content faster.</p>
+    </div>
+    <a href="/admin/universities/new" class="shrink-0 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
       + New University
     </a>
   </div>
 
-  {error ? (
-    <p class="text-sm text-red-600 py-4">Could not load data.</p>
-  ) : rows.length === 0 ? (
-    <p class="text-sm text-gray-500 py-4">No universities found. <a href="/admin/universities/new" class="text-blue-600 hover:underline">Add the first one.</a></p>
-  ) : (
-    <div class="overflow-x-auto rounded-lg border border-gray-200">
+  <div class={filterCardClass}>
+    <form method="get" class="space-y-4">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="md:col-span-2">
+          <label for="q" class="block text-sm font-medium text-gray-700 mb-1">Search name</label>
+          <input
+            id="q"
+            name="q"
+            type="search"
+            value={searchTerm}
+            placeholder="Search universities by name"
+            class={inputClass}
+          />
+        </div>
+
+        <div>
+          <label for="country" class="block text-sm font-medium text-gray-700 mb-1">Country</label>
+          <select id="country" name="country" class={selectClass}>
+            <option value="">All countries</option>
+            {countries.map(option => (
+              <option value={option.id} selected={selectedCountryId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="city" class="block text-sm font-medium text-gray-700 mb-1">City</label>
+          <select id="city" name="city" class={selectClass}>
+            <option value="">All cities</option>
+            {visibleCities.map(option => (
+              <option value={option.id} selected={selectedCityId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+          <select id="status" name="status" class={selectClass}>
+            <option value="">All statuses</option>
+            {CONTENT_STATUS_OPTIONS.map(option => (
+              <option value={option} selected={selectedStatus === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="verification" class="block text-sm font-medium text-gray-700 mb-1">Verification</label>
+          <select id="verification" name="verification" class={selectClass}>
+            <option value="">All verification states</option>
+            {VERIFICATION_OPTIONS.map(option => (
+              <option value={option} selected={selectedVerification === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="sort" class="block text-sm font-medium text-gray-700 mb-1">Sort</label>
+          <select id="sort" name="sort" class={selectClass}>
+            {SORT_OPTIONS.map(option => (
+              <option value={option.value} selected={selectedSort === option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="submit" class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+          Apply filters
+        </button>
+        <a href="/admin/universities" class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+          Clear
+        </a>
+        <p class="text-sm text-gray-500">
+          Showing {totalCount.toLocaleString()} {totalCount === 1 ? 'university' : 'universities'}
+        </p>
+      </div>
+    </form>
+  </div>
+
+  {error && (
+    <p class="text-sm text-red-600 py-4">Could not load universities right now.</p>
+  )}
+
+  {!error && totalCount === 0 && (
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6">
+      <p class="text-sm text-gray-600">
+        {activeFilterCount > 0 ? 'No universities match the current filters.' : 'No universities found yet.'}
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        {activeFilterCount > 0 && (
+          <a href="/admin/universities" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+        )}
+        <a href="/admin/universities/new" class="text-sm text-blue-600 hover:underline">Add a new university</a>
+      </div>
+    </div>
+  )}
+
+  {!error && rows.length > 0 && (
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
       <table class="w-full text-sm text-left">
         <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
           <tr>
             <th class="px-4 py-3">Name</th>
-            <th class="px-4 py-3">Slug</th>
+            <th class="px-4 py-3">Location</th>
             <th class="px-4 py-3">Status</th>
             <th class="px-4 py-3">Verification</th>
-            <th class="px-4 py-3">Completeness</th>
+            <th class="px-4 py-3">Quality</th>
             <th class="px-4 py-3">Created</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
           {rows.map(row => (
-            <tr class="border-b border-gray-100 hover:bg-gray-50">
-              <td class="px-4 py-3 font-medium text-gray-900">{row.name}</td>
-              <td class="px-4 py-3 text-gray-500 font-mono text-xs">{row.slug}</td>
+            <tr class="border-b border-gray-100 align-top hover:bg-gray-50">
+              <td class="px-4 py-3">
+                <div class="font-medium text-gray-900">{row.name}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                  <span class="font-mono">{row.slug}</span>
+                  {!row.official_url && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing official link</span>
+                  )}
+                  {!row.logo_id && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing logo</span>
+                  )}
+                  {!row.cover_image_id && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing cover</span>
+                  )}
+                  {row.data_completeness_score < 60 && (
+                    <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low completeness</span>
+                  )}
+                  {row.source_confidence_score < 50 && (
+                    <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low confidence</span>
+                  )}
+                </div>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-600">
+                <div>{row.city_id ? (cityMap.get(row.city_id)?.name ?? '—') : '—'}</div>
+                <div class="mt-1 text-gray-400">{countryMap.get(row.country_id) ?? '—'}</div>
+              </td>
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
-                  {row.content_status}
+                  {formatEnumLabel(row.content_status)}
                 </span>
               </td>
-              <td class="px-4 py-3 text-gray-600 text-xs">{row.verification_status}</td>
-              <td class="px-4 py-3 text-gray-600">{row.data_completeness_score}%</td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
               <td class="px-4 py-3">
-                <a href={`/admin/universities/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${VERIFICATION_STATUS_BADGE[row.verification_status] ?? FALLBACK_BADGE}`}>
+                  {formatEnumLabel(row.verification_status)}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-600">
+                <div>{row.data_completeness_score}% complete</div>
+                <div class="mt-1 text-gray-400">{row.source_confidence_score}% confidence</div>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3 text-right">
+                <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
               </td>
             </tr>
           ))}
