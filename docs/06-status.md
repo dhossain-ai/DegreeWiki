@@ -3,12 +3,12 @@
 > AI agent reading rule:
 > Read this active status file first for current context. Do not read archived status/history files unless the current task explicitly needs older phase details. For old phase details, use `docs/archive/README.md` to choose the smallest relevant archive file.
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 ## Current Phase
 
-Phase 65C - Admin Content List Filters Bundle - complete.
-`/admin/universities`, `/admin/scholarships`, and `/admin/articles` now follow the same URL-driven filter pattern established in Phase 65A for programs. Each list adds GET-based filters, visible selected state, Clear actions, result counts, safer empty states, compact row-level review hints, and edit links that preserve local `returnTo` context. The corresponding edit pages now validate and preserve that local list context on Back, Cancel, Save, Publish, and add-source redirects where those actions exist. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no import/staging or admin-auth architecture changes.
+Phase 66B - Import Hub + Program Import Staging UX - complete.
+`/admin/imports` is now an option-based Import Hub with a recommended Program Import path plus the older generic batch tools preserved below it. `/admin/imports/programs` now stages pasted or browser-loaded JSON program data against one selected production university, supports raw arrays, `{ programs: [...] }`, and nested research-pack shapes, creates a helper staging-university row linked to the selected production university, stages programs into `staging_programs`, and redirects into the existing batch review screen. `/admin/imports/[id]` now shows detected university context when available, summary entity/outcome counts, and a review-next link into filtered draft programs for that university. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, no direct browser writes to production programs, and no `mergeProgram()` semantic change.
 
 Current branch / git status note:
 - Branch: `main`
@@ -43,6 +43,8 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 66B: import hub + program import staging UX; `/admin/imports` now promotes a dedicated program-import path while preserving generic batch creation. `/admin/imports/programs` requires one production university, accepts pasted JSON or browser-read local `.json` text, previews supported shapes client-side, reparses server-side, creates a mixed import batch plus a helper staging-university row linked to the selected production university, stages programs for review, and redirects to the batch detail page. `/admin/imports/[id]` now surfaces detected matched-university context, entity counts, row outcome counts, helper-row awareness, and a direct review-next link to `/admin/programs?university=<id>&status=draft&sort=newest` when the university can be detected. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no production program writes from the import page.
+
 - Phase 65C: admin content list filters bundle; `/admin/universities` now supports name, country, city, content-status, verification-status, and newest/oldest/name sorting with result count and compact row hints for missing official link/media and low quality signals. `/admin/scholarships` now supports name, provider, host country relation, content-status, verification-status, funding-type, deadline-state, and newest/oldest/deadline/name sorting with result count and quick hints for missing links, funding detail, deadline, and low quality signals. `/admin/articles` now supports title, category, author, content-status, verification-status, and newest/oldest/updated/title sorting with result count and quick hints for missing SEO fields, missing summary, and low quality signals. Safe `returnTo` context is preserved for university, scholarship, and article edit pages on Back, Cancel, Save, existing Publish, and add-source redirects where applicable. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no import/auth architecture changes.
 - Phase 65B: admin program review workflow; `/admin/programs/[id]` now shows a read-only checklist for core identity, student decision fields, sources, intakes, and public readiness; loads existing `data_completeness_score`, `source_confidence_score`, `last_verified_at`, and `next_review_due_at`; adds safe workflow buttons for save, mark in review, publish, mark partially verified, and mark verified; verification buttons stamp `last_verified_at`; review hints remain advisory and do not create new publish blockers beyond existing validation/RLS. No migration, no new dependency, no unsafe HTML APIs, no service role, and no import/auth architecture changes.
 - Phase 65A: admin program review filters; `/admin/programs` now uses GET query params for title, university, status, degree level, subject, optional country, and newest/oldest sort; selected filters remain visible after apply; clear resets to `/admin/programs`; result count and safer empty states were added; list rows now show compact missing-official-link / missing-tuition hints; edit links carry safe `returnTo` context, and the edit page preserves that context on Back, Cancel, Save, and add-source redirects. No migration, no new dependency, no unsafe HTML APIs, no service role, and no admin/import architecture changes.
@@ -73,14 +75,15 @@ Current branch / git status note:
 - Sidebar filtering improves clarity but does not replace route-level permission checks.
 - Dashboard count cards are not fully permission-tailored yet.
 - Default site OG image not yet configured (no brand asset uploaded to Cloudinary yet).
-- Import CSV/file upload remains deferred to a future import-focused phase.
+- CSV import and persistent uploaded-file import storage remain deferred to a future import-focused phase. Phase 66B adds browser-local `.json` file loading for the dedicated program import page only.
 - Mixed-batch research pack staging import is still supported, and Phase 58E adds a separate local direct-draft production import script for trusted packs.
 - Fields without production columns, such as `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform `notes`, remain preserved in staging `raw_data`.
 - Bulk publish/verify flows, persistent saved admin filters, and broader admin review workflow storage remain deferred.
 
 ## Immediate Next Phases
 
-- CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D).
+- Expand the option-based import hub with additional dedicated entity flows if needed.
+- CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D; local browser-read `.json` support now exists only for program staging).
 - Article junction table wiring (article_countries, article_subjects, article_degree_levels) in the admin form — deferred from Phase 59.
 - Continue admin permission boundary hardening.
 - Add default site OG image (upload DegreeWiki brand asset to Cloudinary, wire PUBLIC_DEFAULT_OG_IMAGE_PUBLIC_ID).
