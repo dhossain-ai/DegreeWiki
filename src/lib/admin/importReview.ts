@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type ReviewEntityType = 'universities' | 'programs' | 'scholarships' | 'articles'
 export type ReviewAction = 'approve' | 'reject' | 'skip' | 'reset'
+export type ReviewStatusFilter = 'all' | 'pending' | 'validated' | 'needs_review' | 'approved' | 'rejected' | 'skipped' | 'merged' | 'error'
 
 const VALID_ENTITY_TYPES: readonly ReviewEntityType[] = [
   'universities', 'programs', 'scholarships', 'articles',
@@ -9,6 +10,10 @@ const VALID_ENTITY_TYPES: readonly ReviewEntityType[] = [
 
 const VALID_REVIEW_ACTIONS: readonly ReviewAction[] = [
   'approve', 'reject', 'skip', 'reset',
+]
+
+const VALID_REVIEW_STATUS_FILTERS: readonly ReviewStatusFilter[] = [
+  'all', 'pending', 'validated', 'needs_review', 'approved', 'rejected', 'skipped', 'merged', 'error',
 ]
 
 const BLOCKED_STATUSES = new Set(['processing', 'error', 'merged'])
@@ -28,6 +33,14 @@ const ACTION_STATUS: Record<ReviewAction, string> = {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isProgramImportHelperRow(rawData: unknown): boolean {
+  return isPlainObject(rawData) && rawData.helper_kind === 'program_import_selected_university'
+}
 
 export async function applyReviewAction(
   supabase: SupabaseClient,
@@ -103,4 +116,91 @@ export async function applyReviewAction(
   }
 
   return { ok: true }
+}
+
+export async function applyReviewActionToMatching(
+  supabase: SupabaseClient,
+  params: {
+    entityType: string
+    batchId: string
+    statusFilter: string
+    action: string
+    reviewerUserId: string
+  }
+): Promise<
+  | { ok: true; approved: number; skipped: number; failed: number }
+  | { ok: false; error: string }
+> {
+  const { entityType, batchId, statusFilter, action, reviewerUserId } = params
+
+  if (!(VALID_ENTITY_TYPES as readonly string[]).includes(entityType)) {
+    return { ok: false, error: 'Invalid entity type.' }
+  }
+  if (!(VALID_REVIEW_ACTIONS as readonly string[]).includes(action)) {
+    return { ok: false, error: 'Invalid review action.' }
+  }
+  if (!(VALID_REVIEW_STATUS_FILTERS as readonly string[]).includes(statusFilter)) {
+    return { ok: false, error: 'Invalid status filter.' }
+  }
+  if (!UUID_RE.test(batchId)) {
+    return { ok: false, error: 'Invalid batch ID.' }
+  }
+
+  const table = STAGING_TABLE[entityType as ReviewEntityType]
+  const reviewAction = action as ReviewAction
+  let query = supabase
+    .from(table)
+    .select('id, import_status, raw_data')
+    .eq('import_batch_id', batchId)
+
+  if (statusFilter !== 'all') {
+    query = query.eq('import_status', statusFilter)
+  }
+
+  const { data: matchingRows, error: fetchError } = await query
+
+  if (fetchError) {
+    return { ok: false, error: 'Failed to load matching staged rows.' }
+  }
+
+  const rows = (matchingRows ?? []) as Array<{
+    id: string
+    import_status: string
+    raw_data: Record<string, unknown> | null
+  }>
+
+  let approved = 0
+  let skipped = 0
+  let failed = 0
+
+  for (const row of rows) {
+    if (BLOCKED_STATUSES.has(row.import_status)) {
+      skipped += 1
+      continue
+    }
+
+    if (entityType === 'universities' && isProgramImportHelperRow(row.raw_data)) {
+      skipped += 1
+      continue
+    }
+
+    if (reviewAction === 'approve' && row.import_status === 'approved') {
+      skipped += 1
+      continue
+    }
+
+    const result = await applyReviewAction(supabase, {
+      entityType,
+      rowId: row.id,
+      batchId,
+      action: reviewAction,
+      reviewNotes: '',
+      reviewerUserId,
+    })
+
+    if (result.ok) approved += 1
+    else failed += 1
+  }
+
+  return { ok: true, approved, skipped, failed }
 }
