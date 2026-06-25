@@ -31,6 +31,53 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 66B: Import Hub + Program Import Staging UX
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Turn `/admin/imports` into a clearer option-based hub.
+- Add a dedicated program-import staging page that selects one production university first, supports safe client preview plus local `.json` loading, stages programs into the existing import pipeline, and avoids any direct production program writes.
+- Improve batch-detail context so university-linked program batches are easier to review after staging.
+
+Files modified:
+- `src/pages/admin/imports.astro`
+- `src/pages/admin/imports/programs.astro`
+- `src/pages/admin/imports/[id].astro`
+- `src/lib/admin/importParse.ts`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Reworked `/admin/imports` into an Import Hub with a prominent Program Import card, preserved generic batch creation, and retained recent batch history in the same route.
+- Added `/admin/imports/programs`, which requires one production university, accepts pasted JSON text, and can load a local `.json` file into the textarea entirely in the browser before submit.
+- Added client-side preview for the dedicated program page using safe DOM APIs only; it recognizes raw arrays, `{ programs: [...] }`, and nested `{ university, programs }` research-pack shapes, shows object counts and sample titles, and warns if the JSON university name differs from the selected production university.
+- Extended `src/lib/admin/importParse.ts` with a dedicated program-import parser that reparses those three supported shapes server-side and preserves the existing `MAX_BULK_ROWS` boundary at the program-array level.
+- Server-side program import now validates the selected production university UUID and existence, creates a new mixed import batch, creates a batch-local helper staging-university row linked to the selected production university, and stages each parsed program into `staging_programs` with that helper row as `staging_university_id`.
+- Program staging keeps the existing import-status pattern: rows without warnings start as `validated`, rows with warnings start as `pending`, non-object array items count as failures, and mismatch/unparseable-row warnings are recorded as friendly `staging_errors`.
+- The helper staging-university row is marked and linked so `mergeProgram()` can keep its existing semantics while program rows still resolve their production university through the normal staging-university chain.
+- `/admin/imports/[id]` now detects matched-university context when possible, shows entity counts plus row-outcome counts, excludes helper rows from the main lifecycle summary so guidance stays focused on actionable review work, and adds a direct review-next link to `/admin/programs?university=<id>&status=draft&sort=newest` when a single linked university can be detected.
+- Mixed-batch research-pack support on the existing batch-detail page was preserved; the new program-import route does not replace or remove that older path.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No direct browser write to production `programs`.
+- No `mergeProgram()` semantic change.
+- No mixed-batch support removal.
+
+Validation:
+- `npm run build`: PASS.
+
+Deferred:
+- CSV import and persistent uploaded-file storage remain deferred.
+- Additional dedicated import pages for other entity types remain optional future work.
+
 ## 2026-06-25 - Phase 65C: Admin Content List Filters Bundle
 
 Tool:
