@@ -7,12 +7,12 @@ Last updated: 2026-06-25
 
 ## Current Phase
 
-Phase 65A - Admin Program Review Filters - complete.
-`/admin/programs` now supports GET-driven review filters for title search, university, status, degree level, subject, optional country, and created-date sort so bulk-import review can continue university-by-university without losing context. The page shows a result count, clearer empty states, status badges, and compact review hints for missing official links or tuition. Program edit links now carry a safe `returnTo` list URL, and the edit page preserves that context through Back, Cancel, Save, and add-source actions. No migration, no new dependency, no unsafe HTML APIs, no service role, no admin auth/RLS changes, and no import/staging architecture changes.
+Phase 65B - Admin Program Review Checklist + Verification Workflow - complete.
+`/admin/programs/[id]` now acts as a practical review screen for imported draft programs using existing schema only. The edit page adds a sticky advisory checklist, read-only data completeness and source confidence display, source and intake coverage hints, last verified / next review due context, and explicit workflow actions for save, mark in review, publish, mark partially verified, and mark verified while preserving the Phase 65A `returnTo` list context through Back, Cancel, Save, workflow actions, and add-source. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no import/staging or admin-auth architecture changes.
 
 Current branch / git status note:
 - Branch: `main`
-- Working tree contains uncommitted Phase 65A source/docs changes pending review.
+- Phase 65A pending-review note was stale and has been removed. Check live repo state with `git status --short` when needed.
 
 ## Current Product Summary
 
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 65B: admin program review workflow; `/admin/programs/[id]` now shows a read-only checklist for core identity, student decision fields, sources, intakes, and public readiness; loads existing `data_completeness_score`, `source_confidence_score`, `last_verified_at`, and `next_review_due_at`; adds safe workflow buttons for save, mark in review, publish, mark partially verified, and mark verified; verification buttons stamp `last_verified_at`; review hints remain advisory and do not create new publish blockers beyond existing validation/RLS. No migration, no new dependency, no unsafe HTML APIs, no service role, and no import/auth architecture changes.
 - Phase 65A: admin program review filters; `/admin/programs` now uses GET query params for title, university, status, degree level, subject, optional country, and newest/oldest sort; selected filters remain visible after apply; clear resets to `/admin/programs`; result count and safer empty states were added; list rows now show compact missing-official-link / missing-tuition hints; edit links carry safe `returnTo` context, and the edit page preserves that context on Back, Cancel, Save, and add-source redirects. No migration, no new dependency, no unsafe HTML APIs, no service role, and no admin/import architecture changes.
 - Phase 64: public university and scholarship UX bundle; `/universities` has a stronger discovery header, program-search/Fit Finder paths, location filters in a sticky rail, richer university cards with media, verification, source dates, official links, and bounded published program counts. `/universities/[slug]` now uses a wide detail layout with an action panel, cover/logo media, sticky key facts, SourceBox, Fit Finder, empty-detail fallback, and related published programs. `/scholarships` now has a stronger discovery header, sticky filters, richer scholarship cards with provider/funding/deadline/eligibility/host-country/degree-level/source context, and better empty states. `/scholarships/[slug]` now has an apply/verify panel, key facts, SourceBox, Fit Finder, relationship-backed applies-to sections, nationality notes, and linked published programs filtered to published records before rendering. No migration, no new dependency, no unsafe HTML APIs, no service role, and no admin/import/AI changes.
 - Phase 63: saved programs MVP; uses existing `saved_items` owner-only RLS table, adds authenticated `/api/saved-items/program` POST/DELETE, validates published programs before saving, wires ProgramCard/home/program listing/program detail save states, and adds `/account/saved-programs`. No migration, no new dependency, no service role, no RLS bypass, and no admin/import/AI changes.
