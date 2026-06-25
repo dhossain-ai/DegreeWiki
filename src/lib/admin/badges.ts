@@ -9,6 +9,15 @@ export const CONTENT_STATUS_BADGE: Record<string, string> = {
   archived: 'bg-red-100 text-red-600',
 }
 
+export const VERIFICATION_STATUS_BADGE: Record<string, string> = {
+  unverified: 'bg-gray-100 text-gray-600',
+  partially_verified: 'bg-amber-100 text-amber-700',
+  verified: 'bg-green-100 text-green-700',
+  source_conflict: 'bg-red-100 text-red-600',
+  outdated: 'bg-orange-100 text-orange-700',
+  needs_review: 'bg-yellow-100 text-yellow-700',
+}
+
 export const IMPORT_STATUS_BADGE: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
   processing: 'bg-blue-100 text-blue-700',
