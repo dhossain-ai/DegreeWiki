@@ -16,9 +16,22 @@ const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pa
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
 if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
-const { user: _user, supabase } = guard
+const { user, supabase } = guard
 const { id } = Astro.params
 if (!id) return new Response('Not found.', { status: 404 })
+
+const normalizeReturnTo = (value: string | null) => {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed || trimmed.startsWith('//') || trimmed.includes('\r') || trimmed.includes('\n')) return ''
+  if (!trimmed.startsWith('/admin/articles')) return ''
+
+  const suffix = trimmed.slice('/admin/articles'.length)
+  if (suffix && !suffix.startsWith('?') && !suffix.startsWith('/')) return ''
+
+  return trimmed
+}
+
+let returnTo = normalizeReturnTo(Astro.url.searchParams.get('returnTo'))
 
 const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 
@@ -128,6 +141,7 @@ let serverError = ''
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
+  returnTo = normalizeReturnTo(String(form.get('returnTo') ?? '')) || returnTo
   const g = (key: string) => String(form.get(key) ?? '').trim()
   const action = g('action')
 
@@ -222,7 +236,7 @@ if (Astro.request.method === 'POST') {
         ? 'An article with this slug already exists.'
         : 'Could not save. Please try again.'
     } else {
-      return Astro.redirect('/admin/articles')
+      return Astro.redirect(returnTo || '/admin/articles')
     }
   }
 }
@@ -234,14 +248,15 @@ const hintClass        = 'mt-0.5 text-xs text-gray-400'
 const errorClass       = 'mt-1 text-xs text-red-600'
 const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 pb-1 border-b border-gray-200'
 const cardClass        = 'rounded-lg border border-gray-200 bg-white p-5'
+const backToArticlesHref = returnTo || '/admin/articles'
 ---
-<AdminLayout title={`Edit ${record.title} — DegreeWiki Admin`} activePath="/admin/articles" userEmail={_user.email ?? ''}>
+<AdminLayout title={`Edit ${record.title} — DegreeWiki Admin`} activePath="/admin/articles" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-xl font-bold text-gray-900">Edit Article</h1>
       <p class="text-xs text-gray-400 font-mono mt-0.5">/guides/{record.slug}</p>
     </div>
-    <a href="/admin/articles" class="text-sm text-gray-500 hover:underline">← Back to Articles</a>
+    <a href={backToArticlesHref} class="text-sm text-gray-500 hover:underline">← Back to Articles</a>
   </div>
 
   {serverError && (
@@ -249,6 +264,7 @@ const cardClass        = 'rounded-lg border border-gray-200 bg-white p-5'
   )}
 
   <form method="post">
+    <input type="hidden" name="returnTo" value={returnTo} />
 
     <!-- Identity: full-width above the two-column grid -->
     <div class={`${cardClass} mb-6`}>
@@ -532,7 +548,7 @@ const cardClass        = 'rounded-lg border border-gray-200 bg-white p-5'
             class="w-full px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700">
             Save and Publish
           </button>
-          <a href="/admin/articles"
+          <a href={backToArticlesHref}
             class="block text-center text-sm text-gray-500 hover:underline py-1">
             Cancel
           </a>
