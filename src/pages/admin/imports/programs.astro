@@ -1,0 +1,690 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import { parseProgramImportJson } from '../../../lib/admin/importParse'
+import { validateStagedRecord } from '../../../lib/admin/importValidation'
+import type { FormErrors } from '../../../lib/admin/validate'
+
+const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
+
+const { user, supabase } = guard
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const QUERY_DEFAULT_UNIVERSITY_ID = Astro.url.searchParams.get('university')?.trim() ?? ''
+
+type UniversityQueryRow = {
+  id: string
+  name: string
+  official_url: string | null
+  countries: { name?: string | null; iso2?: string | null } | Array<{ name?: string | null; iso2?: string | null }> | null
+}
+
+type UniversityOption = {
+  id: string
+  name: string
+  officialUrl: string | null
+  countryName: string | null
+  countryIso2: string | null
+}
+
+type Values = {
+  selected_university_id: string
+  json_input: string
+}
+
+function normalizeCountryRelation(
+  value: UniversityQueryRow['countries'],
+): { name: string | null; iso2: string | null } {
+  const record = Array.isArray(value) ? value[0] ?? null : value
+  return {
+    name: record?.name?.trim() || null,
+    iso2: record?.iso2?.trim().toUpperCase() || null,
+  }
+}
+
+function normalizeName(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+}
+
+function detectUniversityMismatch(selectedName: string, sourceName: string | null): string | null {
+  if (!sourceName) return null
+  if (normalizeName(selectedName) === normalizeName(sourceName)) return null
+  return `The JSON includes university "${sourceName}", but the selected production university is "${selectedName}".`
+}
+
+function validationValues(fields: Record<string, string | number | null>): Record<string, string> {
+  return {
+    extracted_name: '',
+    extracted_country_code: '',
+    extracted_official_url: '',
+    extracted_title: String(fields.extracted_title ?? ''),
+    extracted_degree_level_code: String(fields.extracted_degree_level_code ?? ''),
+    extracted_language: String(fields.extracted_language ?? ''),
+    extracted_tuition_amount: fields.extracted_tuition_amount != null ? String(fields.extracted_tuition_amount) : '',
+    extracted_deadline: String(fields.extracted_deadline ?? ''),
+    extracted_amount: '',
+    extracted_slug: '',
+    extracted_category: '',
+    extracted_content: '',
+  }
+}
+
+function buildHelperRawData(
+  selectedUniversity: UniversityOption,
+  sourceShape: string,
+  sourceUniversityName: string | null,
+): Record<string, unknown> {
+  return {
+    helper_kind: 'program_import_selected_university',
+    selected_university_id: selectedUniversity.id,
+    selected_university_name: selectedUniversity.name,
+    selected_university_country: selectedUniversity.countryName,
+    selected_university_official_url: selectedUniversity.officialUrl,
+    source_shape: sourceShape,
+    source_university_name: sourceUniversityName,
+  }
+}
+
+async function cleanupBatch(batchId: string, helperId: string | null): Promise<void> {
+  if (helperId) {
+    await supabase.from('staging_universities').delete().eq('id', helperId).eq('import_batch_id', batchId)
+  }
+  await supabase.from('staging_errors').delete().eq('import_batch_id', batchId)
+  await supabase.from('import_batches').delete().eq('id', batchId)
+}
+
+const { data: universityRows, error: universityLoadError } = await supabase
+  .from('universities')
+  .select('id, name, official_url, countries(name, iso2)')
+  .order('name', { ascending: true })
+
+const universities = ((universityRows ?? []) as UniversityQueryRow[]).map((row) => {
+  const country = normalizeCountryRelation(row.countries)
+  return {
+    id: row.id,
+    name: row.name,
+    officialUrl: row.official_url,
+    countryName: country.name,
+    countryIso2: country.iso2,
+  } satisfies UniversityOption
+})
+
+const universityIdSet = new Set(universities.map((row) => row.id))
+const initialUniversityId = universityIdSet.has(QUERY_DEFAULT_UNIVERSITY_ID)
+  ? QUERY_DEFAULT_UNIVERSITY_ID
+  : universities.length === 1
+    ? universities[0].id
+    : ''
+
+let values: Values = {
+  selected_university_id: initialUniversityId,
+  json_input: '',
+}
+let formErrors: FormErrors = {}
+let serverError = ''
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  values = {
+    selected_university_id: String(form.get('selected_university_id') ?? '').trim(),
+    json_input: String(form.get('json_input') ?? ''),
+  }
+
+  if (universityLoadError) {
+    serverError = 'Could not load production universities. Please try again.'
+  } else if (universities.length === 0) {
+    serverError = 'No production universities are available yet. Create one first.'
+  } else {
+    if (!UUID_RE.test(values.selected_university_id) || !universityIdSet.has(values.selected_university_id)) {
+      formErrors.selected_university_id = 'Select a valid production university.'
+    }
+
+    const parsed = parseProgramImportJson(values.json_input)
+    if (!parsed.ok) {
+      formErrors.json_input = parsed.error
+    } else if (parsed.rows.length === 0) {
+      formErrors.json_input = 'No program objects were found to stage.'
+    }
+
+    if (Object.keys(formErrors).length === 0 && parsed.ok) {
+      const selectedUniversity = universities.find((row) => row.id === values.selected_university_id) ?? null
+
+      if (!selectedUniversity) {
+        serverError = 'Selected production university could not be verified. Please try again.'
+      } else {
+        const sourceUniversityName = String(parsed.sourceUniversity?.fields.extracted_name ?? '').trim() || null
+        const mismatchWarning = detectUniversityMismatch(selectedUniversity.name, sourceUniversityName)
+        const helperRawData = buildHelperRawData(selectedUniversity, parsed.sourceShape, sourceUniversityName)
+
+        const { data: newBatch, error: batchInsertError } = await supabase
+          .from('import_batches')
+          .insert({
+            batch_type: 'mixed',
+            import_status: 'pending',
+            total_records: 0,
+            processed_count: 0,
+            error_count: 0,
+            notes: `Program import staging for ${selectedUniversity.name}.`,
+            created_by_user_id: user.id,
+          })
+          .select('id')
+          .single()
+
+        if (batchInsertError || !newBatch) {
+          console.error('[program_import_page] batch insert failed:', batchInsertError?.code)
+          serverError = 'Could not create the import batch. Please try again.'
+        } else {
+          const batchId = (newBatch as { id: string }).id
+          let helperId: string | null = null
+
+          const { data: existingHelpers, error: existingHelpersError } = await supabase
+            .from('staging_universities')
+            .select('id, raw_data')
+            .eq('import_batch_id', batchId)
+            .eq('match_university_id', selectedUniversity.id)
+
+          if (existingHelpersError) {
+            console.error('[program_import_page] helper lookup failed:', existingHelpersError.code)
+            await cleanupBatch(batchId, null)
+            serverError = 'Could not prepare the helper university row. Please try again.'
+          } else {
+            const existingHelper = ((existingHelpers ?? []) as Array<{ id: string; raw_data: Record<string, unknown> | null }>)
+              .find((row) => row.raw_data?.helper_kind === 'program_import_selected_university')
+
+            if (existingHelper) {
+              helperId = existingHelper.id
+            } else {
+              const { data: helperRow, error: helperInsertError } = await supabase
+                .from('staging_universities')
+                .insert({
+                  import_batch_id: batchId,
+                  raw_data: helperRawData,
+                  extracted_name: selectedUniversity.name,
+                  extracted_country_code: selectedUniversity.countryIso2,
+                  extracted_official_url: selectedUniversity.officialUrl,
+                  match_university_id: selectedUniversity.id,
+                  import_status: 'approved',
+                  review_notes: 'Program import helper row linked to the selected production university.',
+                })
+                .select('id')
+                .single()
+
+              if (helperInsertError || !helperRow) {
+                console.error('[program_import_page] helper insert failed:', helperInsertError?.code)
+                await cleanupBatch(batchId, null)
+                serverError = 'Could not create the helper university row. Please try again.'
+              } else {
+                helperId = (helperRow as { id: string }).id
+              }
+            }
+
+            if (!serverError && helperId) {
+              type ErrorEntry = {
+                import_batch_id: string
+                staging_table: string
+                staging_row_id: string
+                error_type: string
+                error_message: string
+              }
+
+              const errorEntries: ErrorEntry[] = []
+              let insertedPrograms = 0
+              let failedPrograms = parsed.nonObjectCount
+
+              if (mismatchWarning) {
+                errorEntries.push({
+                  import_batch_id: batchId,
+                  staging_table: 'staging_universities',
+                  staging_row_id: helperId,
+                  error_type: 'validation_warning',
+                  error_message: mismatchWarning,
+                })
+              }
+
+              for (const row of parsed.rows) {
+                const resolvedFields = {
+                  ...row.fields,
+                  staging_university_id: helperId,
+                }
+                const rowWarnings = [
+                  ...row.parseWarnings,
+                  ...validateStagedRecord('programs', validationValues(resolvedFields)).warnings,
+                ]
+                const importStatus = rowWarnings.length === 0 ? 'validated' : 'pending'
+
+                const { data: stagedProgram, error: programInsertError } = await supabase
+                  .from('staging_programs')
+                  .insert({
+                    import_batch_id: batchId,
+                    raw_data: row.rawData,
+                    extracted_title: (resolvedFields.extracted_title as string | null) ?? null,
+                    extracted_degree_level_code: (resolvedFields.extracted_degree_level_code as string | null) ?? null,
+                    extracted_language: (resolvedFields.extracted_language as string | null) ?? null,
+                    extracted_tuition_amount: (resolvedFields.extracted_tuition_amount as number | null) ?? null,
+                    extracted_deadline: (resolvedFields.extracted_deadline as string | null) ?? null,
+                    staging_university_id: helperId,
+                    import_status: importStatus,
+                  })
+                  .select('id')
+                  .single()
+
+                if (programInsertError || !stagedProgram) {
+                  console.error('[program_import_page] program insert failed:', programInsertError?.code)
+                  failedPrograms++
+                  continue
+                }
+
+                insertedPrograms++
+                const stagedProgramId = (stagedProgram as { id: string }).id
+
+                for (const warning of rowWarnings) {
+                  errorEntries.push({
+                    import_batch_id: batchId,
+                    staging_table: 'staging_programs',
+                    staging_row_id: stagedProgramId,
+                    error_type: 'validation_warning',
+                    error_message: warning,
+                  })
+                }
+              }
+
+              if (errorEntries.length > 0) {
+                const { error: stagingErrorsInsertError } = await supabase.from('staging_errors').insert(errorEntries)
+                if (stagingErrorsInsertError) {
+                  console.error('[program_import_page] warning insert failed:', stagingErrorsInsertError.code)
+                }
+              }
+
+              if (insertedPrograms === 0) {
+                await cleanupBatch(batchId, helperId)
+                serverError = 'No programs could be staged. Please check the JSON and try again.'
+              } else {
+                const totalRecords = parsed.rows.length + parsed.nonObjectCount + 1
+                const { error: batchUpdateError } = await supabase
+                  .from('import_batches')
+                  .update({
+                    total_records: totalRecords,
+                    processed_count: insertedPrograms + 1,
+                    error_count: failedPrograms,
+                    import_status: 'needs_review',
+                  })
+                  .eq('id', batchId)
+
+                if (batchUpdateError) {
+                  console.error('[program_import_page] batch update failed:', batchUpdateError.code)
+                }
+
+                return Astro.redirect(`/admin/imports/${batchId}`)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+const selectClasses = 'block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+const inputClasses = 'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
+---
+<AdminLayout title="Program Import Staging — DegreeWiki Admin" activePath="/admin/imports" userEmail={user.email ?? ''}>
+  <div class="mb-6 flex items-start justify-between gap-4">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Import Hub</p>
+      <h1 class="mt-1 text-2xl font-bold text-gray-900">Program Import Staging</h1>
+      <p class="mt-2 max-w-3xl text-sm text-gray-600">
+        Select the production university first, then paste or load program JSON for staging. This page never writes
+        programs directly to production. It creates a reviewable import batch and links every staged program to a
+        batch-local helper row for the selected university.
+      </p>
+    </div>
+    <a href="/admin/imports" class="shrink-0 text-sm text-gray-500 hover:underline">Back to Import Hub</a>
+  </div>
+
+  <div class="mb-6 grid gap-4 lg:grid-cols-[minmax(0,2fr),minmax(18rem,1fr)]">
+    <div class="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4">
+      <h2 class="text-sm font-semibold text-blue-900">Supported JSON shapes</h2>
+      <p class="mt-2 text-sm text-blue-800">Use any one of these:</p>
+      <ul class="mt-2 space-y-1 text-sm text-blue-800">
+        <li><code>[...]</code> raw array of program objects</li>
+        <li><code>{'{'} "programs": [...] {'}'}</code></li>
+        <li><code>{'{'} "university": {'{'} ... {'}'}, "programs": [...] {'}'}</code> research-pack shape</li>
+      </ul>
+      <p class="mt-3 text-xs text-blue-700">
+        If the JSON contains a different university name than the one you select, the page warns and continues.
+      </p>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-white px-5 py-4">
+      <h2 class="text-sm font-semibold text-gray-900">What happens on submit</h2>
+      <ul class="mt-2 space-y-1.5 text-sm text-gray-600">
+        <li>A new import batch is created with staging only.</li>
+        <li>A helper staging-university row is linked to the selected production university.</li>
+        <li>Each parsed program is inserted into <code>staging_programs</code> for review.</li>
+        <li>You land on the batch detail page to approve and merge later.</li>
+      </ul>
+    </div>
+  </div>
+
+  {universityLoadError ? (
+    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      Could not load production universities. Please try again.
+    </div>
+  ) : universities.length === 0 ? (
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      No production universities are available yet. Create a university first, then return here.
+    </div>
+  ) : (
+    <form method="post" class="grid gap-6 lg:grid-cols-[minmax(0,2fr),minmax(18rem,1fr)]">
+      <div class="space-y-6">
+        <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
+          <h2 class="text-base font-semibold text-gray-900">1. Choose the production university</h2>
+          <p class="mt-1 text-sm text-gray-500">
+            Programs staged here will inherit their merge target from this university selection.
+          </p>
+          <div class="mt-4">
+            <label for="selected_university_id" class="mb-1 block text-sm font-medium text-gray-700">Production university *</label>
+            <select id="selected_university_id" name="selected_university_id" class={selectClasses} required>
+              <option value="">Select a university…</option>
+              {universities.map((row) => (
+                <option
+                  value={row.id}
+                  selected={values.selected_university_id === row.id}
+                  data-university-name={row.name}
+                >
+                  {row.name}{row.countryName ? ` (${row.countryName})` : ''}
+                </option>
+              ))}
+            </select>
+            {formErrors.selected_university_id && (
+              <p class="mt-1 text-xs text-red-600">{formErrors.selected_university_id}</p>
+            )}
+            <p class="mt-2 text-xs text-gray-400">
+              Default selection uses a valid <code>?university=&lt;uuid&gt;</code> query param when present, or the
+              only available university if there is exactly one.
+            </p>
+          </div>
+        </section>
+
+        <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-base font-semibold text-gray-900">2. Paste or load JSON</h2>
+              <p class="mt-1 text-sm text-gray-500">
+                Local files are read into the textarea in your browser only. The server receives the final JSON text on submit.
+              </p>
+            </div>
+            <label class="inline-flex cursor-pointer items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <input id="json-file-input" type="file" accept=".json,application/json" class="sr-only" />
+              Load `.json` file
+            </label>
+          </div>
+
+          <p id="json-file-status" class="mt-3 text-xs text-gray-500">No local file loaded.</p>
+
+          <div class="mt-4">
+            <label for="json_input" class="mb-1 block text-sm font-medium text-gray-700">Program JSON *</label>
+            <textarea
+              id="json_input"
+              name="json_input"
+              rows="16"
+              required
+              class={textAreaClasses}
+              placeholder={`{\n  "programs": [\n    {\n      "title": "MSc Computer Science",\n      "degree_level_code": "master",\n      "language": "English",\n      "tuition_amount": 15000,\n      "deadline": "2026-09-01"\n    }\n  ]\n}`}
+            >{values.json_input}</textarea>
+            {formErrors.json_input && <p class="mt-1 text-xs text-red-600">{formErrors.json_input}</p>}
+            <p class="mt-2 text-xs text-gray-400">
+              Maximum {100} program rows per submission. Non-object array items are skipped and counted as failures.
+            </p>
+          </div>
+        </section>
+
+        <section id="program-json-preview" class="hidden rounded-xl border border-gray-200 bg-white px-5 py-5">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-base font-semibold text-gray-900">3. Preview before staging</h2>
+            <span id="preview-shape" class="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">Waiting for JSON</span>
+          </div>
+          <p id="preview-status" class="mt-3 text-sm font-medium text-gray-700"></p>
+          <p id="preview-detail" class="mt-1 text-sm text-gray-500"></p>
+          <div id="preview-warning-box" class="mt-3 hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <p class="font-medium">University warning</p>
+            <p id="preview-warning" class="mt-0.5"></p>
+          </div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-3">
+            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+              <p class="text-xs uppercase tracking-wide text-gray-400">Programs</p>
+              <p id="preview-program-count" class="mt-1 text-xl font-bold text-gray-900">0</p>
+            </div>
+            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+              <p class="text-xs uppercase tracking-wide text-gray-400">Non-object rows</p>
+              <p id="preview-skipped-count" class="mt-1 text-xl font-bold text-gray-900">0</p>
+            </div>
+            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+              <p class="text-xs uppercase tracking-wide text-gray-400">Selected university</p>
+              <p id="preview-selected-university" class="mt-1 text-sm font-semibold text-gray-900">Not selected</p>
+            </div>
+          </div>
+          <div class="mt-4">
+            <p class="text-xs uppercase tracking-wide text-gray-400">Sample titles</p>
+            <p id="preview-samples" class="mt-1 text-sm text-gray-600">No sample programs yet.</p>
+          </div>
+        </section>
+
+        {serverError && (
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{serverError}</div>
+        )}
+
+        <div class="flex items-center gap-3">
+          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Create Import Batch
+          </button>
+          <a href="/admin/imports" class="text-sm text-gray-500 hover:underline">Cancel</a>
+        </div>
+      </div>
+
+      <aside class="space-y-4">
+        <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
+          <h2 class="text-sm font-semibold text-gray-900">Staging notes</h2>
+          <ul class="mt-3 space-y-2 text-sm text-gray-600">
+            <li>Programs with no validation warnings start as <code>validated</code>.</li>
+            <li>Programs with warnings start as <code>pending</code>.</li>
+            <li>The helper university row is auto-linked to the selected production university.</li>
+            <li>Program merge still happens later from the batch detail page.</li>
+          </ul>
+        </section>
+
+        <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
+          <h2 class="text-sm font-semibold text-gray-900">Useful next step</h2>
+          <p class="mt-2 text-sm text-gray-600">
+            After staging, open the batch detail page to review rows, run quality checks, approve good rows, then merge
+            draft programs into production.
+          </p>
+        </section>
+      </aside>
+    </form>
+  )}
+
+  <script is:inline>
+    (function () {
+      var universitySelect = document.getElementById('selected_university_id');
+      var jsonInput = document.getElementById('json_input');
+      var fileInput = document.getElementById('json-file-input');
+      var fileStatus = document.getElementById('json-file-status');
+      var preview = document.getElementById('program-json-preview');
+      var previewShape = document.getElementById('preview-shape');
+      var previewStatus = document.getElementById('preview-status');
+      var previewDetail = document.getElementById('preview-detail');
+      var previewProgramCount = document.getElementById('preview-program-count');
+      var previewSkippedCount = document.getElementById('preview-skipped-count');
+      var previewSamples = document.getElementById('preview-samples');
+      var previewSelectedUniversity = document.getElementById('preview-selected-university');
+      var previewWarningBox = document.getElementById('preview-warning-box');
+      var previewWarning = document.getElementById('preview-warning');
+
+      if (!universitySelect || !jsonInput || !preview || !previewShape || !previewStatus || !previewDetail || !previewProgramCount || !previewSkippedCount || !previewSamples || !previewSelectedUniversity || !previewWarningBox || !previewWarning) {
+        return;
+      }
+
+      function normalizeName(value) {
+        return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      }
+
+      function selectedUniversityName() {
+        var option = universitySelect.options[universitySelect.selectedIndex];
+        if (!option) return '';
+        return option.getAttribute('data-university-name') || option.textContent || '';
+      }
+
+      function setWarning(message) {
+        if (message) {
+          previewWarningBox.classList.remove('hidden');
+          previewWarning.textContent = message;
+        } else {
+          previewWarningBox.classList.add('hidden');
+          previewWarning.textContent = '';
+        }
+      }
+
+      function setError(message) {
+        preview.classList.remove('hidden');
+        preview.classList.remove('border-green-200', 'bg-green-50');
+        preview.classList.add('border-red-200', 'bg-red-50');
+        previewShape.textContent = 'Invalid';
+        previewShape.className = 'rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700';
+        previewStatus.textContent = 'JSON preview failed';
+        previewStatus.className = 'mt-3 text-sm font-medium text-red-700';
+        previewDetail.textContent = message;
+        previewProgramCount.textContent = '0';
+        previewSkippedCount.textContent = '0';
+        previewSamples.textContent = 'No sample programs yet.';
+        previewSelectedUniversity.textContent = selectedUniversityName() || 'Not selected';
+        setWarning('');
+      }
+
+      function setSuccess(shapeLabel, detail, count, skipped, samples, warning) {
+        preview.classList.remove('hidden');
+        preview.classList.remove('border-red-200', 'bg-red-50');
+        preview.classList.add('border-green-200', 'bg-green-50');
+        previewShape.textContent = shapeLabel;
+        previewShape.className = 'rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700';
+        previewStatus.textContent = 'Preview looks valid';
+        previewStatus.className = 'mt-3 text-sm font-medium text-green-800';
+        previewDetail.textContent = detail;
+        previewProgramCount.textContent = String(count);
+        previewSkippedCount.textContent = String(skipped);
+        previewSamples.textContent = samples.length > 0 ? samples.join(', ') : 'No sample programs yet.';
+        previewSelectedUniversity.textContent = selectedUniversityName() || 'Not selected';
+        setWarning(warning);
+      }
+
+      function parseProgramItems(items) {
+        var count = Array.isArray(items) ? items.length : 0;
+        var objectItems = [];
+        var skipped = 0;
+
+        for (var i = 0; i < count; i++) {
+          var item = items[i];
+          if (item && typeof item === 'object' && !Array.isArray(item)) objectItems.push(item);
+          else skipped += 1;
+        }
+
+        return {
+          count: objectItems.length,
+          skipped: skipped,
+          samples: objectItems.slice(0, 3).map(function (item) {
+            return String(item.title || 'Untitled program');
+          }),
+        };
+      }
+
+      function updatePreview() {
+        var raw = String(jsonInput.value || '').trim();
+        if (!raw) {
+          preview.classList.add('hidden');
+          return;
+        }
+
+        var parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (error) {
+          setError(String(error && error.message ? error.message : 'Invalid JSON.'));
+          return;
+        }
+
+        if (Array.isArray(parsed)) {
+          var arraySummary = parseProgramItems(parsed);
+          setSuccess(
+            'Raw array',
+            'Program objects will be staged against the selected university helper row.',
+            arraySummary.count,
+            arraySummary.skipped,
+            arraySummary.samples,
+            ''
+          );
+          return;
+        }
+
+        if (!parsed || typeof parsed !== 'object') {
+          setError('Supported shapes are [...], { "programs": [...] }, or { "university": { ... }, "programs": [...] }.');
+          return;
+        }
+
+        if (!Array.isArray(parsed.programs)) {
+          setError('Object-shaped imports must include a programs array.');
+          return;
+        }
+
+        var programsSummary = parseProgramItems(parsed.programs);
+        var sourceUniversityName = parsed.university && typeof parsed.university === 'object' && !Array.isArray(parsed.university)
+          ? String(parsed.university.name || '').trim()
+          : '';
+        var selectedName = selectedUniversityName();
+        var warning = '';
+
+        if (sourceUniversityName && selectedName && normalizeName(sourceUniversityName) !== normalizeName(selectedName)) {
+          warning = 'The JSON names "' + sourceUniversityName + '" but the selected university is "' + selectedName + '".';
+        }
+
+        setSuccess(
+          sourceUniversityName ? 'Research pack' : 'Programs object',
+          sourceUniversityName
+            ? 'Programs will stage under the selected university, not under the JSON university name.'
+            : 'Programs will stage under the selected university helper row.',
+          programsSummary.count,
+          programsSummary.skipped,
+          programsSummary.samples,
+          warning
+        );
+      }
+
+      if (fileInput && fileStatus) {
+        fileInput.addEventListener('change', function () {
+          var file = fileInput.files && fileInput.files[0];
+          if (!file) {
+            fileStatus.textContent = 'No local file loaded.';
+            return;
+          }
+
+          fileStatus.textContent = 'Loading ' + file.name + '...';
+          file.text().then(function (text) {
+            jsonInput.value = text;
+            fileStatus.textContent = 'Loaded ' + file.name + ' into the textarea. Review the preview before submitting.';
+            updatePreview();
+          }).catch(function () {
+            fileStatus.textContent = 'Could not read that file in the browser. Try pasting the JSON instead.';
+          });
+        });
+      }
+
+      universitySelect.addEventListener('change', updatePreview);
+      jsonInput.addEventListener('input', updatePreview);
+      updatePreview();
+    })();
+  </script>
+</AdminLayout>
