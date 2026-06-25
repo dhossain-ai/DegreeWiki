@@ -31,6 +31,57 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-25 - Phase 65C: Admin Content List Filters Bundle
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Copy the successful Phase 65A URL-driven admin list pattern from `/admin/programs` to the main university, scholarship, and article admin lists.
+- Preserve filtered-list review context into the corresponding edit pages without introducing migrations, dependencies, service-role usage, unsafe HTML APIs, or broader architecture changes.
+
+Files modified:
+- `src/pages/admin/universities/index.astro`
+- `src/pages/admin/universities/[id].astro`
+- `src/pages/admin/scholarships/index.astro`
+- `src/pages/admin/scholarships/[id].astro`
+- `src/pages/admin/articles/index.astro`
+- `src/pages/admin/articles/[id].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Rebuilt `/admin/universities` around a GET filter form with query-driven state for name search, country, city, content status, verification status, and newest/oldest/name sorting.
+- Added university result counts, clearer filtered empty states, Clear action, and compact row hints for missing official link, missing logo/cover, and low completeness/confidence.
+- Rebuilt `/admin/scholarships` around GET filters for name, provider, host country relation, content status, verification status, funding type, deadline state, and newest/oldest/deadline/name sorting.
+- Added scholarship result counts, safer empty states, Clear action, and compact row hints for missing official/application links, missing funding detail, missing deadline, and low completeness/confidence.
+- Rebuilt `/admin/articles` around GET filters for title, category, author, content status, verification status, and newest/oldest/updated/title sorting.
+- Added article result counts, safer empty states, Clear action, and compact row hints for missing summary, missing SEO title/description, and low completeness/confidence.
+- Added local `returnTo` propagation from each filtered list into edit links for universities, scholarships, and articles.
+- Updated the three edit pages so Back, Cancel, Save, existing Publish, and add-source redirects preserve only safe local `returnTo` values for their matching admin list paths.
+- Invalid or non-local `returnTo` values are ignored.
+- All pages continue to return friendly generic load/save errors instead of raw database errors.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No import/staging logic change.
+- No admin auth architecture change.
+- No persistent saved filters.
+
+Validation:
+- `npm run build`: PASS.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS.
+
+Deferred:
+- Bulk publish/verify remains out of scope.
+- Persistent saved filters remain out of scope.
+- Additional shared abstractions for admin list filters remain deferred in favor of keeping each page readable and close to the working `/admin/programs` pattern.
+
 ## 2026-06-25 - Phase 65B: Admin Program Review Checklist + Verification Workflow
 
 Tool:
