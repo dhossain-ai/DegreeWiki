@@ -9,14 +9,33 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
 
-const [programsRes, degreeLevelsRes, universitiesRes] = await Promise.all([
-  supabase
-    .from('programs')
-    .select('id, title, slug, content_status, degree_level_id, university_id, created_at')
-    .order('created_at', { ascending: false })
-    .limit(100),
-  supabase.from('degree_levels').select('id, code'),
-  supabase.from('universities').select('id, name'),
+const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+] as const
+
+const formatEnumLabel = (value: string) =>
+  value
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+
+const params = Astro.url.searchParams
+const searchTerm = params.get('q')?.trim() ?? ''
+const rawUniversityId = params.get('university')?.trim() ?? ''
+const rawStatus = params.get('status')?.trim() ?? ''
+const rawDegreeLevelId = params.get('degree_level')?.trim() ?? ''
+const rawSubjectId = params.get('subject')?.trim() ?? ''
+const rawCountryId = params.get('country')?.trim() ?? ''
+const selectedSort = params.get('sort') === 'oldest' ? 'oldest' : 'newest'
+
+const [degreeLevelsRes, universitiesRes, subjectsRes, countriesRes] = await Promise.all([
+  supabase.from('degree_levels').select('id, code, name').order('display_order', { ascending: true }),
+  supabase.from('universities').select('id, name').order('name', { ascending: true }),
+  supabase.from('subjects').select('id, name').order('name', { ascending: true }).limit(500),
+  supabase.from('countries').select('id, name').order('name', { ascending: true }),
 ])
 
 type ProgramRow = {
@@ -26,40 +45,209 @@ type ProgramRow = {
   content_status: string
   degree_level_id: string
   university_id: string
+  primary_subject_id: string | null
+  country_id: string
   created_at: string
+  official_url: string | null
+  tuition_min_amount: number | null
+  tuition_max_amount: number | null
 }
 
+type DegreeLevelOption = { id: string; code: string; name: string }
+type NamedOption = { id: string; name: string }
+
+const degreeLevels = (degreeLevelsRes.data ?? []) as DegreeLevelOption[]
+const universities = (universitiesRes.data ?? []) as NamedOption[]
+const subjects = (subjectsRes.data ?? []) as NamedOption[]
+const countries = (countriesRes.data ?? []) as NamedOption[]
+
+const validUniversityIds = new Set(universities.map(option => option.id))
+const validDegreeLevelIds = new Set(degreeLevels.map(option => option.id))
+const validSubjectIds = new Set(subjects.map(option => option.id))
+const validCountryIds = new Set(countries.map(option => option.id))
+
+const selectedUniversityId = validUniversityIds.has(rawUniversityId) ? rawUniversityId : ''
+const selectedStatus = CONTENT_STATUS_OPTIONS.includes(rawStatus as (typeof CONTENT_STATUS_OPTIONS)[number])
+  ? rawStatus
+  : ''
+const selectedDegreeLevelId = validDegreeLevelIds.has(rawDegreeLevelId) ? rawDegreeLevelId : ''
+const selectedSubjectId = validSubjectIds.has(rawSubjectId) ? rawSubjectId : ''
+const selectedCountryId = validCountryIds.has(rawCountryId) ? rawCountryId : ''
+
+let programsQuery = supabase
+  .from('programs')
+  .select(
+    'id, title, slug, content_status, degree_level_id, university_id, primary_subject_id, country_id, created_at, official_url, tuition_min_amount, tuition_max_amount',
+    { count: 'exact' }
+  )
+
+if (searchTerm) programsQuery = programsQuery.ilike('title', `%${searchTerm}%`)
+if (selectedUniversityId) programsQuery = programsQuery.eq('university_id', selectedUniversityId)
+if (selectedStatus) programsQuery = programsQuery.eq('content_status', selectedStatus)
+if (selectedDegreeLevelId) programsQuery = programsQuery.eq('degree_level_id', selectedDegreeLevelId)
+if (selectedSubjectId) programsQuery = programsQuery.eq('primary_subject_id', selectedSubjectId)
+if (selectedCountryId) programsQuery = programsQuery.eq('country_id', selectedCountryId)
+
+const programsRes = await programsQuery.order('created_at', { ascending: selectedSort === 'oldest' })
+
 const rows = (programsRes.data ?? []) as ProgramRow[]
-const degreeLevelMap = new Map(
-  ((degreeLevelsRes.data ?? []) as { id: string; code: string }[]).map(d => [d.id, d.code])
-)
-const universityMap = new Map(
-  ((universitiesRes.data ?? []) as { id: string; name: string }[]).map(u => [u.id, u.name])
-)
+const totalCount = programsRes.count ?? rows.length
 const error = programsRes.error
+
+const degreeLevelMap = new Map(degreeLevels.map(option => [option.id, `${option.name} (${option.code})`]))
+const universityMap = new Map(universities.map(option => [option.id, option.name]))
+const subjectMap = new Map(subjects.map(option => [option.id, option.name]))
+const countryMap = new Map(countries.map(option => [option.id, option.name]))
+
+const activeFilterCount = [
+  searchTerm,
+  selectedUniversityId,
+  selectedStatus,
+  selectedDegreeLevelId,
+  selectedSubjectId,
+  selectedCountryId,
+  selectedSort === 'oldest' ? selectedSort : '',
+].filter(Boolean).length
+
+const currentListPath = Astro.url.search ? `${Astro.url.pathname}${Astro.url.search}` : ''
+const buildEditHref = (id: string) =>
+  currentListPath
+    ? `/admin/programs/${id}?returnTo=${encodeURIComponent(currentListPath)}`
+    : `/admin/programs/${id}`
+
+const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
 ---
 <AdminLayout title="Programs — DegreeWiki Admin" activePath="/admin/programs" userEmail={user.email ?? ''}>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-bold text-gray-900">Programs</h1>
+  <div class="flex items-center justify-between mb-6 gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">Programs</h1>
+      <p class="text-sm text-gray-500 mt-1">Review imported programs with URL-driven filters and keep context as you work.</p>
+    </div>
     <a href="/admin/programs/new"
-      class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      class="shrink-0 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
       + New Program
     </a>
   </div>
 
+  <div class={filterCardClass}>
+    <form method="get" class="space-y-4">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="md:col-span-2">
+          <label for="q" class="block text-sm font-medium text-gray-700 mb-1">Search title</label>
+          <input
+            id="q"
+            name="q"
+            type="search"
+            value={searchTerm}
+            placeholder="Search programs by title"
+            class={inputClass}
+          />
+        </div>
+
+        <div>
+          <label for="university" class="block text-sm font-medium text-gray-700 mb-1">University</label>
+          <select id="university" name="university" class={selectClass}>
+            <option value="">All universities</option>
+            {universities.map(option => (
+              <option value={option.id} selected={selectedUniversityId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+          <select id="status" name="status" class={selectClass}>
+            <option value="">All statuses</option>
+            {CONTENT_STATUS_OPTIONS.map(option => (
+              <option value={option} selected={selectedStatus === option}>{formatEnumLabel(option)}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="degree_level" class="block text-sm font-medium text-gray-700 mb-1">Degree level</label>
+          <select id="degree_level" name="degree_level" class={selectClass}>
+            <option value="">All degree levels</option>
+            {degreeLevels.map(option => (
+              <option value={option.id} selected={selectedDegreeLevelId === option.id}>
+                {option.name} ({option.code})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="subject" class="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+          <select id="subject" name="subject" class={selectClass}>
+            <option value="">All subjects</option>
+            {subjects.map(option => (
+              <option value={option.id} selected={selectedSubjectId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="country" class="block text-sm font-medium text-gray-700 mb-1">Country</label>
+          <select id="country" name="country" class={selectClass}>
+            <option value="">All countries</option>
+            {countries.map(option => (
+              <option value={option.id} selected={selectedCountryId === option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label for="sort" class="block text-sm font-medium text-gray-700 mb-1">Sort</label>
+          <select id="sort" name="sort" class={selectClass}>
+            {SORT_OPTIONS.map(option => (
+              <option value={option.value} selected={selectedSort === option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        >
+          Apply filters
+        </button>
+        <a
+          href="/admin/programs"
+          class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+          Clear
+        </a>
+        <p class="text-sm text-gray-500">
+          Showing {totalCount.toLocaleString()} {totalCount === 1 ? 'program' : 'programs'}
+        </p>
+      </div>
+    </form>
+  </div>
+
   {error && (
-    <p class="text-sm text-red-600 py-4">Could not load data.</p>
+    <p class="text-sm text-red-600 py-4">Could not load programs right now.</p>
   )}
 
-  {!error && rows.length === 0 && (
-    <p class="text-sm text-gray-500 py-4">
-      No programs yet.{' '}
-      <a href="/admin/programs/new" class="text-blue-600 hover:underline">Add the first one.</a>
-    </p>
+  {!error && totalCount === 0 && (
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6">
+      <p class="text-sm text-gray-600">
+        {activeFilterCount > 0 ? 'No programs match the current filters.' : 'No programs yet.'}
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        {activeFilterCount > 0 && (
+          <a href="/admin/programs" class="text-sm text-blue-600 hover:underline">Clear filters</a>
+        )}
+        <a href="/admin/programs/new" class="text-sm text-blue-600 hover:underline">Add a new program</a>
+      </div>
+    </div>
   )}
 
   {!error && rows.length > 0 && (
-    <div class="overflow-x-auto rounded-lg border border-gray-200">
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
       <table class="w-full text-sm text-left">
         <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
           <tr>
@@ -73,18 +261,35 @@ const error = programsRes.error
         </thead>
         <tbody>
           {rows.map(row => (
-            <tr class="border-b border-gray-100 hover:bg-gray-50">
-              <td class="px-4 py-3 font-medium text-gray-900">{row.title}</td>
-              <td class="px-4 py-3 text-gray-600 text-xs">{universityMap.get(row.university_id) ?? '—'}</td>
-              <td class="px-4 py-3 text-gray-500 text-xs font-mono">{degreeLevelMap.get(row.degree_level_id) ?? '—'}</td>
+            <tr class="border-b border-gray-100 align-top hover:bg-gray-50">
+              <td class="px-4 py-3">
+                <div class="font-medium text-gray-900">{row.title}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                  <span class="font-mono">{row.slug}</span>
+                  {row.primary_subject_id && subjectMap.get(row.primary_subject_id) && (
+                    <span>{subjectMap.get(row.primary_subject_id)}</span>
+                  )}
+                  {!row.official_url && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing official link</span>
+                  )}
+                  {row.tuition_min_amount === null && row.tuition_max_amount === null && (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing tuition</span>
+                  )}
+                </div>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-600">
+                <div>{universityMap.get(row.university_id) ?? '—'}</div>
+                <div class="mt-1 text-gray-400">{countryMap.get(row.country_id) ?? '—'}</div>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-500">{degreeLevelMap.get(row.degree_level_id) ?? '—'}</td>
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
-                  {row.content_status}
+                  {formatEnumLabel(row.content_status)}
                 </span>
               </td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{new Date(row.created_at).toLocaleDateString()}</td>
-              <td class="px-4 py-3">
-                <a href={`/admin/programs/${row.id}`} class="text-xs text-blue-600 hover:underline">Edit</a>
+              <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td class="px-4 py-3 text-right">
+                <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
               </td>
             </tr>
           ))}
