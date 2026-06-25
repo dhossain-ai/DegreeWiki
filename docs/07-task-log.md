@@ -31,6 +31,49 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-25 - Phase 65A: Admin Program Review Filters
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Make `/admin/programs` useful for bulk-import review by keeping university/status context in the URL and making it easy to continue through edit cycles.
+- Avoid migrations, new dependencies, service-role expansion, admin auth/RLS changes, import logic changes, unsafe HTML APIs, and large query rewrites.
+
+Files modified:
+- `src/pages/admin/programs/index.astro`
+- `src/pages/admin/programs/[id].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Rebuilt `/admin/programs` around a GET form so filters are driven by query params and remain shareable/bookmarkable.
+- Added filters for title search (`q`), university (`university`), status (`status`), degree level (`degree_level`), subject (`subject`), optional country (`country`), and created-date sort (`sort=newest|oldest`).
+- Added a result count line, clearer no-results messaging, and a real Clear action that resets to `/admin/programs`.
+- Kept the table focused on title, university, level, status, created date, and edit action while adding compact row-level review hints for missing official links and missing tuition.
+- Edit links now include a safe local `returnTo` value when the list has query params.
+- Updated `src/pages/admin/programs/[id].astro` so Back, Cancel, Save, and add-source redirects preserve the filtered list context through that `returnTo` value.
+- `returnTo` is allow-listed to local `/admin/programs` paths only and invalid values are ignored.
+- The page continues to show safe generic load/save errors instead of raw database errors.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No admin auth/RLS architecture change.
+- No import/staging logic change.
+- No large query architecture rewrite.
+
+Validation:
+- `npm run build`: PASS.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS.
+
+Notes:
+- Country filter was included because `programs.country_id` already exists and is indexed, making it a low-risk optional addition.
+- Missing-official-link and missing-tuition quick filters were left out to keep the phase focused, but compact review hints were added in the table rows.
+
 ## 2026-06-24 - Phase 63: Saved Programs MVP
 
 Tool:
