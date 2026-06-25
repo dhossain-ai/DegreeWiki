@@ -31,6 +31,52 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 66C1: Import Batch Pagination + Bulk Approve
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Make `/admin/imports/[id]` workable for larger staged batches without touching merge semantics or introducing any new schema.
+- Add URL-driven staged-row pagination, page-size/status/entity filters, visible-row selection, and safe bulk review for selected visible rows only.
+
+Files modified:
+- `src/pages/admin/imports/[id].astro`
+- `src/lib/admin/importReview.ts`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Reworked the batch detail page so staged-row review is URL-driven through `entity`, `status`, `page`, and `pageSize`, with the programs view chosen by default when a batch includes staged programs.
+- Replaced the old fixed 50-row staged-entity display with server-side paged range/count queries for the active entity only, while preserving whole-batch summary cards and detected university context.
+- Added filter controls for entity, status, and page size, plus a clear link and previous/next pagination controls.
+- Preserved current filter context through existing POST review/merge/link/quality/import redirects so admins stay on the same filtered batch view after actions complete.
+- Added visible-row checkboxes and safe client-side `Select visible` / `Clear selection` helpers using `querySelectorAll`, `checked`, `textContent`, and `addEventListener` only.
+- Added `_action=bulk_review` for selected visible rows only, with support for `approve`, `reject`, `skip`, and `reset`; the handler revalidates current batch membership and visible-row scope, and reuses `applyReviewAction()` per row so existing review transition rules stay authoritative.
+- Tightened review safety by blocking review actions on `merged` rows in `applyReviewAction()`, matching the existing UI expectation that merged rows are no longer reviewable.
+- Prevented program-import helper university rows from being changed through bulk review, since those helper rows preserve the selected production-university merge context for staged programs.
+- Added a lightweight program preview block that surfaces language, tuition, deadline, official URL, and application URL before raw JSON.
+- Left bulk merge, bulk publish, service-role usage, and any `mergeProgram()` semantic changes out of scope.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No bulk merge.
+- No bulk publish.
+- No “select all across hidden pages”.
+
+Validation:
+- `npm run build`: PASS.
+
+Deferred:
+- Bulk merge remains deferred.
+- Batch-scoped bulk publish remains deferred.
+- Issue-list pagination remains deferred; the issues table is still capped separately from staged-row pagination in this phase.
+
 ## 2026-06-26 - Phase 66B: Import Hub + Program Import Staging UX
 
 Tool:
