@@ -3,8 +3,8 @@ import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
-import { applyReviewAction } from '../../../lib/admin/importReview'
-import { mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
+import { applyReviewAction, applyReviewActionToMatching } from '../../../lib/admin/importReview'
+import { bulkMergeApprovedPrograms, bulkPublishMergedPrograms, mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
 import { parseBulkJson, parseResearchPackJson } from '../../../lib/admin/importParse'
 import { IMPORT_TEMPLATES, TEMPLATE_FIELD_NOTES, type EntityTemplateType } from '../../../lib/admin/importTemplates'
 import { AI_PROMPTS } from '../../../lib/admin/importPrompts'
@@ -65,7 +65,22 @@ const FILTERABLE_STATUS_OPTIONS: readonly VisibleStatusFilter[] = [
 ]
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 20
-const FLASH_QUERY_KEYS = ['mergeWarning', 'imported', 'warned', 'failed', 'quality', 'bulkAction', 'bulkSuccess', 'bulkFailed'] as const
+const FLASH_QUERY_KEYS = [
+  'mergeWarning',
+  'imported',
+  'warned',
+  'failed',
+  'quality',
+  'bulkAction',
+  'bulkSuccess',
+  'bulkFailed',
+  'batchAction',
+  'batchScope',
+  'batchSuccess',
+  'batchSkipped',
+  'batchFailed',
+  'batchWarned',
+] as const
 
 function buildBatchHref(
   batchId: string,
@@ -144,6 +159,7 @@ let mergeWarningPost: string | null = null
 let setMatchError: string | null = null
 let bulkImportError: string | null = null
 let bulkReviewError: string | null = null
+let batchActionError: string | null = null
 let qualityError: string | null = null
 const BATCH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -484,6 +500,126 @@ if (Astro.request.method === 'POST') {
           bulkFailed: failedCount,
         })
       }
+    }
+  } else if (postAction === 'bulk_review_matching') {
+    const confirm = fd.get('confirm_all_matching')?.toString().trim()
+    const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
+    const rawStatusFilter = fd.get('status_filter')?.toString().trim() ?? 'all'
+
+    if (confirm !== 'yes') {
+      batchActionError = 'Confirm the all-matching approval before continuing.'
+    } else {
+      const result = await applyReviewActionToMatching(supabase, {
+        entityType: rawEntityType,
+        batchId: b.id,
+        statusFilter: rawStatusFilter,
+        action: 'approve',
+        reviewerUserId: user.id,
+      })
+
+      if (result.ok) {
+        return redirectToBatch({
+          batchAction: 'approve_matching',
+          batchSuccess: result.approved,
+          batchSkipped: result.skipped,
+          batchFailed: result.failed,
+        })
+      }
+
+      batchActionError = result.error
+    }
+  } else if (postAction === 'bulk_merge_programs') {
+    const mergeScope = fd.get('merge_scope')?.toString().trim() ?? 'selected'
+    const rawStatusFilter = fd.get('status_filter')?.toString().trim() ?? 'all'
+    const visibleRowIdSet = new Set(
+      fd.getAll('visible_row_ids')
+        .map(value => value.toString().trim())
+        .filter(value => BATCH_UUID_RE.test(value)),
+    )
+    const selectedRowIds = [
+      ...new Set(
+        fd.getAll('row_ids')
+          .map(value => value.toString().trim())
+          .filter(value => BATCH_UUID_RE.test(value)),
+      ),
+    ]
+
+    if (mergeScope === 'selected') {
+      if (selectedRowIds.length === 0) {
+        batchActionError = 'Select at least one visible approved program row first.'
+      } else if (visibleRowIdSet.size === 0) {
+        batchActionError = 'This merge action requires visible rows from the current page.'
+      } else if (selectedRowIds.some(rowId => !visibleRowIdSet.has(rowId))) {
+        batchActionError = 'Bulk merge can apply only to program rows visible on the current page.'
+      } else {
+        const result = await bulkMergeApprovedPrograms(supabase, {
+          batchId: b.id,
+          rowIds: selectedRowIds,
+        })
+
+        if (result.ok) {
+          return redirectToBatch({
+            batchAction: 'merge_selected_programs',
+            batchScope: 'selected',
+            batchSuccess: result.merged,
+            batchSkipped: result.skipped,
+            batchFailed: result.failed,
+            batchWarned: result.warned > 0 ? result.warned : null,
+          })
+        }
+
+        batchActionError = result.error
+      }
+    } else if (mergeScope === 'matching') {
+      const confirm = fd.get('confirm_merge_matching')?.toString().trim()
+
+      if (confirm !== 'yes') {
+        batchActionError = 'Confirm the all-matching merge before continuing.'
+      } else {
+        const result = await bulkMergeApprovedPrograms(supabase, {
+          batchId: b.id,
+          statusFilter: rawStatusFilter,
+        })
+
+        if (result.ok) {
+          return redirectToBatch({
+            batchAction: 'merge_matching_programs',
+            batchScope: 'matching',
+            batchSuccess: result.merged,
+            batchSkipped: result.skipped,
+            batchFailed: result.failed,
+            batchWarned: result.warned > 0 ? result.warned : null,
+          })
+        }
+
+        batchActionError = result.error
+      }
+    } else {
+      batchActionError = 'Invalid bulk merge scope.'
+    }
+  } else if (postAction === 'bulk_publish_programs') {
+    const confirm = fd.get('confirm_publish_matching')?.toString().trim()
+    const rawStatusFilter = fd.get('status_filter')?.toString().trim() ?? 'all'
+
+    if (confirm !== 'yes') {
+      batchActionError = 'Confirm the publish action before continuing.'
+    } else {
+      const result = await bulkPublishMergedPrograms(supabase, {
+        batchId: b.id,
+        statusFilter: rawStatusFilter,
+      })
+
+      if (result.ok) {
+        return redirectToBatch({
+          batchAction: 'publish_matching_programs',
+          batchScope: 'matching',
+          batchSuccess: result.published,
+          batchSkipped: result.skipped,
+          batchFailed: result.failed,
+        })
+      }
+
+      batchActionError = result.error
     }
   } else if (postAction === 'merge') {
     const confirm = fd.get('confirm')?.toString().trim()
@@ -1227,6 +1363,18 @@ const bulkReviewSummary = bulkReviewActionParam
     }
   : null
 
+const batchActionParam = Astro.url.searchParams.get('batchAction')
+const batchActionSummary = batchActionParam
+  ? {
+      action: batchActionParam,
+      scope: Astro.url.searchParams.get('batchScope') ?? '',
+      success: Math.max(0, parseInt(Astro.url.searchParams.get('batchSuccess') ?? '0', 10) || 0),
+      skipped: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkipped') ?? '0', 10) || 0),
+      failed: Math.max(0, parseInt(Astro.url.searchParams.get('batchFailed') ?? '0', 10) || 0),
+      warned: Math.max(0, parseInt(Astro.url.searchParams.get('batchWarned') ?? '0', 10) || 0),
+    }
+  : null
+
 // ---- Quality check summary (from PRG redirect query params) ----
 const qualityParam = Astro.url.searchParams.get('quality')
 const qualitySummary = qualityParam !== null
@@ -1314,6 +1462,7 @@ const showPrograms = batchType === 'programs' || batchType === 'mixed'
 const showScholarships = batchType === 'scholarships' || batchType === 'mixed'
 const showArticles = batchType === 'articles' || batchType === 'mixed'
 type StagingStatusRow = { id: string; import_status: string }
+type StagingProgramStatusRow = { id: string; import_status: string; match_program_id: string | null }
 
 const visibleEntityOptions = FILTERABLE_ENTITY_TYPES.filter((entity) =>
   entity === 'universities' ? showUniversities
@@ -1343,7 +1492,7 @@ const [uniMetaResult, progStatusResult, scholStatusResult, artStatusResult, errR
   showPrograms
     ? supabase
         .from('staging_programs')
-        .select('id, import_status')
+        .select('id, import_status, match_program_id')
         .eq('import_batch_id', id)
     : Promise.resolve({ data: [] }),
   showScholarships
@@ -1367,7 +1516,7 @@ const [uniMetaResult, progStatusResult, scholStatusResult, artStatusResult, errR
 ])
 
 const stagingUniversities = (uniMetaResult.data ?? []) as StagingUniversity[]
-const allProgramStatusRows = (progStatusResult.data ?? []) as StagingStatusRow[]
+const allProgramStatusRows = (progStatusResult.data ?? []) as StagingProgramStatusRow[]
 const allScholarshipStatusRows = (scholStatusResult.data ?? []) as StagingStatusRow[]
 const allArticleStatusRows = (artStatusResult.data ?? []) as StagingStatusRow[]
 const stagingErrors = (errResult.data ?? []) as StagingError[]
@@ -1592,6 +1741,43 @@ const activeEntityLabel =
 const currentFilterPath = buildBatchHref(b.id, Astro.url.searchParams)
 const buildFilterHref = (updates: Record<string, string | number | null | undefined> = {}) =>
   buildBatchHref(b.id, Astro.url.searchParams, updates)
+const isStatusMatch = (status: string) => selectedStatusFilter === 'all' || status === selectedStatusFilter
+const blockedBulkReviewStatuses = new Set(['merged', 'processing', 'error'])
+const currentEntityMatchingRows =
+  activeEntity === 'universities'
+    ? actionableUniversityRows.filter((row) => isStatusMatch(row.import_status))
+    : activeEntity === 'programs'
+      ? allProgramStatusRows.filter((row) => isStatusMatch(row.import_status))
+      : activeEntity === 'scholarships'
+        ? allScholarshipStatusRows.filter((row) => isStatusMatch(row.import_status))
+        : allArticleStatusRows.filter((row) => isStatusMatch(row.import_status))
+const approveAllMatchingReadyCount = currentEntityMatchingRows.filter(
+  (row) => !blockedBulkReviewStatuses.has(row.import_status) && row.import_status !== 'approved'
+).length
+const currentFilterApprovedProgramRows = activeEntity === 'programs'
+  ? allProgramStatusRows.filter((row) => isStatusMatch(row.import_status) && row.import_status === 'approved' && !row.match_program_id)
+  : []
+const approvedProgramsReadyToMergeCount = currentFilterApprovedProgramRows.length
+const currentFilterMergedProgramIds = activeEntity === 'programs'
+  ? [
+      ...new Set(
+        allProgramStatusRows
+          .filter((row) => isStatusMatch(row.import_status) && row.import_status === 'merged' && row.match_program_id)
+          .map((row) => row.match_program_id)
+          .filter((programId): programId is string => programId !== null)
+      ),
+    ]
+  : []
+let mergedDraftProgramsReadyToPublishCount = 0
+if (currentFilterMergedProgramIds.length > 0) {
+  const { data: publishablePrograms } = await supabase
+    .from('programs')
+    .select('id')
+    .in('id', currentFilterMergedProgramIds)
+    .in('content_status', ['draft', 'in_review'])
+
+  mergedDraftProgramsReadyToPublishCount = (publishablePrograms ?? []).length
+}
 
 // Guidance message for "what to do next" banner.
 let nextStepMessage = ''
@@ -1624,6 +1810,18 @@ const REVIEW_ACTION_LABEL: Record<string, string> = {
   reject: 'rejected',
   skip: 'skipped',
   reset: 'reset',
+}
+const BATCH_ACTION_LABEL: Record<string, string> = {
+  approve_matching: 'Approve all matching',
+  merge_selected_programs: 'Merge approved programs',
+  merge_matching_programs: 'Merge approved programs',
+  publish_matching_programs: 'Publish merged drafts as unverified',
+}
+const BATCH_ACTION_RESULT_LABEL: Record<string, string> = {
+  approve_matching: 'approved',
+  merge_selected_programs: 'merged',
+  merge_matching_programs: 'merged',
+  publish_matching_programs: 'published',
 }
 
 const INPUT_CLS = 'block w-full rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
@@ -1819,7 +2017,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
 
     <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
       <p class="text-xs text-gray-500">
-        Active view: <span class="font-medium text-gray-700">{activeEntity}</span> · Bulk actions can affect only rows selected on this page.
+        Active view: <span class="font-medium text-gray-700">{activeEntity}</span> · Selected-row actions stay on this page. All-matching actions require explicit confirmation before affecting hidden pages in the current batch/filter.
       </p>
       <div class="flex items-center gap-2">
         <a
@@ -1892,6 +2090,138 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     </div>
   )}
 
+  {filteredRowCount > 0 && (
+    <div class="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-4">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div class="max-w-3xl">
+          <h2 class="text-base font-semibold text-gray-900">Batch actions</h2>
+          <p class="mt-1 text-sm text-gray-500">
+            These actions stay scoped to batch <span class="font-mono text-xs text-gray-600">{b.id}</span>, entity <span class="font-medium text-gray-700">{activeEntity}</span>, and status filter <span class="font-medium text-gray-700">{selectedStatusFilter}</span>.
+          </p>
+        </div>
+        <div class="text-xs text-gray-500">
+          Matching rows: <span class="font-medium text-gray-700">{currentEntityMatchingRows.length}</span>
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
+        <div class="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold text-blue-900">Review actions</h3>
+              <p class="mt-1 text-xs text-blue-800">
+                Approve every matching row in this batch/filter. Merged, processing, error, and helper rows are skipped automatically.
+              </p>
+            </div>
+            <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-blue-900">
+              {approveAllMatchingReadyCount} ready
+            </div>
+          </div>
+
+          <form method="POST" action={currentFilterPath} class="mt-4 space-y-3">
+            <input type="hidden" name="_action" value="bulk_review_matching" />
+            <input type="hidden" name="entity_type" value={activeEntity} />
+            <input type="hidden" name="status_filter" value={selectedStatusFilter} />
+            <label class="flex items-start gap-2 text-sm text-blue-900">
+              <input type="checkbox" name="confirm_all_matching" value="yes" required class="mt-0.5 shrink-0" />
+              <span>I understand this will approve all matching rows in this batch/filter.</span>
+            </label>
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                Approve all matching
+              </button>
+              <span class="text-xs text-blue-800">Hidden pages are affected only through this confirmed action.</span>
+            </div>
+          </form>
+        </div>
+
+        {activeEntity === 'programs' ? (
+          <div class="space-y-4">
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-sm font-semibold text-emerald-900">Merge actions</h3>
+                  <p class="mt-1 text-xs text-emerald-800">
+                    Merge approved program rows with the existing `mergeProgram()` flow. New production programs stay draft and unverified until you review them.
+                  </p>
+                </div>
+                <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-emerald-900">
+                  {approvedProgramsReadyToMergeCount} approved ready
+                </div>
+              </div>
+
+              <div class="mt-4 grid gap-3">
+                <form
+                  method="POST"
+                  action={currentFilterPath}
+                  class="rounded border border-emerald-200 bg-white p-3"
+                  data-mirror-selected-rows
+                >
+                  <input type="hidden" name="_action" value="bulk_merge_programs" />
+                  <input type="hidden" name="merge_scope" value="selected" />
+                  {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
+                  <p class="text-sm font-medium text-emerald-900">Merge selected approved rows</p>
+                  <p class="mt-1 text-xs text-emerald-800">Uses the same visible-row selection as the bulk review controls below.</p>
+                  <button type="submit" class="mt-3 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                    Merge approved programs
+                  </button>
+                </form>
+
+                <form method="POST" action={currentFilterPath} class="rounded border border-emerald-200 bg-white p-3 space-y-3">
+                  <input type="hidden" name="_action" value="bulk_merge_programs" />
+                  <input type="hidden" name="merge_scope" value="matching" />
+                  <input type="hidden" name="status_filter" value={selectedStatusFilter} />
+                  <p class="text-sm font-medium text-emerald-900">Merge all approved rows in this batch/filter</p>
+                  <label class="flex items-start gap-2 text-sm text-emerald-900">
+                    <input type="checkbox" name="confirm_merge_matching" value="yes" required class="mt-0.5 shrink-0" />
+                    <span>I understand this will merge all approved program rows in this batch/filter.</span>
+                  </label>
+                  <button type="submit" class="rounded border border-emerald-300 bg-emerald-100 px-4 py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-200">
+                    Merge all approved programs
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-sm font-semibold text-amber-900">Publish actions</h3>
+                  <p class="mt-1 text-xs text-amber-800">
+                    Publish linked production programs from merged staging rows only. This makes them public, but verification remains manual.
+                  </p>
+                </div>
+                <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900">
+                  {mergedDraftProgramsReadyToPublishCount} drafts ready
+                </div>
+              </div>
+
+              <form method="POST" action={currentFilterPath} class="mt-4 rounded border border-amber-200 bg-white p-3 space-y-3">
+                <input type="hidden" name="_action" value="bulk_publish_programs" />
+                <input type="hidden" name="status_filter" value={selectedStatusFilter} />
+                <p class="text-sm font-medium text-amber-900">Publish merged drafts as unverified</p>
+                <p class="text-xs text-amber-800">
+                  Only linked production programs in <code>draft</code> or <code>in_review</code> are updated. Verification fields stay unchanged.
+                </p>
+                <label class="flex items-start gap-2 text-sm text-amber-900">
+                  <input type="checkbox" name="confirm_publish_matching" value="yes" required class="mt-0.5 shrink-0" />
+                  <span>I understand these programs will become public but remain unverified.</span>
+                </label>
+                <button type="submit" class="rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
+                  Publish merged drafts as unverified
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <div class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+            Program-only merge and publish actions appear when the active entity filter is set to <span class="font-medium text-gray-700">programs</span>.
+          </div>
+        )}
+      </div>
+    </div>
+  )}
+
   {reviewError && (
     <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
       Review action failed: {reviewError}
@@ -1901,6 +2231,12 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
   {bulkReviewError && (
     <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
       Bulk review failed: {bulkReviewError}
+    </div>
+  )}
+
+  {batchActionError && (
+    <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      Batch action failed: {batchActionError}
     </div>
   )}
 
@@ -1939,6 +2275,22 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
       {bulkReviewSummary.failed > 0
         ? <span class="text-amber-700"> {bulkReviewSummary.failed} row{bulkReviewSummary.failed !== 1 ? 's' : ''} could not be updated.</span>
         : ''}
+    </div>
+  )}
+
+  {batchActionSummary && (
+    <div class={`mb-4 rounded-md border px-4 py-3 text-sm ${
+      batchActionSummary.action === 'publish_matching_programs'
+        ? 'border-amber-200 bg-amber-50 text-amber-900'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    }`}>
+      {BATCH_ACTION_LABEL[batchActionSummary.action] ?? batchActionSummary.action}
+      {batchActionSummary.scope === 'selected' ? ' (selected)' : batchActionSummary.scope === 'matching' ? ' (all matching)' : ''}
+      : {batchActionSummary.success} row{batchActionSummary.success !== 1 ? 's' : ''} {BATCH_ACTION_RESULT_LABEL[batchActionSummary.action] ?? 'processed'}.
+      {batchActionSummary.skipped > 0 && ` ${batchActionSummary.skipped} skipped.`}
+      {batchActionSummary.failed > 0 && ` ${batchActionSummary.failed} failed.`}
+      {batchActionSummary.warned > 0 && ` ${batchActionSummary.warned} merged row${batchActionSummary.warned !== 1 ? 's' : ''} need manual follow-up.`}
+      {batchActionSummary.action === 'publish_matching_programs' && ' Verification remains manual.'}
     </div>
   )}
 
@@ -3225,6 +3577,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     var selectVisibleBtn = bulkForm.querySelector('[data-select-visible]');
     var clearSelectionBtn = bulkForm.querySelector('[data-clear-selection]');
     var selectionCount = bulkForm.querySelector('[data-selection-count]');
+    var mirroredForms = bulkForm.ownerDocument.querySelectorAll('[data-mirror-selected-rows]');
 
     function updateSelectionCount() {
       if (!selectionCount) return;
@@ -3233,6 +3586,22 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
         if (checkbox.checked) checked += 1;
       });
       selectionCount.textContent = checked + ' selected';
+    }
+
+    function syncMirroredRowIds(targetForm) {
+      targetForm.querySelectorAll('[data-mirrored-row-id]').forEach(function (input) {
+        input.remove();
+      });
+
+      rowCheckboxes.forEach(function (checkbox) {
+        if (!checkbox.checked || checkbox.disabled) return;
+        var hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'row_ids';
+        hidden.value = checkbox.value;
+        hidden.setAttribute('data-mirrored-row-id', 'true');
+        targetForm.appendChild(hidden);
+      });
     }
 
     if (selectVisibleBtn) {
@@ -3256,6 +3625,12 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
 
     rowCheckboxes.forEach(function (checkbox) {
       checkbox.addEventListener('change', updateSelectionCount);
+    });
+
+    mirroredForms.forEach(function (form) {
+      form.addEventListener('submit', function () {
+        syncMirroredRowIds(form);
+      });
     });
 
     updateSelectionCount();
