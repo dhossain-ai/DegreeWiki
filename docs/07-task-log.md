@@ -31,6 +31,47 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-25 - Phase 65B: Admin Program Review Checklist + Verification Workflow
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Turn `/admin/programs/[id]` into a practical review screen for imported draft programs using existing schema only.
+- Keep the Phase 65A filtered-list `returnTo` flow intact while adding review guidance and explicit workflow actions.
+- Avoid migrations, new dependencies, service role usage, RLS bypasses, import/staging changes, unsafe HTML APIs, and persistent checklist storage.
+
+Files modified:
+- `src/pages/admin/programs/[id].astro`
+- `src/lib/admin/badges.ts`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Expanded the program edit query to load existing `data_completeness_score`, `source_confidence_score`, `last_verified_at`, and `next_review_due_at`.
+- Added a read-only review checklist sidebar covering core identity, student decision fields, intake/deadline coverage, source/trust coverage, and public-readiness hints.
+- Checklist states are advisory only and use existing loaded program, `data_sources`, and `program_intakes` data; they do not create new publish blockers beyond current validation and RLS.
+- Added read-only data-quality progress bars modeled after the article admin edit page pattern.
+- Added workflow buttons for `save`, `mark_in_review`, `publish`, `mark_partially_verified`, and `mark_verified`.
+- `publish` updates `content_status` only; verification workflow buttons update `verification_status`, and the two verification buttons stamp `last_verified_at`.
+- `next_review_due_at` is displayed but not changed because no existing pattern safely manages it here.
+- Strengthened add-source validation to check URL and enum values before insert while continuing to return only friendly errors.
+- Preserved safe local `returnTo` handling for Back, Cancel, Save, workflow actions, and add-source redirects.
+- Added shared verification badge classes in `src/lib/admin/badges.ts` for restrained admin status display.
+- Corrected the stale Phase 65A status note that still implied uncommitted pending-review changes.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No import/staging logic change.
+- No admin auth architecture change.
+- No persistent checklist storage.
+- No raw database errors shown to admins.
+
 ## 2026-06-25 - Phase 65A: Admin Program Review Filters
 
 Tool:
