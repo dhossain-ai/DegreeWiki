@@ -7,8 +7,8 @@ Last updated: 2026-06-26
 
 ## Current Phase
 
-Phase 66B - Import Hub + Program Import Staging UX - complete.
-`/admin/imports` is now an option-based Import Hub with a recommended Program Import path plus the older generic batch tools preserved below it. `/admin/imports/programs` now stages pasted or browser-loaded JSON program data against one selected production university, supports raw arrays, `{ programs: [...] }`, and nested research-pack shapes, creates a helper staging-university row linked to the selected production university, stages programs into `staging_programs`, and redirects into the existing batch review screen. `/admin/imports/[id]` now shows detected university context when available, summary entity/outcome counts, and a review-next link into filtered draft programs for that university. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, no direct browser writes to production programs, and no `mergeProgram()` semantic change.
+Phase 66C1 - Import Batch Pagination + Bulk Approve - complete.
+`/admin/imports/[id]` now uses URL-driven staged-row review controls with `entity`, `status`, `page`, and `pageSize`, defaults to the programs view when a batch contains staged programs, and pages visible staged rows with server-side Supabase range/count queries instead of the old fixed 50-row display cap. The batch detail page now supports visible-row checkboxes, safe client-side select-visible / clear-selection helpers, and bulk review for selected visible rows only (`approve`, `reject`, `skip`, `reset`) while preserving existing per-row review and merge flows. Program rows also gained a quick preview block for language, tuition, deadline, and key URLs ahead of raw JSON. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, no direct production writes beyond existing per-row merge behavior, no `mergeProgram()` semantic change, and no bulk merge/publish yet.
 
 Current branch / git status note:
 - Branch: `main`
@@ -43,6 +43,7 @@ Current branch / git status note:
 
 ## Last Completed Phases
 
+- Phase 66C1: import batch pagination + bulk approve; `/admin/imports/[id]` now supports URL-driven staged-row filters for entity, status, page, and page size, uses paged staged-row queries instead of rendering every visible entity section at once, preserves review context through POST redirects, adds visible-row selection with safe select-visible / clear-selection helpers, and adds bulk review actions for selected visible rows only (`approve`, `reject`, `skip`, `reset`). Program rows now expose a lightweight preview of language, tuition, deadline, and official/application URLs before raw JSON. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, no `mergeProgram()` semantic change, and no bulk merge/publish implementation in this phase.
 - Phase 66B: import hub + program import staging UX; `/admin/imports` now promotes a dedicated program-import path while preserving generic batch creation. `/admin/imports/programs` requires one production university, accepts pasted JSON or browser-read local `.json` text, previews supported shapes client-side, reparses server-side, creates a mixed import batch plus a helper staging-university row linked to the selected production university, stages programs for review, and redirects to the batch detail page. `/admin/imports/[id]` now surfaces detected matched-university context, entity counts, row outcome counts, helper-row awareness, and a direct review-next link to `/admin/programs?university=<id>&status=draft&sort=newest` when the university can be detected. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no production program writes from the import page.
 
 - Phase 65C: admin content list filters bundle; `/admin/universities` now supports name, country, city, content-status, verification-status, and newest/oldest/name sorting with result count and compact row hints for missing official link/media and low quality signals. `/admin/scholarships` now supports name, provider, host country relation, content-status, verification-status, funding-type, deadline-state, and newest/oldest/deadline/name sorting with result count and quick hints for missing links, funding detail, deadline, and low quality signals. `/admin/articles` now supports title, category, author, content-status, verification-status, and newest/oldest/updated/title sorting with result count and quick hints for missing SEO fields, missing summary, and low quality signals. Safe `returnTo` context is preserved for university, scholarship, and article edit pages on Back, Cancel, Save, existing Publish, and add-source redirects where applicable. No migration, no new dependency, no unsafe HTML APIs, no service role, no RLS bypass, and no import/auth architecture changes.
@@ -78,11 +79,12 @@ Current branch / git status note:
 - CSV import and persistent uploaded-file import storage remain deferred to a future import-focused phase. Phase 66B adds browser-local `.json` file loading for the dedicated program import page only.
 - Mixed-batch research pack staging import is still supported, and Phase 58E adds a separate local direct-draft production import script for trusted packs.
 - Fields without production columns, such as `duration_text`, `required_documents_text`, `scholarship_notes`, `official_tuition_url`, `missing_fields`, and freeform `notes`, remain preserved in staging `raw_data`.
-- Bulk publish/verify flows, persistent saved admin filters, and broader admin review workflow storage remain deferred.
+- Bulk merge and bulk publish/verify flows, persistent saved admin filters, and broader admin review workflow storage remain deferred.
 
 ## Immediate Next Phases
 
 - Expand the option-based import hub with additional dedicated entity flows if needed.
+- Bulk merge and batch-scoped bulk publish for import-reviewed programs remain the next import-workflow follow-up.
 - CSV/file upload import pipeline (intentionally deferred from Phase 58C/58D; local browser-read `.json` support now exists only for program staging).
 - Article junction table wiring (article_countries, article_subjects, article_degree_levels) in the admin form — deferred from Phase 59.
 - Continue admin permission boundary hardening.
