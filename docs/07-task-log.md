@@ -31,6 +31,53 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 66C2: Import Batch Bulk Merge + Publish + Mark All Actions
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Extend `/admin/imports/[id]` so large program batches can be advanced safely without clicking one row at a time.
+- Add explicit all-matching approval, batch-scoped program merge, and batch-scoped publish while preserving the existing single-row workflow and merge semantics.
+
+Files modified:
+- `src/pages/admin/imports/[id].astro`
+- `src/lib/admin/importReview.ts`
+- `src/lib/admin/importMerge.ts`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Added a batch-actions panel on `/admin/imports/[id]` that stays scoped to the current batch, entity filter, and status filter, and explains when hidden pages can be affected.
+- Added `_action=bulk_review_matching`, which requires an explicit confirmation checkbox and re-queries all matching rows server-side before approving them; helper staging-university rows plus `merged` / `processing` / `error` rows are skipped automatically.
+- Kept the existing selected-visible bulk review flow intact for `approve`, `reject`, `skip`, and `reset`.
+- Added exported review helper logic in `src/lib/admin/importReview.ts` so all-matching approval reuses `applyReviewAction()` instead of introducing a second review transition path.
+- Added `_action=bulk_merge_programs` with two safe scopes: selected visible approved program rows, and all approved program rows in the current batch/filter after explicit confirmation.
+- Bulk merge re-queries staged program rows from the current batch only, skips rows that are not currently `approved` or are already linked, and then calls the existing `mergeApprovedRow(..., entityType='programs')` path so `mergeProgram()` semantics remain unchanged.
+- Added `_action=bulk_publish_programs`, which only looks at `staging_programs` rows in the current batch/filter that are already `merged` and linked to production `programs` through `match_program_id`.
+- Bulk publish updates only linked production programs whose `content_status` is currently `draft` or `in_review`, sets `content_status = published` and `indexing_status = index`, and leaves `verification_status` plus `last_verified_at` unchanged.
+- Added current-filter counts for approval-ready rows, approved program rows ready to merge, and merged draft/in-review programs ready to publish.
+- Added generic batch-action summaries plus a small JS helper that mirrors the selected visible program row IDs into the selected-merge form without changing the existing checkbox UX.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No direct production writes outside the existing merge flow for create-new program merges.
+- No `mergeProgram()` semantic change.
+- No bulk verify action.
+- No `last_verified_at` update during bulk publish.
+
+Validation:
+- `npm run build`: pending local run after implementation.
+
+Notes:
+- Bulk publish is intentionally limited to programs and intentionally keeps verification manual.
+- All-matching actions can affect hidden pages only after the explicit confirmation checkbox is ticked.
+
 ## 2026-06-26 - Phase 66C1: Import Batch Pagination + Bulk Approve
 
 Tool:
