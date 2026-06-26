@@ -621,6 +621,25 @@ type StagedProgramRow = {
   match_program_id: string | null
 }
 
+export type ProgramPrimarySubjectResolution = {
+  status: 'missing' | 'matched_by_name' | 'matched_by_slug' | 'unmatched' | 'ambiguous'
+  input: string | null
+  subjectId: string | null
+}
+
+export type ProgramImportPreview = {
+  language: string | null
+  durationLabel: string | null
+  tuitionLabel: string | null
+  officialUrl: string | null
+  applicationUrl: string | null
+  primarySubject: string | null
+  admissionSnippet: string | null
+  curriculumSnippet: string | null
+  careerSnippet: string | null
+  sourceUrlCount: number
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -629,6 +648,7 @@ function textField(raw: Record<string, unknown>, keys: string[]): string | null 
   for (const key of keys) {
     const value = raw[key]
     if (value === null || value === undefined) continue
+    if (typeof value === 'object') continue
     const s = String(value).trim()
     if (s) return s
   }
@@ -670,7 +690,109 @@ function normalizeTuitionPeriod(value: string | null): string | null {
   })
 }
 
+function formatProgramImportSnippet(value: string | null, maxLength = 96): string | null {
+  if (!value) return null
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (!compact) return null
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1).trimEnd()}…` : compact
+}
+
+function formatProgramImportTuitionLabel(raw: Record<string, unknown>, fallbackAmount: number | null = null): string | null {
+  const tuitionMin = numberField(raw, ['tuition_min_amount', 'tuition_amount', 'tuition'])
+  const tuitionMax = numberField(raw, ['tuition_max_amount', 'tuition_amount_max'])
+  const currency = textField(raw, ['tuition_currency', 'currency'])
+  const period = normalizeTuitionPeriod(textField(raw, ['tuition_period', 'tuition_frequency']))
+  const effectiveMin = tuitionMin ?? fallbackAmount
+
+  if (effectiveMin === null && tuitionMax === null && !currency && !period) return null
+
+  let amountLabel = 'Not listed'
+  if (effectiveMin !== null && tuitionMax !== null) {
+    amountLabel = effectiveMin === tuitionMax
+      ? String(effectiveMin)
+      : `${effectiveMin}-${tuitionMax}`
+  } else if (effectiveMin !== null) {
+    amountLabel = String(effectiveMin)
+  } else if (tuitionMax !== null) {
+    amountLabel = String(tuitionMax)
+  }
+
+  const suffix = [currency, period].filter(Boolean).join(' / ')
+  return suffix ? `${amountLabel} ${suffix}` : amountLabel
+}
+
+function collectUniqueProgramSourceUrls(raw: Record<string, unknown>): string[] {
+  const urls: string[] = []
+  const seen = new Set<string>()
+
+  function add(urlValue: string | null) {
+    const sourceUrl = validUrlOrNull(urlValue)
+    if (!sourceUrl || seen.has(sourceUrl)) return
+    seen.add(sourceUrl)
+    urls.push(sourceUrl)
+  }
+
+  add(textField(raw, ['official_program_url', 'official_url', 'program_url']))
+  add(textField(raw, ['official_application_url', 'application_url', 'apply_url']))
+  add(textField(raw, ['official_tuition_url']))
+
+  const sourceUrls = raw.source_urls
+  if (Array.isArray(sourceUrls)) {
+    for (const value of sourceUrls) {
+      if (typeof value === 'string') add(value)
+    }
+  }
+
+  return urls
+}
+
+export function buildProgramImportPreview(
+  raw: Record<string, unknown>,
+  extracted: { language?: string | null; tuitionAmount?: number | null } = {},
+): ProgramImportPreview {
+  const language = textField(raw, ['language_of_instruction', 'language', 'instruction_language'])
+    ?? extracted.language?.trim()
+    ?? null
+  const durationMonths = positiveIntegerField(raw, ['duration_months', 'duration_in_months'])
+  const durationText = textField(raw, ['duration_text'])
+  const admissionText = textField(raw, [
+    'admission_requirements_text',
+    'admission_requirements',
+    'entry_requirements',
+    'academic_requirements_text',
+  ])
+
+  return {
+    language,
+    durationLabel: durationMonths !== null
+      ? `${durationMonths} month${durationMonths === 1 ? '' : 's'}`
+      : durationText,
+    tuitionLabel: formatProgramImportTuitionLabel(raw, extracted.tuitionAmount ?? null),
+    officialUrl: textField(raw, ['official_program_url', 'official_url', 'program_url']),
+    applicationUrl: textField(raw, ['official_application_url', 'application_url', 'apply_url']),
+    primarySubject: textField(raw, ['primary_subject', 'subject_area', 'subject']),
+    admissionSnippet: formatProgramImportSnippet(admissionText),
+    curriculumSnippet: formatProgramImportSnippet(textField(raw, [
+      'curriculum_or_modules_text',
+      'curriculum_summary',
+      'curriculum',
+      'modules_summary',
+    ])),
+    careerSnippet: formatProgramImportSnippet(textField(raw, [
+      'career_outcomes_text',
+      'career_outcomes',
+      'career_prospects',
+    ])),
+    sourceUrlCount: collectUniqueProgramSourceUrls(raw).length,
+  }
+}
+
 function buildEnglishRequirements(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const structured = raw.english_requirements
+  if (isPlainObject(structured)) {
+    return structured
+  }
+
   const englishText = textField(raw, ['english_requirements_text', 'english_requirements'])
   const ielts = numberField(raw, ['ielts_min_score'])
   const toefl = numberField(raw, ['toefl_min_score'])
@@ -683,6 +805,53 @@ function buildEnglishRequirements(raw: Record<string, unknown>): Record<string, 
   return Object.keys(requirements).length > 0 ? requirements : null
 }
 
+export async function resolveProgramPrimarySubject(
+  supabase: SupabaseClient,
+  raw: Record<string, unknown>,
+): Promise<ProgramPrimarySubjectResolution> {
+  const subjectName = textField(raw, ['primary_subject', 'subject_area', 'subject'])
+  if (!subjectName) {
+    return { status: 'missing', input: null, subjectId: null }
+  }
+
+  const { data: byName } = await supabase
+    .from('subjects')
+    .select('id, name')
+    .ilike('name', subjectName)
+    .limit(10)
+
+  const exactMatches = ((byName ?? []) as { id: string; name: string }[])
+    .filter((subject) => subject.name.toLowerCase() === subjectName.toLowerCase())
+
+  if (exactMatches.length === 1) {
+    return { status: 'matched_by_name', input: subjectName, subjectId: exactMatches[0].id }
+  }
+  if (exactMatches.length > 1) {
+    return { status: 'ambiguous', input: subjectName, subjectId: null }
+  }
+
+  const subjectSlug = slugify(subjectName)
+  if (!subjectSlug) {
+    return { status: 'unmatched', input: subjectName, subjectId: null }
+  }
+
+  const { data: bySlug } = await supabase
+    .from('subjects')
+    .select('id')
+    .eq('slug', subjectSlug)
+    .limit(2)
+
+  const slugMatches = (bySlug ?? []) as { id: string }[]
+  if (slugMatches.length === 1) {
+    return { status: 'matched_by_slug', input: subjectName, subjectId: slugMatches[0].id }
+  }
+  if (slugMatches.length > 1) {
+    return { status: 'ambiguous', input: subjectName, subjectId: null }
+  }
+
+  return { status: 'unmatched', input: subjectName, subjectId: null }
+}
+
 async function buildRichProgramPayload(
   supabase: SupabaseClient,
   raw: Record<string, unknown>
@@ -690,18 +859,18 @@ async function buildRichProgramPayload(
   const payload: Record<string, unknown> = {}
 
   const directTextFields: Array<[string, string[]]> = [
-    ['degree_award', ['degree_award']],
-    ['language_of_instruction', ['language_of_instruction', 'language']],
-    ['tuition_currency', ['tuition_currency']],
-    ['tuition_notes', ['tuition_notes']],
-    ['application_fee_currency', ['application_fee_currency']],
-    ['application_fee_notes', ['application_fee_notes']],
-    ['official_url', ['official_program_url', 'official_url']],
-    ['application_url', ['official_application_url', 'application_url']],
-    ['admission_requirements', ['admission_requirements_text', 'admission_requirements']],
-    ['gpa_requirements', ['gpa_requirements_text', 'gpa_requirements']],
-    ['curriculum_summary', ['curriculum_or_modules_text', 'curriculum_summary']],
-    ['career_outcomes', ['career_outcomes_text', 'career_outcomes']],
+    ['degree_award', ['degree_award', 'award', 'credential']],
+    ['language_of_instruction', ['language_of_instruction', 'language', 'instruction_language']],
+    ['tuition_currency', ['tuition_currency', 'currency']],
+    ['tuition_notes', ['tuition_notes', 'tuition_note']],
+    ['application_fee_currency', ['application_fee_currency', 'app_fee_currency']],
+    ['application_fee_notes', ['application_fee_notes', 'app_fee_notes']],
+    ['official_url', ['official_program_url', 'official_url', 'program_url']],
+    ['application_url', ['official_application_url', 'application_url', 'apply_url']],
+    ['admission_requirements', ['admission_requirements_text', 'admission_requirements', 'entry_requirements']],
+    ['gpa_requirements', ['gpa_requirements_text', 'gpa_requirements', 'minimum_gpa']],
+    ['curriculum_summary', ['curriculum_or_modules_text', 'curriculum_summary', 'curriculum', 'modules_summary']],
+    ['career_outcomes', ['career_outcomes_text', 'career_outcomes', 'career_prospects']],
   ]
 
   for (const [column, keys] of directTextFields) {
@@ -710,49 +879,40 @@ async function buildRichProgramPayload(
   }
 
   const studyMode = normalizeEnum(
-    textField(raw, ['study_mode']),
+    textField(raw, ['study_mode', 'attendance_mode']),
     ['full_time', 'part_time', 'online', 'hybrid'],
     { fulltime: 'full_time', full_time: 'full_time', parttime: 'part_time', part_time: 'part_time' }
   )
   if (studyMode) payload.study_mode = studyMode
 
   const deliveryMode = normalizeEnum(
-    textField(raw, ['delivery_mode']),
+    textField(raw, ['delivery_mode', 'delivery_format']),
     ['on_campus', 'online', 'hybrid', 'distance'],
     { campus: 'on_campus', in_person: 'on_campus', oncampus: 'on_campus' }
   )
   if (deliveryMode) payload.delivery_mode = deliveryMode
 
-  const durationMonths = positiveIntegerField(raw, ['duration_months'])
+  const durationMonths = positiveIntegerField(raw, ['duration_months', 'duration_in_months'])
   if (durationMonths !== null) payload.duration_months = durationMonths
 
-  const tuitionMin = numberField(raw, ['tuition_min_amount', 'tuition_amount'])
+  const tuitionMin = numberField(raw, ['tuition_min_amount', 'tuition_amount', 'tuition'])
   if (tuitionMin !== null) payload.tuition_min_amount = tuitionMin
 
-  const tuitionMax = numberField(raw, ['tuition_max_amount'])
+  const tuitionMax = numberField(raw, ['tuition_max_amount', 'tuition_amount_max'])
   if (tuitionMax !== null) payload.tuition_max_amount = tuitionMax
 
-  const tuitionPeriod = normalizeTuitionPeriod(textField(raw, ['tuition_period']))
+  const tuitionPeriod = normalizeTuitionPeriod(textField(raw, ['tuition_period', 'tuition_frequency']))
   if (tuitionPeriod) payload.tuition_period = tuitionPeriod
 
-  const applicationFee = numberField(raw, ['application_fee_amount'])
+  const applicationFee = numberField(raw, ['application_fee_amount', 'application_fee', 'app_fee_amount'])
   if (applicationFee !== null) payload.application_fee_amount = applicationFee
 
   const englishRequirements = buildEnglishRequirements(raw)
   if (englishRequirements) payload.english_requirements = englishRequirements
 
-  const subjectName = textField(raw, ['primary_subject', 'subject_area', 'subject'])
-  if (subjectName) {
-    const { data } = await supabase
-      .from('subjects')
-      .select('id, name')
-      .ilike('name', subjectName)
-      .limit(2)
-    const exactMatches = ((data ?? []) as { id: string; name: string }[])
-      .filter(s => s.name.toLowerCase() === subjectName.toLowerCase())
-    if (exactMatches.length === 1) {
-      payload.primary_subject_id = exactMatches[0].id
-    }
+  const subjectResolution = await resolveProgramPrimarySubject(supabase, raw)
+  if (subjectResolution.subjectId) {
+    payload.primary_subject_id = subjectResolution.subjectId
   }
 
   return payload
@@ -777,13 +937,12 @@ function collectProgramSourceRows(
   raw: Record<string, unknown>
 ): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = []
-  const seen = new Set<string>()
   const confidence = confidenceLevel(raw)
+  const officialProgramUrl = validUrlOrNull(textField(raw, ['official_program_url', 'official_url', 'program_url']))
+  const officialApplicationUrl = validUrlOrNull(textField(raw, ['official_application_url', 'application_url', 'apply_url']))
+  const officialTuitionUrl = validUrlOrNull(textField(raw, ['official_tuition_url']))
 
-  function addSource(urlValue: string | null, title: string, sourceType: string, isPrimary: boolean) {
-    const sourceUrl = validUrlOrNull(urlValue)
-    if (!sourceUrl || seen.has(sourceUrl)) return
-    seen.add(sourceUrl)
+  function addSource(sourceUrl: string, title: string, sourceType: string, isPrimary: boolean) {
     rows.push({
       entity_type: 'program',
       entity_id: productionId,
@@ -798,17 +957,21 @@ function collectProgramSourceRows(
     })
   }
 
-  addSource(textField(raw, ['official_program_url', 'official_url']), 'Official program page', 'official_university', true)
-  addSource(textField(raw, ['official_application_url', 'application_url']), 'Official application page', 'official_university', false)
-  addSource(textField(raw, ['official_tuition_url']), 'Official tuition page', 'official_university', false)
-
-  const sourceUrls = raw.source_urls
-  if (Array.isArray(sourceUrls)) {
-    for (const value of sourceUrls) {
-      if (typeof value === 'string') {
-        addSource(value, 'Research source', 'third_party', rows.length === 0)
-      }
+  for (const sourceUrl of collectUniqueProgramSourceUrls(raw)) {
+    if (sourceUrl === officialProgramUrl) {
+      addSource(sourceUrl, 'Official program page', 'official_university', rows.length === 0)
+      continue
     }
+    if (sourceUrl === officialApplicationUrl) {
+      addSource(sourceUrl, 'Official application page', 'official_university', rows.length === 0)
+      continue
+    }
+    if (sourceUrl === officialTuitionUrl) {
+      addSource(sourceUrl, 'Official tuition page', 'official_university', rows.length === 0)
+      continue
+    }
+
+    addSource(sourceUrl, 'Research source', 'third_party', rows.length === 0)
   }
 
   return rows
@@ -989,10 +1152,13 @@ async function mergeProgram(
 
   if (stagingUpdateErr) {
     console.error('[importMerge] mergeProgram: staging status update failed after production insert:', stagingUpdateErr.code, stagingUpdateErr.message)
+    const combinedWarning = sourceWarning
+      ? `${sourceWarning} Also, the staging row status update failed. The row may still show "approved". Reload the page to check.`
+      : 'Production program created but staging row status update failed. The row may still show "approved". Reload the page to check.'
     return {
       ok: true,
       productionId,
-      warning: 'Production program created but staging row status update failed. The row may still show "approved". Reload the page to check.',
+      warning: combinedWarning,
     }
   }
 
