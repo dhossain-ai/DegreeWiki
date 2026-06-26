@@ -93,7 +93,7 @@ function mapUniversity(item: Record<string, unknown>): BulkParsedRow {
     fields: {
       extracted_name: str(item.name),
       extracted_country_code: countryCode ? countryCode.toUpperCase() : null,
-      extracted_official_url: str(item.official_url),
+      extracted_official_url: str(item.official_url ?? item.official_website),
     },
     parseWarnings: [],
   }
