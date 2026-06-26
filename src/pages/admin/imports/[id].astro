@@ -8,6 +8,7 @@ import {
   buildProgramImportPreview,
   bulkMergeApprovedPrograms,
   bulkPublishMergedPrograms,
+  bulkUpdateExistingMatchedPrograms,
   mergeApprovedRow,
   resolveProgramPrimarySubject,
   resolveProgramProductionMatches,
@@ -624,6 +625,85 @@ if (Astro.request.method === 'POST') {
       }
     } else {
       batchActionError = 'Invalid bulk merge scope.'
+    }
+  } else if (postAction === 'bulk_update_existing_programs') {
+    const updateScope = fd.get('update_scope')?.toString().trim() ?? 'selected'
+    const rawStatusFilter = fd.get('status_filter')?.toString().trim() ?? 'all'
+    const visibleRowIdSet = new Set(
+      fd.getAll('visible_row_ids')
+        .map(value => value.toString().trim())
+        .filter(value => BATCH_UUID_RE.test(value)),
+    )
+    const selectedRowIds = [
+      ...new Set(
+        fd.getAll('row_ids')
+          .map(value => value.toString().trim())
+          .filter(value => BATCH_UUID_RE.test(value)),
+      ),
+    ]
+
+    if (updateScope === 'selected') {
+      const confirm = fd.get('confirm_update_selected')?.toString().trim()
+
+      if (confirm !== 'yes') {
+        batchActionError = 'Confirm the selected enrichment update before continuing.'
+      } else if (selectedRowIds.length === 0) {
+        batchActionError = 'Select at least one visible approved program row first.'
+      } else if (visibleRowIdSet.size === 0) {
+        batchActionError = 'This update action requires visible rows from the current page.'
+      } else if (selectedRowIds.some(rowId => !visibleRowIdSet.has(rowId))) {
+        batchActionError = 'Bulk update-existing can apply only to program rows visible on the current page.'
+      } else {
+        const result = await bulkUpdateExistingMatchedPrograms(supabase, {
+          batchId: b.id,
+          rowIds: selectedRowIds,
+        })
+
+        if (result.ok) {
+          return redirectToBatch({
+            batchAction: 'update_existing_selected_programs',
+            batchScope: 'selected',
+            batchSuccess: result.updated,
+            batchFailed: result.failed,
+            batchWarned: result.warned > 0 ? result.warned : null,
+            batchUpdated: result.updated > 0 ? result.updated : null,
+            batchSkippedNoExactMatch: result.skippedNoExactMatch > 0 ? result.skippedNoExactMatch : null,
+            batchSkippedAmbiguousMatch: result.skippedAmbiguousMatch > 0 ? result.skippedAmbiguousMatch : null,
+            batchSkippedNoSafeFields: result.skippedNoSafeFields > 0 ? result.skippedNoSafeFields : null,
+          })
+        }
+
+        batchActionError = result.error
+      }
+    } else if (updateScope === 'matching') {
+      const confirm = fd.get('confirm_update_matching')?.toString().trim()
+
+      if (confirm !== 'yes') {
+        batchActionError = 'Confirm the all-matching enrichment update before continuing.'
+      } else {
+        const result = await bulkUpdateExistingMatchedPrograms(supabase, {
+          batchId: b.id,
+          statusFilter: rawStatusFilter,
+        })
+
+        if (result.ok) {
+          return redirectToBatch({
+            batchAction: 'update_existing_matching_programs',
+            batchScope: 'matching',
+            batchSuccess: result.updated,
+            batchFailed: result.failed,
+            batchWarned: result.warned > 0 ? result.warned : null,
+            batchUpdated: result.updated > 0 ? result.updated : null,
+            batchSkippedNoExactMatch: result.skippedNoExactMatch > 0 ? result.skippedNoExactMatch : null,
+            batchSkippedAmbiguousMatch: result.skippedAmbiguousMatch > 0 ? result.skippedAmbiguousMatch : null,
+            batchSkippedNoSafeFields: result.skippedNoSafeFields > 0 ? result.skippedNoSafeFields : null,
+          })
+        }
+
+        batchActionError = result.error
+      }
+    } else {
+      batchActionError = 'Invalid bulk update-existing scope.'
     }
   } else if (postAction === 'bulk_publish_programs') {
     const confirm = fd.get('confirm_publish_matching')?.toString().trim()
@@ -1464,6 +1544,9 @@ const batchActionSummary = batchActionParam
       created: Math.max(0, parseInt(Astro.url.searchParams.get('batchCreated') ?? '0', 10) || 0),
       updated: Math.max(0, parseInt(Astro.url.searchParams.get('batchUpdated') ?? '0', 10) || 0),
       skippedExisting: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkippedExisting') ?? '0', 10) || 0),
+      skippedNoExactMatch: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkippedNoExactMatch') ?? '0', 10) || 0),
+      skippedAmbiguousMatch: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkippedAmbiguousMatch') ?? '0', 10) || 0),
+      skippedNoSafeFields: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkippedNoSafeFields') ?? '0', 10) || 0),
     }
   : null
 
@@ -1936,12 +2019,16 @@ const BATCH_ACTION_LABEL: Record<string, string> = {
   approve_matching: 'Approve all matching',
   merge_selected_programs: 'Merge approved programs',
   merge_matching_programs: 'Merge approved programs',
+  update_existing_selected_programs: 'Update existing matched programs',
+  update_existing_matching_programs: 'Update existing matched programs',
   publish_matching_programs: 'Publish merged drafts as unverified',
 }
 const BATCH_ACTION_RESULT_LABEL: Record<string, string> = {
   approve_matching: 'approved',
   merge_selected_programs: 'merged',
   merge_matching_programs: 'merged',
+  update_existing_selected_programs: 'updated',
+  update_existing_matching_programs: 'updated',
   publish_matching_programs: 'published',
 }
 
@@ -2305,6 +2392,61 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
               </div>
             </div>
 
+            <div class="rounded-lg border border-sky-200 bg-sky-50/80 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-sm font-semibold text-sky-900">Enrichment pass</h3>
+                  <p class="mt-1 text-xs text-sky-800">
+                    Use this after a second research pass to fill missing fields. It only updates existing exact matches, only fills empty fields, never creates duplicates, and does not publish or verify programs.
+                  </p>
+                </div>
+                <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-sky-900">
+                  Exact match only
+                </div>
+              </div>
+
+              <div class="mt-4 grid gap-3">
+                <form
+                  method="POST"
+                  action={currentFilterPath}
+                  class="rounded border border-sky-200 bg-white p-3 space-y-3"
+                  data-mirror-selected-rows
+                >
+                  <input type="hidden" name="_action" value="bulk_update_existing_programs" />
+                  <input type="hidden" name="update_scope" value="selected" />
+                  {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
+                  <p class="text-sm font-medium text-sky-900">Update selected existing matches</p>
+                  <p class="text-xs text-sky-800">
+                    Uses the same visible-row selection as the bulk review controls below. Only rows with one exact production match are updated, and only empty allowlisted production fields are filled.
+                  </p>
+                  <label class="flex items-start gap-2 text-sm text-sky-900">
+                    <input type="checkbox" name="confirm_update_selected" value="yes" required class="mt-0.5 shrink-0" />
+                    <span>I understand this updates only empty fields on exact existing program matches and never creates new programs.</span>
+                  </label>
+                  <button type="submit" class="rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">
+                    Update existing matched programs
+                  </button>
+                </form>
+
+                <form method="POST" action={currentFilterPath} class="rounded border border-sky-200 bg-white p-3 space-y-3">
+                  <input type="hidden" name="_action" value="bulk_update_existing_programs" />
+                  <input type="hidden" name="update_scope" value="matching" />
+                  <input type="hidden" name="status_filter" value={selectedStatusFilter} />
+                  <p class="text-sm font-medium text-sky-900">Update all exact existing matches in this batch/filter</p>
+                  <p class="text-xs text-sky-800">
+                    Best for a richer second import. Rows without one exact match are skipped, ambiguous duplicates stay manual, and non-empty production fields are never overwritten.
+                  </p>
+                  <label class="flex items-start gap-2 text-sm text-sky-900">
+                    <input type="checkbox" name="confirm_update_matching" value="yes" required class="mt-0.5 shrink-0" />
+                    <span>I understand this enriches exact existing matches only in the current batch/filter.</span>
+                  </label>
+                  <button type="submit" class="rounded border border-sky-300 bg-sky-100 px-4 py-2 text-sm font-medium text-sky-900 hover:bg-sky-200">
+                    Bulk Update Existing Matched Programs
+                  </button>
+                </form>
+              </div>
+            </div>
+
             <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
               <div class="flex items-start justify-between gap-3">
                 <div>
@@ -2404,6 +2546,8 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     <div class={`mb-4 rounded-md border px-4 py-3 text-sm ${
       batchActionSummary.action === 'publish_matching_programs'
         ? 'border-amber-200 bg-amber-50 text-amber-900'
+      : batchActionSummary.action === 'update_existing_selected_programs' || batchActionSummary.action === 'update_existing_matching_programs'
+        ? 'border-sky-200 bg-sky-50 text-sky-900'
       : 'border-emerald-200 bg-emerald-50 text-emerald-900'
     }`}>
       {BATCH_ACTION_LABEL[batchActionSummary.action] ?? batchActionSummary.action}
@@ -2413,8 +2557,11 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
       {batchActionSummary.updated > 0 && ` ${batchActionSummary.updated} updated.`}
       {batchActionSummary.skippedExisting > 0 && ` ${batchActionSummary.skippedExisting} skipped as existing duplicates.`}
       {batchActionSummary.skipped > 0 && ` ${batchActionSummary.skipped} skipped.`}
+      {batchActionSummary.skippedNoExactMatch > 0 && ` ${batchActionSummary.skippedNoExactMatch} skipped with no exact match.`}
+      {batchActionSummary.skippedAmbiguousMatch > 0 && ` ${batchActionSummary.skippedAmbiguousMatch} skipped as ambiguous matches.`}
+      {batchActionSummary.skippedNoSafeFields > 0 && ` ${batchActionSummary.skippedNoSafeFields} skipped because there were no safe empty fields to fill.`}
       {batchActionSummary.failed > 0 && ` ${batchActionSummary.failed} failed.`}
-      {batchActionSummary.warned > 0 && ` ${batchActionSummary.warned} merged row${batchActionSummary.warned !== 1 ? 's' : ''} need manual follow-up.`}
+      {batchActionSummary.warned > 0 && ` ${batchActionSummary.warned} row${batchActionSummary.warned !== 1 ? 's' : ''} saved but need source-link follow-up.`}
       {batchActionSummary.action === 'publish_matching_programs' && ' Verification remains manual.'}
     </div>
   )}
