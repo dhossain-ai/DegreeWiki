@@ -84,6 +84,51 @@ Notes:
 - `data_sources` attachment remains best-effort and deduped by normalized URL. Friendly warnings are preserved when source attachment fails.
 - Intake/deadline import remains intentionally deferred until a later phase introduces an explicit intake schema.
 
+## 2026-06-26 - Phase 66F2: Program Import Duplicate Handling
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Stop repeat program imports from silently creating duplicate production programs with new slugs.
+- Add explicit safe handling for exact existing program matches without changing schema, RLS boundaries, or public publish defaults.
+
+Files modified:
+- `src/lib/admin/importMerge.ts`
+- `src/lib/admin/importQuality.ts`
+- `src/pages/admin/imports/[id].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+- `docs/10-import-workflow.md`
+
+Implementation:
+- Added exact program production matching based on normalized title plus the linked production university and resolved degree level, replacing the earlier title-only quality warning behavior for programs.
+- Added `skip_existing` support for programs so an approved staged row can be linked to an existing production program and marked handled without creating a new production row.
+- Added program `update_existing`, which fills only empty allowlisted production fields from staged rich program data and never overwrites identity, ownership, status, SEO, media, or already-filled rich fields.
+- Kept `create_new` available for intentional duplicates, but now block it server-side when an exact unique or ambiguous match exists unless the admin explicitly confirms duplicate creation from the UI.
+- Added `set_match_program_id` on `/admin/imports/[id]` so admins can manually link a staged program to a chosen production UUID before using skip/update actions.
+- Updated the program row actions UI to show detected exact matches, ambiguous matches, explicit link-existing, skip-existing, update-existing, and create-new-anyway paths with stronger confirmation copy.
+- Changed bulk program merge so exact unique matches are skipped as existing duplicates by default, unmatched rows are created normally, and ambiguous matches stay untouched for manual review instead of creating more duplicates.
+- Deduped imported program `data_sources` URLs against existing sources on the target program before best-effort insert, for both create-new and update-existing flows.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No hard delete.
+- No public publish-default change.
+- No `program_intakes` import.
+
+Validation:
+- `npm run build`: PASS.
+
+Notes:
+- Bulk merge now reports created, updated, skipped-as-existing, skipped, failed, and warning counts through the existing batch summary flow.
+- Ambiguous exact matches remain intentionally manual so the import path does not guess between multiple production duplicates.
+
 ## 2026-06-26 - Phase 66C2: Import Batch Bulk Merge + Publish + Mark All Actions
 
 Tool:
