@@ -2559,7 +2559,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
               b.batch_type === 'universities'
                 ? '[{\n  "name": "University of Example",\n  "country_code": "GB",\n  "official_url": "https://example.ac.uk"\n}]'
                 : b.batch_type === 'programs'
-                ? '[{\n  "title": "MSc Computer Science",\n  "degree_level_code": "msc",\n  "tuition_amount": 15000,\n  "staging_university_id": "<uuid>"\n}]'
+                ? '[{\n  "title": "MSc Computer Science",\n  "degree_level_code": "master",\n  "primary_subject": "Computer Science",\n  "study_mode": "full_time",\n  "delivery_mode": "on_campus",\n  "official_url": "https://example.edu/programs/computer-science",\n  "source_urls": ["https://example.edu/programs/computer-science"],\n  "staging_university_id": "<uuid>"\n}]'
                 : b.batch_type === 'scholarships'
                 ? '[{\n  "name": "Global Excellence Award",\n  "amount": 5000,\n  "deadline": "2026-05-01"\n}]'
                 : b.batch_type === 'articles'
@@ -2575,14 +2575,14 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
           <p class="mt-1 text-xs text-gray-400">
             Paste a JSON array of objects. Maximum 100 rows per paste.
             {b.batch_type === 'universities' && ' Keys: name, country_code, official_url.'}
-            {b.batch_type === 'programs' && ' Keys: title, degree_level_code, language, tuition_amount, deadline, staging_university_id.'}
+            {b.batch_type === 'programs' && ' Keys: title, degree_level_code, primary_subject, study_mode, delivery_mode, language_of_instruction, tuition_*, official_url, application_url, source_urls, staging_university_id.'}
             {b.batch_type === 'scholarships' && ' Keys: name, amount, deadline.'}
             {b.batch_type === 'articles' && ' Keys: title, slug, category, content.'}
             {b.batch_type === 'mixed' && ' Paste a flat array for the selected type, or paste a nested university + programs research pack.'}
           </p>
           {(b.batch_type === 'programs' || b.batch_type === 'mixed') && (
             <p class="mt-1 text-xs text-amber-700 font-medium">
-              Program rows: <span class="font-normal">flat program arrays still need staging_university_id at import time. Research packs do this automatically by staging the university first and linking each program to it.</span>
+              Program rows: <span class="font-normal">flat program arrays still need staging_university_id at import time. Prefer supported importer fields only. Intake/deadline data is not imported in this phase, and JSON content/verification statuses are ignored.</span>
             </p>
           )}
         </div>
