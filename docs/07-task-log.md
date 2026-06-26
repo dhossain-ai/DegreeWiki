@@ -31,6 +31,51 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 67B: Program Import Final QA + Prompt Tightening
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Make the program import workflow easier to use for repeated university-by-university collection without changing merge semantics, duplicate behavior, schema, or security boundaries.
+- Tighten the built-in prompt/template, dedicated import-page helper copy, and import docs so external research JSON stays closer to the importer's supported field set.
+
+Files modified:
+- `src/lib/admin/importPrompts.ts`
+- `src/lib/admin/importTemplates.ts`
+- `src/lib/admin/importParse.ts`
+- `src/pages/admin/imports/programs.astro`
+- `src/pages/admin/imports/[id].astro`
+- `docs/10-import-workflow.md`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Tightened the shared AI prompt rules so the built-in prompts explicitly require JSON-only output and forbid extra keys outside the shown schema.
+- Updated the flat `programs` prompt/template to use the current supported field names for new research JSON: `official_url`, `application_url`, `admission_requirements`, `gpa_requirements`, `curriculum_summary`, `career_outcomes`, and `source_urls`.
+- Reworked the `research_pack` prompt/template into the preferred university-by-university shape with `university + programs`, explicit `official_website` support, null-on-unknown guidance, and an explicit ban on deadline/intake/status fields.
+- Added clearer prompt/template guidance for broad primary subjects, `source_urls`, supported enum values, and the rule that imported production programs still become draft/unverified by server logic.
+- Added a small parser alignment so `official_website` is accepted as a university official URL alias in the preferred nested shape.
+- Updated `/admin/imports/programs` helper copy to explain the recommended workflow, staging-only behavior, duplicate-safe re-imports, empty-field-only `Update Existing`, later publish-as-unverified flow, supported JSON shapes, and the broad-subject/source-URL reminders.
+- Tightened generic batch helper copy on `/admin/imports/[id]` so program examples and key guidance no longer recommend deadline fields and instead point operators toward the supported program field set for new JSON.
+- Rewrote `docs/10-import-workflow.md` around the current preferred operational path: one university at a time, recommended prompt usage, JSON field rules, unsupported scope, duplicate handling, cleanup guidance, and a manual QA checklist.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No merge-semantics change.
+- No duplicate-handling change.
+- No `program_intakes` import.
+- No trust in JSON `content_status` or `verification_status`.
+
+Validation:
+- `npm run build`: pending local run after implementation.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: pending local run after implementation.
+
 ## 2026-06-26 - Phase 67A: Program Duplicate Cleanup + Safe Delete
 
 Tool:
