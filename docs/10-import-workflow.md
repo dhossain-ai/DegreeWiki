@@ -148,6 +148,9 @@ Fields:
 - `english_requirements_text`, `ielts_min_score`, `toefl_min_score`, or
   structured `english_requirements`: optional.
 - `source_urls`: optional. Best-effort attached to `data_sources` after merge.
+- Exact production duplicate detection now uses normalized `title` +
+  linked production university + degree level. Bulk merge skips exact unique
+  matches by default instead of creating new duplicate slugs.
 - `content_status` / `verification_status`: ignored if present.
 - `deadline` / `application_deadline`: staging-only context for review. Phase
   66E does not create `program_intakes`.
@@ -239,9 +242,22 @@ The import validates that each `staging_university_id` belongs to the current ba
 referenced staging university has `match_university_id` set.
 
 **Step 9 — Review and merge programs.**
-Approve each program row after manual review. Use the create-new merge form for each. Program
-merge resolves the linked staging university's `match_university_id` to get the production
-university UUID for the FK relationship.
+Approve each program row after manual review. For each approved row:
+
+- Use **Skip Existing** when the staged row is a duplicate of an existing production program.
+- Use **Update Existing** only when you want to fill empty allowlisted rich fields on the
+  existing production program.
+- Use **Merge to Production** only when the row is genuinely new, or when you intentionally
+  want to create a second production record and have explicitly confirmed that duplicate create.
+
+Program merge resolves the linked staging university's `match_university_id` to get the
+production university UUID for the FK relationship.
+
+Bulk program merge is now duplicate-safe by default:
+
+- exact unique matches are skipped as existing,
+- unmatched rows are created normally,
+- ambiguous matches remain for manual review and are not auto-created.
 
 The `set_match_university_id` action is available only for universities and only for rows in
 `approved` status. It validates: the row belongs to the current batch, the row is not already
