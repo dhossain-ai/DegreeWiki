@@ -2,6 +2,13 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import { CONTENT_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import {
+  buildProgramDuplicateGroupIndex,
+  getProgramDuplicateKey,
+  hardDeleteProgramById,
+  preflightProgramHardDelete,
+  userIsSuperAdmin,
+} from '../../../lib/admin/programCleanup'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -15,12 +22,30 @@ const SORT_OPTIONS = [
   { value: 'oldest', label: 'Oldest first' },
 ] as const
 
+type SummaryTone = 'success' | 'warning' | 'danger'
+type ActionSummary = {
+  tone: SummaryTone
+  title: string
+  details: string[]
+}
+
 const formatEnumLabel = (value: string) =>
   value
     .split('_')
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
+
+const normalizeListPath = (value: string | null) => {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed || trimmed.startsWith('//') || trimmed.includes('\r') || trimmed.includes('\n')) return ''
+  if (!trimmed.startsWith('/admin/programs')) return ''
+
+  const suffix = trimmed.slice('/admin/programs'.length)
+  if (suffix && !suffix.startsWith('?') && !suffix.startsWith('/')) return ''
+
+  return trimmed
+}
 
 const params = Astro.url.searchParams
 const searchTerm = params.get('q')?.trim() ?? ''
@@ -30,19 +55,14 @@ const rawDegreeLevelId = params.get('degree_level')?.trim() ?? ''
 const rawSubjectId = params.get('subject')?.trim() ?? ''
 const rawCountryId = params.get('country')?.trim() ?? ''
 const selectedSort = params.get('sort') === 'oldest' ? 'oldest' : 'newest'
-
-const [degreeLevelsRes, universitiesRes, subjectsRes, countriesRes] = await Promise.all([
-  supabase.from('degree_levels').select('id, code, name').order('display_order', { ascending: true }),
-  supabase.from('universities').select('id, name').order('name', { ascending: true }),
-  supabase.from('subjects').select('id, name').order('name', { ascending: true }).limit(500),
-  supabase.from('countries').select('id, name').order('name', { ascending: true }),
-])
+const duplicatesOnly = params.get('duplicates') === '1'
 
 type ProgramRow = {
   id: string
   title: string
   slug: string
   content_status: string
+  indexing_status: string
   degree_level_id: string
   university_id: string
   primary_subject_id: string | null
@@ -55,6 +75,15 @@ type ProgramRow = {
 
 type DegreeLevelOption = { id: string; code: string; name: string }
 type NamedOption = { id: string; name: string }
+
+const [degreeLevelsRes, universitiesRes, subjectsRes, countriesRes, duplicateScanRes, superAdmin] = await Promise.all([
+  supabase.from('degree_levels').select('id, code, name').order('display_order', { ascending: true }),
+  supabase.from('universities').select('id, name').order('name', { ascending: true }),
+  supabase.from('subjects').select('id, name').order('name', { ascending: true }).limit(500),
+  supabase.from('countries').select('id, name').order('name', { ascending: true }),
+  supabase.from('programs').select('id, title, university_id, degree_level_id'),
+  userIsSuperAdmin(supabase),
+])
 
 const degreeLevels = (degreeLevelsRes.data ?? []) as DegreeLevelOption[]
 const universities = (universitiesRes.data ?? []) as NamedOption[]
@@ -74,11 +103,177 @@ const selectedDegreeLevelId = validDegreeLevelIds.has(rawDegreeLevelId) ? rawDeg
 const selectedSubjectId = validSubjectIds.has(rawSubjectId) ? rawSubjectId : ''
 const selectedCountryId = validCountryIds.has(rawCountryId) ? rawCountryId : ''
 
+let currentListPath = Astro.url.search ? `${Astro.url.pathname}${Astro.url.search}` : Astro.url.pathname
+let summary: ActionSummary | null = null
+
+if (Astro.url.searchParams.get('notice')) {
+  const tone = Astro.url.searchParams.get('noticeLevel') === 'danger'
+    ? 'danger'
+    : Astro.url.searchParams.get('noticeLevel') === 'warning'
+      ? 'warning'
+      : 'success'
+  summary = {
+    tone,
+    title: Astro.url.searchParams.get('notice') ?? '',
+    details: Astro.url.searchParams.get('detail')?.split('||').filter(Boolean) ?? [],
+  }
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  currentListPath = normalizeListPath(String(form.get('currentListPath') ?? '')) || currentListPath
+
+  const action = String(form.get('_action') ?? '').trim()
+  const visibleIds = [...new Set(form.getAll('visible_ids').map(value => String(value)).filter(Boolean))]
+  const selectedIds = [...new Set(form.getAll('selected_ids').map(value => String(value)).filter(Boolean))]
+  const selectedVisibleIds = selectedIds.filter(id => visibleIds.includes(id))
+
+  const makeSummary = (tone: SummaryTone, title: string, details: string[] = []) => {
+    summary = { tone, title, details }
+  }
+
+  if (!action) {
+    makeSummary('danger', 'No bulk action was selected.')
+  } else if (selectedVisibleIds.length === 0) {
+    makeSummary('warning', 'Select at least one visible program first.')
+  } else {
+    const { data: selectedProgramsData, error: selectedProgramsError } = await supabase
+      .from('programs')
+      .select('id, title, slug, content_status')
+      .in('id', selectedVisibleIds)
+
+    const selectedPrograms = (selectedProgramsData ?? []) as Array<{
+      id: string
+      title: string
+      slug: string
+      content_status: string
+    }>
+
+    if (selectedProgramsError || selectedPrograms.length === 0) {
+      makeSummary('danger', 'Could not load the selected programs right now.')
+    } else if (action === 'archive_selected') {
+      const toArchive = selectedPrograms.filter(program => program.content_status !== 'archived')
+      const alreadyArchived = selectedPrograms.filter(program => program.content_status === 'archived')
+
+      if (toArchive.length === 0) {
+        makeSummary('warning', 'All selected visible programs were already archived.')
+      } else {
+        const { error } = await supabase
+          .from('programs')
+          .update({ content_status: 'archived', indexing_status: 'draft' })
+          .in('id', toArchive.map(program => program.id))
+
+        if (error) {
+          makeSummary('danger', 'Could not archive the selected programs right now.')
+        } else {
+          makeSummary(
+            'success',
+            `Archived ${toArchive.length} selected ${toArchive.length === 1 ? 'program' : 'programs'}.`,
+            alreadyArchived.length > 0
+              ? [`Skipped ${alreadyArchived.length} already archived ${alreadyArchived.length === 1 ? 'program' : 'programs'}.`]
+              : [],
+          )
+        }
+      }
+    } else if (action === 'restore_selected') {
+      const toRestore = selectedPrograms.filter(program => program.content_status === 'archived')
+      const alreadyActive = selectedPrograms.filter(program => program.content_status !== 'archived')
+
+      if (toRestore.length === 0) {
+        makeSummary('warning', 'Only archived programs can be restored to draft.')
+      } else {
+        const { error } = await supabase
+          .from('programs')
+          .update({ content_status: 'draft', indexing_status: 'draft' })
+          .in('id', toRestore.map(program => program.id))
+
+        if (error) {
+          makeSummary('danger', 'Could not restore the selected programs right now.')
+        } else {
+          makeSummary(
+            'success',
+            `Restored ${toRestore.length} archived ${toRestore.length === 1 ? 'program' : 'programs'} to draft.`,
+            alreadyActive.length > 0
+              ? [`Skipped ${alreadyActive.length} selected ${alreadyActive.length === 1 ? 'program' : 'programs'} that were not archived.`]
+              : [],
+          )
+        }
+      }
+    } else if (action === 'hard_delete_selected') {
+      const deleteConfirmed = form.get('hard_delete_confirm') === 'on'
+      const typedConfirmation = String(form.get('hard_delete_text') ?? '').trim()
+
+      if (!superAdmin) {
+        makeSummary('danger', 'Hard delete is limited to super admins.')
+      } else if (!deleteConfirmed || typedConfirmation !== 'DELETE') {
+        makeSummary(
+          'warning',
+          'Hard delete confirmation is incomplete.',
+          ['Tick the permanent-delete checkbox and type DELETE before trying again.'],
+        )
+      } else {
+        const preflight = await preflightProgramHardDelete(supabase, selectedPrograms.map(program => program.id))
+        const deletableIds = preflight
+          .filter(item => item.blockingReasons.length === 0)
+          .map(item => item.programId)
+
+        const deleted: string[] = []
+        const failed: string[] = []
+        const details: string[] = []
+
+        for (const item of preflight) {
+          const program = selectedPrograms.find(row => row.id === item.programId)
+          if (!program) continue
+
+          if (item.blockingReasons.length > 0) {
+            details.push(`${program.title} (${program.slug}): ${item.blockingReasons.join(' ')}`)
+            continue
+          }
+
+          const result = await hardDeleteProgramById(supabase, item.programId)
+          if (result.ok) {
+            deleted.push(program.title)
+            const cleanupNotes = [
+              item.cleanup.scholarshipLinks > 0 ? `${item.cleanup.scholarshipLinks} scholarship link${item.cleanup.scholarshipLinks === 1 ? '' : 's'}` : '',
+              item.cleanup.dataSources > 0 ? `${item.cleanup.dataSources} data source${item.cleanup.dataSources === 1 ? '' : 's'}` : '',
+              item.cleanup.savedItems > 0 ? `${item.cleanup.savedItems} saved item${item.cleanup.savedItems === 1 ? '' : 's'}` : '',
+              item.cleanup.userReports > 0 ? `${item.cleanup.userReports} user report${item.cleanup.userReports === 1 ? '' : 's'}` : '',
+              item.cleanup.verificationEvents > 0 ? `${item.cleanup.verificationEvents} verification event${item.cleanup.verificationEvents === 1 ? '' : 's'}` : '',
+              item.cleanup.dataQualityChecks > 0 ? `${item.cleanup.dataQualityChecks} data quality check${item.cleanup.dataQualityChecks === 1 ? '' : 's'}` : '',
+            ].filter(Boolean)
+
+            if (cleanupNotes.length > 0) {
+              details.push(`${program.title} (${program.slug}): deleted after cleaning ${cleanupNotes.join(', ')}.`)
+            }
+          } else {
+            failed.push(program.title)
+            details.push(`${program.title} (${program.slug}): ${result.message}`)
+          }
+        }
+
+        if (deleted.length > 0 && failed.length === 0 && deletableIds.length === deleted.length && details.length === deleted.length) {
+          makeSummary('success', `Permanently deleted ${deleted.length} selected ${deleted.length === 1 ? 'program' : 'programs'}.`, details)
+        } else if (deleted.length > 0) {
+          makeSummary(
+            'warning',
+            `Deleted ${deleted.length} selected ${deleted.length === 1 ? 'program' : 'programs'} and skipped ${selectedPrograms.length - deleted.length}.`,
+            details,
+          )
+        } else {
+          makeSummary('warning', 'No selected programs were permanently deleted.', details)
+        }
+      }
+    } else {
+      makeSummary('danger', 'Unknown bulk action.')
+    }
+  }
+}
+
 let programsQuery = supabase
   .from('programs')
   .select(
-    'id, title, slug, content_status, degree_level_id, university_id, primary_subject_id, country_id, created_at, official_url, tuition_min_amount, tuition_max_amount',
-    { count: 'exact' }
+    'id, title, slug, content_status, indexing_status, degree_level_id, university_id, primary_subject_id, country_id, created_at, official_url, tuition_min_amount, tuition_max_amount',
+    { count: 'exact' },
   )
 
 if (searchTerm) programsQuery = programsQuery.ilike('title', `%${searchTerm}%`)
@@ -91,13 +286,33 @@ if (selectedCountryId) programsQuery = programsQuery.eq('country_id', selectedCo
 const programsRes = await programsQuery.order('created_at', { ascending: selectedSort === 'oldest' })
 
 const rows = (programsRes.data ?? []) as ProgramRow[]
-const totalCount = programsRes.count ?? rows.length
 const error = programsRes.error
-
 const degreeLevelMap = new Map(degreeLevels.map(option => [option.id, `${option.name} (${option.code})`]))
 const universityMap = new Map(universities.map(option => [option.id, option.name]))
 const subjectMap = new Map(subjects.map(option => [option.id, option.name]))
 const countryMap = new Map(countries.map(option => [option.id, option.name]))
+const duplicateGroups = buildProgramDuplicateGroupIndex((duplicateScanRes.data ?? []) as Array<{
+  id: string
+  title: string
+  university_id: string
+  degree_level_id: string
+}>)
+
+const rowsWithDuplicateMeta = rows
+  .map(row => {
+    const duplicateKey = getProgramDuplicateKey(row)
+    const duplicateIds = duplicateGroups.get(duplicateKey) ?? []
+    return {
+      ...row,
+      duplicateGroupSize: duplicateIds.length,
+      duplicateKey,
+      isDuplicate: duplicateIds.length > 1,
+    }
+  })
+  .filter(row => !duplicatesOnly || row.isDuplicate)
+
+const totalCount = rowsWithDuplicateMeta.length
+const duplicateVisibleCount = rowsWithDuplicateMeta.filter(row => row.isDuplicate).length
 
 const activeFilterCount = [
   searchTerm,
@@ -107,9 +322,9 @@ const activeFilterCount = [
   selectedSubjectId,
   selectedCountryId,
   selectedSort === 'oldest' ? selectedSort : '',
+  duplicatesOnly ? 'duplicates' : '',
 ].filter(Boolean).length
 
-const currentListPath = Astro.url.search ? `${Astro.url.pathname}${Astro.url.search}` : ''
 const buildEditHref = (id: string) =>
   currentListPath
     ? `/admin/programs/${id}?returnTo=${encodeURIComponent(currentListPath)}`
@@ -118,18 +333,34 @@ const buildEditHref = (id: string) =>
 const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 const selectClass = inputClass + ' bg-white'
 const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
+const summaryToneClass: Record<SummaryTone, string> = {
+  success: 'border-green-200 bg-green-50 text-green-800',
+  warning: 'border-amber-200 bg-amber-50 text-amber-900',
+  danger: 'border-red-200 bg-red-50 text-red-800',
+}
 ---
 <AdminLayout title="Programs — DegreeWiki Admin" activePath="/admin/programs" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6 gap-3">
     <div>
       <h1 class="text-xl font-bold text-gray-900">Programs</h1>
-      <p class="text-sm text-gray-500 mt-1">Review imported programs with URL-driven filters and keep context as you work.</p>
+      <p class="text-sm text-gray-500 mt-1">Review imports, isolate duplicate groups, and archive or clean up obvious pre-launch test records safely.</p>
     </div>
     <a href="/admin/programs/new"
       class="shrink-0 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
       + New Program
     </a>
   </div>
+
+  {summary && (
+    <div class={`mb-6 rounded-lg border px-4 py-3 text-sm ${summaryToneClass[summary.tone]}`}>
+      <p class="font-medium">{summary.title}</p>
+      {summary.details.length > 0 && (
+        <ul class="mt-2 space-y-1 text-xs">
+          {summary.details.map(detail => <li>{detail}</li>)}
+        </ul>
+      )}
+    </div>
+  )}
 
   <div class={filterCardClass}>
     <form method="get" class="space-y-4">
@@ -206,6 +437,13 @@ const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
             ))}
           </select>
         </div>
+
+        <div class="flex items-end">
+          <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" name="duplicates" value="1" checked={duplicatesOnly} class="h-4 w-4 rounded border-gray-300 text-blue-600" />
+            Duplicate groups only
+          </label>
+        </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -221,8 +459,15 @@ const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
         >
           Clear
         </a>
+        <a
+          href="/admin/programs?duplicates=1"
+          class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+          Duplicate cleanup view
+        </a>
         <p class="text-sm text-gray-500">
           Showing {totalCount.toLocaleString()} {totalCount === 1 ? 'program' : 'programs'}
+          {duplicateVisibleCount > 0 && ` · ${duplicateVisibleCount.toLocaleString()} duplicate candidates visible`}
         </p>
       </div>
     </form>
@@ -246,55 +491,200 @@ const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
     </div>
   )}
 
-  {!error && rows.length > 0 && (
-    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-      <table class="w-full text-sm text-left">
-        <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
-          <tr>
-            <th class="px-4 py-3">Title</th>
-            <th class="px-4 py-3">University</th>
-            <th class="px-4 py-3">Level</th>
-            <th class="px-4 py-3">Status</th>
-            <th class="px-4 py-3">Created</th>
-            <th class="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(row => (
-            <tr class="border-b border-gray-100 align-top hover:bg-gray-50">
-              <td class="px-4 py-3">
-                <div class="font-medium text-gray-900">{row.title}</div>
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                  <span class="font-mono">{row.slug}</span>
-                  {row.primary_subject_id && subjectMap.get(row.primary_subject_id) && (
-                    <span>{subjectMap.get(row.primary_subject_id)}</span>
-                  )}
-                  {!row.official_url && (
-                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing official link</span>
-                  )}
-                  {row.tuition_min_amount === null && row.tuition_max_amount === null && (
-                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing tuition</span>
-                  )}
+  {!error && rowsWithDuplicateMeta.length > 0 && (
+    <form method="post" data-program-bulk-actions>
+      <input type="hidden" name="currentListPath" value={currentListPath} />
+      {rowsWithDuplicateMeta.map(row => <input type="hidden" name="visible_ids" value={row.id} />)}
+
+      <div class="mb-4 rounded-lg border border-gray-200 bg-white p-4">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-gray-900">Bulk cleanup actions</h2>
+            <p class="mt-1 text-sm text-gray-500">
+              Bulk actions apply only to selected visible rows on this page. Archive and restore keep verification status unchanged.
+            </p>
+            <p class="mt-2 text-xs text-gray-500" data-selected-count>0 visible rows selected.</p>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-select-visible
+              class="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Select visible
+            </button>
+            <button
+              type="button"
+              data-clear-selection
+              class="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Clear selection
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+          <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Archive selected</h3>
+            <p class="mt-2 text-xs text-gray-600">Sets <code>content_status</code> to archived and resets <code>indexing_status</code> to draft. No delete happens here.</p>
+            <button
+              type="submit"
+              name="_action"
+              value="archive_selected"
+              class="mt-3 w-full px-3 py-2 text-sm font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700"
+            >
+              Archive Selected
+            </button>
+          </div>
+
+          <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Restore selected</h3>
+            <p class="mt-2 text-xs text-gray-600">Restores archived programs to draft and resets <code>indexing_status</code> to draft without auto-publishing them.</p>
+            <button
+              type="submit"
+              name="_action"
+              value="restore_selected"
+              class="mt-3 w-full px-3 py-2 text-sm font-medium bg-slate-700 text-white rounded-md hover:bg-slate-800"
+            >
+              Restore Selected
+            </button>
+          </div>
+
+          <div class="rounded-lg border border-red-200 bg-red-50 p-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-red-700">Hard delete selected</h3>
+            <p class="mt-2 text-xs text-red-700">
+              Super-admin only. Intended for obvious pre-launch duplicate or test records. Shared university rows and shared media assets are not deleted.
+            </p>
+            {superAdmin ? (
+              <>
+                <label class="mt-3 flex items-start gap-2 text-xs text-red-800">
+                  <input type="checkbox" name="hard_delete_confirm" class="mt-0.5 h-4 w-4 rounded border-red-300 text-red-600" />
+                  <span>I understand this permanently deletes selected programs and is intended for pre-launch duplicate/test cleanup.</span>
+                </label>
+                <div class="mt-3">
+                  <label for="hard_delete_text" class="block text-xs font-medium text-red-800 mb-1">Type DELETE to confirm</label>
+                  <input id="hard_delete_text" name="hard_delete_text" type="text" class="w-full rounded-md border border-red-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500" />
                 </div>
-              </td>
-              <td class="px-4 py-3 text-xs text-gray-600">
-                <div>{universityMap.get(row.university_id) ?? '—'}</div>
-                <div class="mt-1 text-gray-400">{countryMap.get(row.country_id) ?? '—'}</div>
-              </td>
-              <td class="px-4 py-3 text-xs text-gray-500">{degreeLevelMap.get(row.degree_level_id) ?? '—'}</td>
-              <td class="px-4 py-3">
-                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
-                  {formatEnumLabel(row.content_status)}
-                </span>
-              </td>
-              <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleDateString()}</td>
-              <td class="px-4 py-3 text-right">
-                <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
-              </td>
+                <button
+                  type="submit"
+                  name="_action"
+                  value="hard_delete_selected"
+                  class="mt-3 w-full px-3 py-2 text-sm font-medium bg-red-700 text-white rounded-md hover:bg-red-800"
+                >
+                  Permanently Delete Selected
+                </button>
+              </>
+            ) : (
+              <p class="mt-3 text-xs text-red-800">Hard delete controls are shown only to super admins.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-4 py-3 w-12">
+                <span class="sr-only">Select</span>
+              </th>
+              <th class="px-4 py-3">Title</th>
+              <th class="px-4 py-3">University</th>
+              <th class="px-4 py-3">Level</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Created</th>
+              <th class="px-4 py-3"></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rowsWithDuplicateMeta.map(row => (
+              <tr class:list={[
+                'border-b border-gray-100 align-top hover:bg-gray-50',
+                row.isDuplicate && 'bg-amber-50/40',
+              ]}>
+                <td class="px-4 py-3 align-middle">
+                  <input
+                    type="checkbox"
+                    name="selected_ids"
+                    value={row.id}
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    data-program-select
+                  />
+                </td>
+                <td class="px-4 py-3">
+                  <div class="font-medium text-gray-900">{row.title}</div>
+                  <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                    <span class="font-mono">{row.slug}</span>
+                    {row.isDuplicate && (
+                      <span class="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                        Duplicate group · {row.duplicateGroupSize} rows
+                      </span>
+                    )}
+                    {row.primary_subject_id && subjectMap.get(row.primary_subject_id) && (
+                      <span>{subjectMap.get(row.primary_subject_id)}</span>
+                    )}
+                    {!row.official_url && (
+                      <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing official link</span>
+                    )}
+                    {row.tuition_min_amount === null && row.tuition_max_amount === null && (
+                      <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing tuition</span>
+                    )}
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">
+                  <div>{universityMap.get(row.university_id) ?? '—'}</div>
+                  <div class="mt-1 text-gray-400">{countryMap.get(row.country_id) ?? '—'}</div>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500">{degreeLevelMap.get(row.degree_level_id) ?? '—'}</td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-col gap-1">
+                    <span class={`inline-flex w-fit items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
+                      {formatEnumLabel(row.content_status)}
+                    </span>
+                    <span class="text-[11px] text-gray-400">Indexing: {formatEnumLabel(row.indexing_status)}</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-400">{new Date(row.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-3 text-right">
+                  <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </form>
   )}
+
+  <script is:inline>
+    const bulkRoot = document.querySelector('[data-program-bulk-actions]')
+    if (bulkRoot) {
+      const checkboxes = Array.from(bulkRoot.querySelectorAll('input[data-program-select]'))
+      const counter = bulkRoot.querySelector('[data-selected-count]')
+      const selectVisibleButton = bulkRoot.querySelector('[data-select-visible]')
+      const clearSelectionButton = bulkRoot.querySelector('[data-clear-selection]')
+
+      const updateCounter = () => {
+        const count = checkboxes.filter((checkbox) => checkbox.checked).length
+        if (counter) counter.textContent = `${count} visible row${count === 1 ? '' : 's'} selected.`
+      }
+
+      for (const checkbox of checkboxes) {
+        checkbox.addEventListener('change', updateCounter)
+      }
+
+      selectVisibleButton?.addEventListener('click', () => {
+        for (const checkbox of checkboxes) checkbox.checked = true
+        updateCounter()
+      })
+
+      clearSelectionButton?.addEventListener('click', () => {
+        for (const checkbox of checkboxes) checkbox.checked = false
+        updateCounter()
+      })
+
+      updateCounter()
+    }
+  </script>
 </AdminLayout>
