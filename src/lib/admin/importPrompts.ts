@@ -31,9 +31,14 @@ Use official university program pages as sources.
 
 ${SHARED_RULES}
 - degree_level_code must be one of: bachelor, master, phd, foundation, diploma, certificate, associate
-- tuition_amount: annual fee as a plain number (no currency, no commas). Use null if not found.
-- deadline: YYYY-MM-DD format. Use null if rolling admissions or not specified.
-- language: primary language of instruction.
+- primary_subject should use the closest existing subject name when obvious (for example "Computer Science"). Do not invent new subjects.
+- study_mode must be one of: full_time, part_time, online, hybrid, or null.
+- delivery_mode must be one of: on_campus, online, hybrid, distance, or null.
+- tuition_period must be one of: per_year, per_semester, total, per_credit, or null.
+- Use official_program_url for the canonical program page and official_application_url when available.
+- You may include source_urls as an array of useful source links.
+- Do not include content_status or verification_status.
+- Do not include intakes or deadlines arrays in this phase.
 - staging_university_id: Do not include this field in your JSON response — it is a batch-internal UUID that only exists after universities are staged in DegreeWiki and cannot be known in advance. The admin will add it manually to each program object before importing.
 - One object per program.
 
@@ -42,9 +47,30 @@ Required schema:
   {
     "title": "Full program name",
     "degree_level_code": "master",
-    "language": "English",
-    "tuition_amount": null,
-    "deadline": null
+    "degree_award": null,
+    "primary_subject": null,
+    "language_of_instruction": null,
+    "study_mode": null,
+    "delivery_mode": null,
+    "duration_months": null,
+    "tuition_min_amount": null,
+    "tuition_max_amount": null,
+    "tuition_currency": null,
+    "tuition_period": null,
+    "tuition_notes": null,
+    "application_fee_amount": null,
+    "application_fee_currency": null,
+    "application_fee_notes": null,
+    "official_program_url": null,
+    "official_application_url": null,
+    "admission_requirements_text": null,
+    "gpa_requirements_text": null,
+    "english_requirements_text": null,
+    "ielts_min_score": null,
+    "toefl_min_score": null,
+    "curriculum_or_modules_text": null,
+    "career_outcomes_text": null,
+    "source_urls": []
   }
 ]
 
@@ -105,6 +131,8 @@ ${SHARED_RULES}
 - tuition_period may be year, semester, total, credit, or null.
 - Use official_program_url for the canonical program page.
 - source_confidence must be high, medium, low, or unknown.
+- Do not include intakes or deadlines arrays in this phase.
+- Do not include content_status or verification_status.
 
 Required schema:
 {
