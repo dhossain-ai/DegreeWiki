@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { resolveProgramProductionMatches } from './importMerge'
 
 export type QualityWarning = {
   rowId: string
@@ -196,34 +197,29 @@ export async function detectProgProductionMatches(
   const warnings: QualityWarning[] = []
   if (rows.length === 0) return warnings
 
-  const titleToRowIds = new Map<string, string[]>()
+  const matchResolutions = await resolveProgramProductionMatches(supabase, rows)
+
   for (const row of rows) {
-    if (!row.extracted_title?.trim()) continue
-    const key = normalizeForMatch(row.extracted_title)
-    const ids = titleToRowIds.get(key) ?? []
-    ids.push(row.id)
-    titleToRowIds.set(key, ids)
-  }
+    const resolution = matchResolutions.get(row.id)
+    if (!resolution) continue
 
-  const checks = await Promise.all(
-    [...titleToRowIds.keys()].map(async normTitle => {
-      const { data } = await supabase
-        .from('programs')
-        .select('id, title')
-        .ilike('title', normTitle)
-        .limit(1)
-      return { normTitle, match: (data?.[0] as { id: string; title: string } | undefined) ?? null }
-    }),
-  )
-
-  for (const { normTitle, match } of checks) {
-    if (!match) continue
-    for (const rowId of titleToRowIds.get(normTitle) ?? []) {
+    if (resolution.status === 'matched') {
+      const match = resolution.matches[0]
       warnings.push({
-        rowId,
+        rowId: row.id,
         stagingTable: 'staging_programs',
         errorType: 'possible_production_match',
-        errorMessage: `Possible match: production program "${match.title}" already exists.`,
+        errorMessage: `Possible exact match: production program "${match.title}" (${match.slug}) already exists for the same university and degree level.`,
+      })
+      continue
+    }
+
+    if (resolution.status === 'ambiguous') {
+      warnings.push({
+        rowId: row.id,
+        stagingTable: 'staging_programs',
+        errorType: 'possible_production_match',
+        errorMessage: 'Possible exact match: multiple production programs already exist with the same title, university, and degree level. Link the intended program before updating or skipping.',
       })
     }
   }
