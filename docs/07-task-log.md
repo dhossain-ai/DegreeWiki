@@ -31,6 +31,59 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 66E: Program Import Field Mapping Hardening
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Harden the existing no-migration program import mapping without changing JSON shapes, merge defaults, RLS boundaries, or bulk-action semantics.
+- Improve alias coverage, validation warnings, primary-subject handling, staged preview clarity, and prompt/template alignment while explicitly deferring intake import.
+
+Files modified:
+- `src/lib/admin/importMerge.ts`
+- `src/lib/admin/importValidation.ts`
+- `src/lib/admin/importParse.ts`
+- `src/lib/admin/importTemplates.ts`
+- `src/lib/admin/importPrompts.ts`
+- `src/pages/admin/imports/programs.astro`
+- `src/pages/admin/imports/[id].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+- `docs/10-import-workflow.md`
+
+Implementation:
+- Expanded the rich-field alias path in `mergeProgram()` so the existing `raw_data -> programs` mapping now accepts additional safe variants for degree award, language, study mode, delivery mode, duration, tuition, application fee, official/application URLs, admissions, GPA, curriculum, and career fields.
+- Hardened `textField()` to ignore nested objects instead of stringifying them into `[object Object]`, and added support for structured `english_requirements` JSON when it is already provided as an object.
+- Added reusable primary-subject resolution that first exact-matches `subjects.name` case-insensitively, then falls back to a safe exact `subjects.slug` match. Unknown or ambiguous subjects now warn and are ignored; no subjects are auto-created.
+- Added program validation warnings for missing or unsupported `degree_level_code`, and for invalid optional `study_mode`, `delivery_mode`, and `tuition_period` values. These optional enum-like values warn and are ignored instead of crashing or blocking merge.
+- Kept JSON `content_status` and `verification_status` ignored. Programs still merge only through the existing reviewed merge flow and still create draft, unverified, indexing-draft production rows.
+- Kept deadline/intake import deferred. The parser can still surface deadline-like text for review context, but Phase 66E does not create `program_intakes`.
+- Improved staged program preview on `/admin/imports/[id]` so rows now summarize language, duration, tuition range/currency/period, primary subject, source URL count, official/application URLs, and short admissions/curriculum/career snippets before raw JSON.
+- Improved the dedicated `/admin/imports/programs` client preview so it now shows a richer sample-field summary from the first parsed program object.
+- Updated the flat program template and AI prompt so they request the rich fields that the hardened merge path already supports, explicitly warn that status/verification are ignored, and explicitly exclude intake arrays for this phase.
+- Updated the import workflow docs to match the current supported program field set and the deferred-intakes rule.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No direct production write outside the existing merge flow.
+- No subject auto-creation.
+- No `program_intakes` import.
+- No trust in JSON `content_status` or `verification_status`.
+
+Validation:
+- `npm run build`: PASS.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS.
+
+Notes:
+- `data_sources` attachment remains best-effort and deduped by normalized URL. Friendly warnings are preserved when source attachment fails.
+- Intake/deadline import remains intentionally deferred until a later phase introduces an explicit intake schema.
+
 ## 2026-06-26 - Phase 66C2: Import Batch Bulk Merge + Publish + Mark All Actions
 
 Tool:
