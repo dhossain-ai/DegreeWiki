@@ -31,6 +31,50 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 67C: Program Import Bulk Update Existing Enrichment
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Add a safe second-pass enrichment workflow for program re-imports so richer JSON can patch exact existing production programs in bulk without creating duplicates.
+
+Files modified:
+- `src/lib/admin/importMerge.ts`
+- `src/pages/admin/imports/[id].astro`
+- `docs/10-import-workflow.md`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+Implementation:
+- Added a dedicated `bulkUpdateExistingMatchedPrograms()` helper for program staging rows.
+- Bulk enrichment supports the same two batch scopes already used by the import page pattern: selected visible rows and all matching rows in the current batch/filter after confirmation.
+- Matching still requires the exact safe rule already used elsewhere: normalized title plus linked production university plus resolved degree level.
+- Bulk enrichment never creates production programs. Rows with no exact match are skipped, ambiguous exact matches are skipped for manual handling, and only rows with one exact match can proceed.
+- Program patching now reuses a shared helper so single-row `Update Existing` and bulk enrichment apply the same empty-field-only allowlist.
+- Tightened the program update allowlist to the fields explicitly approved for this phase and stopped treating `english_requirements` as update-existing patchable in this workflow.
+- Successful enrichment updates keep the existing staging behavior of marking the row `merged` and linking `match_program_id`; skipped rows remain unchanged for manual follow-up.
+- Source URLs still attach best-effort only, dedupe against existing `data_sources` URLs on the target program, and surface warning counts without failing the whole batch action.
+- Added a dedicated enrichment-pass panel on `/admin/imports/[id]` with confirmation copy that explains the intended second-research-pass workflow and the no-duplicate / empty-field-only / no-publish / no-verify rules.
+- Added batch summary reporting for updated rows, skipped no exact match, skipped ambiguous match, skipped no safe fields, failed, and source-link follow-up counts.
+- Updated the import workflow docs with an explicit "Enrichment pass" section.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No subject auto-creation.
+- No `program_intakes` import.
+- No trust in JSON `content_status` or `verification_status`.
+- No auto-overwrite of non-empty production fields.
+
+Validation:
+- `npm run build`: PASS.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS (no matches).
+
 ## 2026-06-26 - Phase 67B: Program Import Final QA + Prompt Tightening
 
 Tool:
