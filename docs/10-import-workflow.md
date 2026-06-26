@@ -107,8 +107,15 @@ Minimum operational fields:
     "title": "Example Master of Computing",
     "degree_level_code": "master",
     "staging_university_id": "00000000-0000-0000-0000-000000000000",
-    "language": "English",
-    "tuition_amount": 25000
+    "language_of_instruction": "English",
+    "study_mode": "full_time",
+    "delivery_mode": "on_campus",
+    "duration_months": 24,
+    "tuition_min_amount": 25000,
+    "tuition_currency": "EUR",
+    "tuition_period": "per_year",
+    "official_program_url": "https://www.example.edu/programs/master-of-computing",
+    "source_urls": []
   }
 ]
 ```
@@ -120,9 +127,30 @@ Fields:
   `degree_levels.code`.
 - `staging_university_id`: required for merge. Must point to a staged university
   in the same batch whose row has already been merged.
-- `language`: optional.
-- `tuition_amount`: optional numeric value.
-- `deadline`: optional text value.
+- `primary_subject` / `subject_area` / `subject`: optional. Exact subject-name
+  match is preferred; unknown or ambiguous values warn and are ignored.
+- `study_mode`: optional. Supported values: `full_time`, `part_time`,
+  `online`, `hybrid`. Invalid values warn and are ignored.
+- `delivery_mode`: optional. Supported values: `on_campus`, `online`,
+  `hybrid`, `distance`. Invalid values warn and are ignored.
+- `language` / `language_of_instruction`: optional.
+- `duration_months`: optional positive whole number.
+- `tuition_*`: optional. Supported directly on production programs.
+- `application_fee_*`: optional. Supported directly on production programs.
+- `official_program_url` / `official_url`: optional. Maps to
+  `programs.official_url` and can also be attached to `data_sources`.
+- `official_application_url` / `application_url`: optional. Maps to
+  `programs.application_url` and can also be attached to `data_sources`.
+- `admission_requirements_text` / `admission_requirements`: optional.
+- `gpa_requirements_text` / `gpa_requirements`: optional.
+- `curriculum_or_modules_text` / `curriculum_summary`: optional.
+- `career_outcomes_text` / `career_outcomes`: optional.
+- `english_requirements_text`, `ielts_min_score`, `toefl_min_score`, or
+  structured `english_requirements`: optional.
+- `source_urls`: optional. Best-effort attached to `data_sources` after merge.
+- `content_status` / `verification_status`: ignored if present.
+- `deadline` / `application_deadline`: staging-only context for review. Phase
+  66E does not create `program_intakes`.
 
 ### Scholarships
 
@@ -302,18 +330,19 @@ and re-import through the approved process.
 
 ## Post-Merge Data Source Step
 
-After each successful merge, add a production data source record through the
-admin UI.
+Program merges now try to attach source links automatically from
+`official_program_url`, `official_application_url`, `official_tuition_url`, and
+`source_urls`.
 
-Use the merged entity's admin edit page and Data Sources panel:
+Important notes:
 
-- `source_type`: `official_university`
-- `confidence_level`: `high`
-- `is_primary_source`: `true`
-- URL: the official source page used for manual verification
+- Source attachment is best-effort and respects existing `data_sources` RLS.
+- URL duplicates are removed before insert.
+- A source-link failure does not roll back the already-created draft program.
+- If source attachment fails, add the missing links manually from the merged
+  program's admin edit page.
 
-The data source step is required so future verification work can trace every
-real production record back to an official source.
+Use the program edit page Data Sources panel for any manual additions or fixes.
 
 ## Troubleshooting
 
