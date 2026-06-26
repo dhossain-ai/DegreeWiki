@@ -31,6 +31,53 @@ Older detail lives in `docs/archive/`.
 - Phase 55E: rebuilt the programs listing page into a proper discovery experience.
 - Phase 55F: completed the directory/detail-page redesign bundle for universities, scholarships, guides, and program detail pages.
 
+## 2026-06-26 - Phase 67A: Program Duplicate Cleanup + Safe Delete
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Add safe admin cleanup tools for existing duplicate/test program rows without changing schema, RLS architecture, or public program behavior.
+- Support archive/unpublish as the normal safe path and super-admin hard delete as a pre-launch duplicate cleanup path.
+
+Files modified:
+- `src/lib/admin/programCleanup.ts`
+- `src/pages/admin/programs/index.astro`
+- `src/pages/admin/programs/[id].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+- `docs/10-import-workflow.md`
+
+Implementation:
+- Added shared program-cleanup helpers for duplicate-key normalization, duplicate-group detection, super-admin detection, hard-delete preflight, and safe program-scoped cleanup deletes.
+- Reworked `/admin/programs` so it can show a duplicate-focused cleanup view through `?duplicates=1`, while preserving the existing GET filter flow for title, university, status, degree level, subject, country, and sort.
+- Duplicate grouping now uses normalized `title` plus `university_id` plus `degree_level_id`; rows in duplicate groups are visually marked and the duplicate-only view filters the current result set down to rows whose key is duplicated anywhere in production.
+- Added row checkboxes plus safe `Select visible` / `Clear selection` helpers that affect only currently rendered rows.
+- Added bulk archive selected and restore selected actions. Archive sets `content_status = archived` and `indexing_status = draft`; restore moves archived rows back to `draft` and also sets `indexing_status = draft`. Neither flow changes `verification_status`.
+- Added super-admin-only bulk hard delete with both required safeguards: a confirmation checkbox and typed `DELETE`.
+- Hard delete now runs a preflight per selected program. It skips rows referenced by `ai_finder_program_matches`, or by immutable `analytics_events` / `outbound_clicks` history, and tells the admin to archive those rows instead.
+- When hard delete is allowed, cleanup removes only safe program-scoped rows through existing RLS before deleting the program itself: `scholarship_programs`, `data_sources`, `saved_items`, `user_reports`, `verification_events`, and `data_quality_checks`. Existing `program_subjects` and `program_intakes` still clean up through their database cascades.
+- Added matching single-record cleanup controls on `/admin/programs/[id]`: archive, restore-to-draft when archived, and a super-admin-only hard-delete panel with the same confirmation rules.
+- Hard delete does not touch shared university rows, shared Cloudinary/media assets, or other shared entities. The program record may drop its own FK reference on delete, but asset records themselves are never deleted here.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No shared university delete.
+- No shared media delete.
+
+Validation:
+- `npm run build`: PASS.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS (no matches).
+
+Notes:
+- Hard delete stays intentionally conservative: immutable analytics/outbound logs block permanent delete even though they are polymorphic rather than FK-backed, because the current RLS model does not allow safe cleanup there.
+- Duplicate cleanup is now available directly in admin, but archive remains the recommended default once the site is public.
+
 ## 2026-06-26 - Phase 66E: Program Import Field Mapping Hardening
 
 Tool:
