@@ -4,7 +4,14 @@ import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/gu
 import { IMPORT_STATUS_BADGE, BATCH_TYPE_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
 import { parseRawData, validateStagedRecord, type StagedEntityType } from '../../../lib/admin/importValidation'
 import { applyReviewAction, applyReviewActionToMatching } from '../../../lib/admin/importReview'
-import { bulkMergeApprovedPrograms, bulkPublishMergedPrograms, mergeApprovedRow, type MergeAction } from '../../../lib/admin/importMerge'
+import {
+  buildProgramImportPreview,
+  bulkMergeApprovedPrograms,
+  bulkPublishMergedPrograms,
+  mergeApprovedRow,
+  resolveProgramPrimarySubject,
+  type MergeAction,
+} from '../../../lib/admin/importMerge'
 import { parseBulkJson, parseResearchPackJson } from '../../../lib/admin/importParse'
 import { IMPORT_TEMPLATES, TEMPLATE_FIELD_NOTES, type EntityTemplateType } from '../../../lib/admin/importTemplates'
 import { AI_PROMPTS } from '../../../lib/admin/importPrompts'
@@ -190,6 +197,20 @@ function stagedValidationValues(resolvedFields: Record<string, string | number |
   }
 }
 
+async function getProgramValidationWarnings(
+  rawData: Record<string, unknown>,
+  resolvedFields: Record<string, string | number | null>,
+): Promise<string[]> {
+  const subjectResolution = await resolveProgramPrimarySubject(supabase, rawData)
+  return validateStagedRecord('programs', stagedValidationValues(resolvedFields), {
+    rawData,
+    programPrimarySubject: {
+      status: subjectResolution.status,
+      input: subjectResolution.input,
+    },
+  }).warnings
+}
+
 async function resolveCountryCodeFromRaw(rawData: Record<string, unknown>): Promise<string | null> {
   const rawCountry = rawData.country
   if (rawCountry === null || rawCountry === undefined) return null
@@ -349,7 +370,7 @@ async function importResearchPack(jsonInput: string): Promise<
     }
     const rowWarnings = [
       ...row.parseWarnings,
-      ...validateStagedRecord('programs', stagedValidationValues(resolvedFields)).warnings,
+      ...await getProgramValidationWarnings(row.rawData, resolvedFields),
     ]
     const importStatus = rowWarnings.length === 0 ? 'validated' : 'pending'
 
@@ -755,7 +776,9 @@ if (Astro.request.method === 'POST') {
             extracted_content: String(resolvedFields.extracted_content ?? ''),
           }
 
-          const { warnings: validationWarnings } = validateStagedRecord(entityType, vals)
+          const validationWarnings = entityType === 'programs'
+            ? await getProgramValidationWarnings(row.rawData, resolvedFields)
+            : validateStagedRecord(entityType, vals).warnings
           const allWarnings = [...rowWarnings, ...validationWarnings]
           const importStatus = allWarnings.length === 0 ? 'validated' : 'pending'
 
@@ -1230,7 +1253,16 @@ if (Astro.request.method === 'POST') {
             extracted_content: fv('extracted_content'),
           }
 
-          const { warnings } = validateStagedRecord(entityType, vals)
+          const warnings = entityType === 'programs'
+            ? await getProgramValidationWarnings(rawData, {
+                extracted_title: vals.extracted_title,
+                extracted_degree_level_code: vals.extracted_degree_level_code,
+                extracted_language: vals.extracted_language,
+                extracted_tuition_amount: vals.extracted_tuition_amount ? Number(vals.extracted_tuition_amount) : null,
+                extracted_deadline: vals.extracted_deadline,
+                staging_university_id: null,
+              })
+            : validateStagedRecord(entityType, vals).warnings
           const importStatus = warnings.length === 0 ? 'validated' : 'pending'
 
           let insertedId: string | null = null
@@ -3000,20 +3032,34 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                   )}
                 </td>
                 <td class="px-4 py-3">
-                  <details class="text-xs">
-                    <summary class="cursor-pointer text-gray-400 hover:text-gray-600">preview</summary>
-                    <div class="mt-1 space-y-1 rounded bg-gray-50 p-2 text-xs text-gray-600 max-w-[260px]">
-                      <p><span class="font-medium text-gray-700">Language:</span> {String(row.raw_data.language_of_instruction ?? row.raw_data.language ?? row.extracted_language ?? '—')}</p>
-                      <p><span class="font-medium text-gray-700">Tuition:</span> {String(row.raw_data.tuition_min_amount ?? row.raw_data.tuition_amount ?? row.extracted_tuition_amount ?? '—')}</p>
-                      <p><span class="font-medium text-gray-700">Deadline:</span> {String(row.raw_data.deadline ?? row.raw_data.application_deadline ?? '—')}</p>
-                      <p class="break-all"><span class="font-medium text-gray-700">Official URL:</span> {String(row.raw_data.official_program_url ?? row.raw_data.official_url ?? '—')}</p>
-                      <p class="break-all"><span class="font-medium text-gray-700">Application URL:</span> {String(row.raw_data.official_application_url ?? row.raw_data.application_url ?? '—')}</p>
-                    </div>
-                    <details class="mt-2">
-                      <summary class="cursor-pointer text-gray-400 hover:text-gray-600">raw JSON</summary>
-                      <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[260px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
-                    </details>
-                  </details>
+                  {(() => {
+                    const preview = buildProgramImportPreview(row.raw_data, {
+                      language: row.extracted_language,
+                      tuitionAmount: row.extracted_tuition_amount,
+                    })
+
+                    return (
+                      <details class="text-xs">
+                        <summary class="cursor-pointer text-gray-400 hover:text-gray-600">preview</summary>
+                        <div class="mt-1 space-y-1 rounded bg-gray-50 p-2 text-xs text-gray-600 max-w-[280px]">
+                          <p><span class="font-medium text-gray-700">Language:</span> {preview.language ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Duration:</span> {preview.durationLabel ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Tuition:</span> {preview.tuitionLabel ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Primary subject:</span> {preview.primarySubject ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Source URLs:</span> {preview.sourceUrlCount}</p>
+                          <p class="break-all"><span class="font-medium text-gray-700">Official URL:</span> {preview.officialUrl ?? '—'}</p>
+                          <p class="break-all"><span class="font-medium text-gray-700">Application URL:</span> {preview.applicationUrl ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Admissions:</span> {preview.admissionSnippet ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Curriculum:</span> {preview.curriculumSnippet ?? '—'}</p>
+                          <p><span class="font-medium text-gray-700">Career:</span> {preview.careerSnippet ?? '—'}</p>
+                        </div>
+                        <details class="mt-2">
+                          <summary class="cursor-pointer text-gray-400 hover:text-gray-600">raw JSON</summary>
+                          <pre class="mt-1 text-xs text-gray-600 bg-gray-50 p-2 rounded overflow-x-auto max-w-[280px]">{JSON.stringify(row.raw_data, null, 2)}</pre>
+                        </details>
+                      </details>
+                    )
+                  })()}
                 </td>
               </tr>
             ))}
