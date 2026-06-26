@@ -3,6 +3,7 @@ import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import { toSlug } from '../../../lib/admin/slug'
 import { CONTENT_STATUS_BADGE, VERIFICATION_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import { hardDeleteProgramById, preflightProgramHardDelete, userIsSuperAdmin } from '../../../lib/admin/programCleanup'
 import {
   type FormErrors,
   validateRequired,
@@ -17,6 +18,7 @@ if (guard.type === 'redirect') return Astro.redirect(guard.to)
 if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
 const { user, supabase } = guard
+const isSuperAdmin = await userIsSuperAdmin(supabase)
 const { id } = Astro.params
 if (!id) return new Response('Not found.', { status: 404 })
 
@@ -122,6 +124,8 @@ const reviewStateFromContentStatus = (status: string): ReviewState => {
 }
 
 let returnTo = normalizeReturnTo(Astro.url.searchParams.get('returnTo'))
+let actionNotice = Astro.url.searchParams.get('notice')?.trim() ?? ''
+let actionNoticeLevel = Astro.url.searchParams.get('noticeLevel')?.trim() ?? 'success'
 
 const { data: existing, error: loadError } = await supabase
   .from('programs')
@@ -286,8 +290,64 @@ let sourceError = ''
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
   returnTo = normalizeReturnTo(String(form.get('returnTo') ?? '')) || returnTo
+  const cleanupAction = String(form.get('_action') ?? '').trim()
 
-  if (form.get('_action') === 'add_source') {
+  if (cleanupAction === 'archive_program') {
+    const { error } = await supabase
+      .from('programs')
+      .update({ content_status: 'archived', indexing_status: 'draft' })
+      .eq('id', id)
+
+    if (error) {
+      serverError = 'Could not archive this program right now.'
+    } else {
+      const redirectHref = returnTo
+        ? `${Astro.url.pathname}?returnTo=${encodeURIComponent(returnTo)}&notice=${encodeURIComponent('Program archived.')}&noticeLevel=success`
+        : `${Astro.url.pathname}?notice=${encodeURIComponent('Program archived.')}&noticeLevel=success`
+      return Astro.redirect(redirectHref)
+    }
+  } else if (cleanupAction === 'restore_program') {
+    const { error } = await supabase
+      .from('programs')
+      .update({ content_status: 'draft', indexing_status: 'draft' })
+      .eq('id', id)
+
+    if (error) {
+      serverError = 'Could not restore this program to draft right now.'
+    } else {
+      const redirectHref = returnTo
+        ? `${Astro.url.pathname}?returnTo=${encodeURIComponent(returnTo)}&notice=${encodeURIComponent('Program restored to draft.')}&noticeLevel=success`
+        : `${Astro.url.pathname}?notice=${encodeURIComponent('Program restored to draft.')}&noticeLevel=success`
+      return Astro.redirect(redirectHref)
+    }
+  } else if (cleanupAction === 'hard_delete_program') {
+    const deleteConfirmed = form.get('hard_delete_confirm') === 'on'
+    const typedConfirmation = String(form.get('hard_delete_text') ?? '').trim()
+
+    if (!isSuperAdmin) {
+      serverError = 'Hard delete is limited to super admins.'
+    } else if (!deleteConfirmed || typedConfirmation !== 'DELETE') {
+      serverError = 'Tick the permanent-delete checkbox and type DELETE before trying again.'
+    } else {
+      const preflight = await preflightProgramHardDelete(supabase, [id])
+      const current = preflight[0]
+
+      if (!current) {
+        serverError = 'Could not verify delete safety for this program right now.'
+      } else if (current.blockingReasons.length > 0) {
+        serverError = current.blockingReasons.join(' ')
+      } else {
+        const result = await hardDeleteProgramById(supabase, id)
+        if (!result.ok) {
+          serverError = result.message
+        } else {
+          const destination = returnTo || '/admin/programs'
+          const separator = destination.includes('?') ? '&' : '?'
+          return Astro.redirect(`${destination}${separator}notice=${encodeURIComponent('Program permanently deleted.')}&noticeLevel=success`)
+        }
+      }
+    }
+  } else if (cleanupAction === 'add_source') {
     const srcUrl = String(form.get('source_url') ?? '').trim()
     const sourceType = String(form.get('source_type') ?? 'third_party').trim() || 'third_party'
     const confidenceLevel = String(form.get('confidence_level') ?? 'unknown').trim() || 'unknown'
@@ -636,6 +696,11 @@ const errorClass = 'mt-1 text-xs text-red-600'
 const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 pb-1 border-b border-gray-200'
 const cardClass = 'rounded-lg border border-gray-200 bg-white p-4'
 const backToProgramsHref = returnTo || '/admin/programs'
+const noticeToneClass = actionNoticeLevel === 'danger'
+  ? 'border-red-200 bg-red-50 text-red-800'
+  : actionNoticeLevel === 'warning'
+    ? 'border-amber-200 bg-amber-50 text-amber-900'
+    : 'border-green-200 bg-green-50 text-green-800'
 ---
 <AdminLayout title={`Edit ${record.title} — DegreeWiki Admin`} activePath="/admin/programs" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6 gap-3">
@@ -645,6 +710,10 @@ const backToProgramsHref = returnTo || '/admin/programs'
     </div>
     <a href={backToProgramsHref} class="text-sm text-gray-500 hover:underline">← Back to Programs</a>
   </div>
+
+  {actionNotice && (
+    <div class={`mb-4 rounded-md border px-4 py-3 text-sm ${noticeToneClass}`}>{actionNotice}</div>
+  )}
 
   {serverError && (
     <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
@@ -1137,9 +1206,81 @@ const backToProgramsHref = returnTo || '/admin/programs'
           </div>
           <a href={backToProgramsHref} class="block text-center text-sm text-gray-500 hover:underline pt-1">Cancel</a>
         </div>
+
       </aside>
     </div>
   </form>
+
+  <div class="mt-8 max-w-6xl">
+    <div class={`${cardClass} space-y-4`}>
+      <div>
+        <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cleanup Actions</h2>
+        <p class="mt-1 text-sm text-gray-500">Archive is the safe default. Hard delete is pre-launch only, super-admin only, and never removes shared university rows or shared media assets.</p>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          {values.content_status === 'archived' ? (
+            <form method="post" class="space-y-3">
+              <input type="hidden" name="_action" value="restore_program" />
+              <input type="hidden" name="returnTo" value={returnTo} />
+              <p class="text-sm font-medium text-gray-900">Restore to draft</p>
+              <p class="text-xs text-gray-600">Bring this archived record back as a draft without publishing it.</p>
+              <button
+                type="submit"
+                class="w-full px-4 py-2 text-sm font-medium bg-slate-700 text-white rounded-md hover:bg-slate-800"
+              >
+                Restore To Draft
+              </button>
+            </form>
+          ) : (
+            <form method="post" class="space-y-3">
+              <input type="hidden" name="_action" value="archive_program" />
+              <input type="hidden" name="returnTo" value={returnTo} />
+              <p class="text-sm font-medium text-gray-900">Archive this program</p>
+              <p class="text-xs text-gray-600">Sets <code>content_status</code> to archived and resets <code>indexing_status</code> to draft while keeping verification status unchanged.</p>
+              <button
+                type="submit"
+                class="w-full px-4 py-2 text-sm font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700"
+              >
+                Archive Program
+              </button>
+            </form>
+          )}
+        </div>
+
+        <div class="rounded-lg border border-red-200 bg-red-50 p-4">
+          {isSuperAdmin ? (
+            <form method="post" class="space-y-3">
+              <input type="hidden" name="_action" value="hard_delete_program" />
+              <input type="hidden" name="returnTo" value={returnTo} />
+              <p class="text-sm font-medium text-red-900">Permanent delete</p>
+              <p class="text-xs text-red-800">Use only for obvious duplicate or test records before launch. AI Finder history and immutable analytics references will block deletion and should be archived instead.</p>
+              <label class="flex items-start gap-2 text-xs text-red-800">
+                <input type="checkbox" name="hard_delete_confirm" class="mt-0.5 h-4 w-4 rounded border-red-300 text-red-600" />
+                <span>I understand this permanently deletes selected programs and is intended for pre-launch duplicate/test cleanup.</span>
+              </label>
+              <div>
+                <label for="hard_delete_text" class="block text-xs font-medium text-red-800 mb-1">Type DELETE to confirm</label>
+                <input id="hard_delete_text" name="hard_delete_text" type="text" class="w-full rounded-md border border-red-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500" />
+              </div>
+              <button
+                type="submit"
+                class="w-full px-4 py-2 text-sm font-medium bg-red-700 text-white rounded-md hover:bg-red-800"
+              >
+                Permanently Delete Program
+              </button>
+            </form>
+          ) : (
+            <div class="space-y-2">
+              <p class="text-sm font-medium text-red-900">Permanent delete</p>
+              <p class="text-xs text-red-800">Hard delete is only available to super admins.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="mt-8 max-w-6xl">
     <div class={`${cardClass} border-t-0`}>
