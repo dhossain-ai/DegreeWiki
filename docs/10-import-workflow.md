@@ -38,6 +38,8 @@ What this flow does:
 - It detects exact duplicate re-imports by normalized title + university +
   degree level.
 - `Update Existing` fills empty allowlisted production fields only.
+- Bulk Update Existing Matched Programs fills empty allowlisted production
+  fields only on exact existing matches and never creates duplicates.
 
 ## Recommended Research Prompt
 
@@ -192,8 +194,33 @@ Use these actions after review:
 - **Skip Existing** when the staged row is already represented in production.
 - **Update Existing** when you want to fill empty allowlisted production fields
   only.
+- **Bulk Update Existing Matched Programs** after a richer second import when
+  you want to patch many exact existing matches in one pass.
 - **Create New** only when the program is genuinely distinct, or when you have
   explicitly confirmed that a duplicate production row is intentional.
+
+## Enrichment Pass
+
+Use this when a first import created draft/unverified programs but some safe
+rich fields were still missing.
+
+1. First import creates draft, unverified programs.
+2. If fields are missing, run deep research again.
+3. Import the richer JSON into staging.
+4. Use **Bulk Update Existing Matched Programs** on `/admin/imports/[id]`.
+5. Review the patched production programs.
+6. Publish as unverified only after review.
+7. Verify manually later.
+
+Enrichment-pass rules:
+
+- Matching still requires normalized title + linked production university +
+  degree level.
+- Rows without one exact match are skipped, not created.
+- Ambiguous exact matches stay manual.
+- Only empty allowlisted production fields are filled.
+- Source URLs are attached best-effort and deduped by URL.
+- The enrichment pass does not publish or verify programs.
 
 ## Cleanup Rules
 
