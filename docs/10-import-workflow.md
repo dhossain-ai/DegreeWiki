@@ -1,422 +1,224 @@
 # Import Workflow
 
-Phase 47 establishes the import workflow and example templates only. It does not
-authorize a real import run, production merge, Supabase data mutation, or direct
-production write. Actual real data import is an operational step that must be
-reviewed and explicitly approved before it starts.
+This file documents the current safe import workflow, with the final QA focus on
+university-by-university program import.
 
 ## Hard Boundary
 
-- Direct production writes are forbidden.
-- Do not insert, update, delete, merge, or manually patch production rows outside
-  the approved admin import workflow.
-- Do not create import batches for real data until the operational import run is
-  explicitly approved.
-- Do not paste real data into the admin UI during this docs/templates phase.
-- Do not approve, reject, review, or merge real staged rows during this phase.
-- Do not use scraping, AI extraction, or secondary aggregator data as source data.
+- Use official university and official program pages as primary sources.
+- Do not write directly to production outside the existing reviewed merge flow.
+- Do not trust JSON `content_status` or `verification_status`.
+- Do not import `program_intakes`, deadlines, or intake arrays in this phase.
+- Do not auto-create subjects.
+- Do not hard delete production data unless you are intentionally using the
+  existing pre-launch cleanup tools.
 
-## Recommended Entity Order
+## Recommended Program Workflow
 
-Start with universities.
+The preferred operational path for program imports is one university at a time.
 
-Universities have no staging dependencies and create the production records that
-program imports need later. Programs depend on merged universities through
-`staging_university_id -> staging_universities.match_university_id`. Scholarships
-and articles have fewer dependencies and can follow once the core university and
-program data workflow is proven.
+1. Open `/admin/imports/programs`.
+2. Select the production university first.
+3. Use the recommended research prompt to collect one university and its
+   programs into the preferred nested JSON shape.
+4. Paste or upload the JSON.
+5. Confirm the preview shows the right university, sample titles, and useful
+   rich fields.
+6. Submit to create a staging-only import batch.
+7. Review staged rows and warnings on `/admin/imports/[id]`.
+8. Approve matching rows after manual QA.
+9. Merge approved rows.
+10. Use **Publish merged drafts as unverified** only after review.
+11. Verify manually later.
 
-Recommended sequence:
+What this flow does:
 
-1. Universities
-2. Programs linked to merged universities
-3. Scholarships
-4. Articles
+- It stages rows only at first.
+- It creates draft, unverified programs only through the existing merge flow.
+- It detects exact duplicate re-imports by normalized title + university +
+  degree level.
+- `Update Existing` fills empty allowlisted production fields only.
 
-## Template Files
+## Recommended Research Prompt
 
-Example templates live in `data/import-templates/`.
-
-The `.example.json` files contain placeholder data only. Names such as
-`Example University One` are intentionally not real institutions. They document
-field names and JSON shape; they are not starter data and must not be imported
-as production content.
-
-If a real starter dataset is ever added, keep it separate from placeholder
-examples. Use a name such as `universities.real-starter.au.json`, document the
-source expectations in the file's companion notes, and manually verify every row
-against official websites before import.
-
-## JSON-Only Import Workflow
-
-The current structured import path accepts a JSON array of up to 100 rows.
-For first operational runs, keep batches much smaller than the technical limit:
-5-10 university rows is the recommended starting size.
-
-Pre-import checklist for an approved operational run:
-
-1. Confirm the run is approved.
-2. Confirm the entity type and batch scope.
-3. Verify country codes exist in `countries.iso2`.
-4. For programs, verify degree level codes exist in active `degree_levels.code`.
-5. Prepare a JSON array manually from official source pages.
-6. Validate JSON syntax before pasting.
-7. Keep a separate source list of official URLs for post-merge data source entry.
-
-Admin import steps after approval:
-
-1. Open `/admin/imports`.
-2. Create a new import batch for the entity type.
-3. Open the batch detail page.
-4. Expand `Bulk JSON Import`.
-5. Select the entity type when using a mixed batch.
-6. Paste the JSON array.
-7. Submit the import.
-8. Read the inserted, warned, and failed row counts.
-
-## Field Reference
-
-### Universities
-
-Minimum operational fields:
+Use the built-in `research_pack` prompt as the default starting point for
+university-by-university collection. The preferred output shape is:
 
 ```json
-[
-  {
-    "name": "Example University One",
-    "country_code": "EX",
-    "official_url": "https://www.example.edu"
-  }
-]
-```
-
-Fields:
-
-- `name`: required for merge. Maps to `extracted_name`.
-- `country_code`: required for merge. Must match `countries.iso2` exactly.
-- `official_url`: optional but strongly recommended. Used by validation and
-  production-match checks.
-
-### Programs
-
-Minimum operational fields:
-
-```json
-[
-  {
-    "title": "Example Master of Computing",
-    "degree_level_code": "master",
-    "staging_university_id": "00000000-0000-0000-0000-000000000000",
-    "language_of_instruction": "English",
-    "study_mode": "full_time",
-    "delivery_mode": "on_campus",
-    "duration_months": 24,
-    "tuition_min_amount": 25000,
-    "tuition_currency": "EUR",
-    "tuition_period": "per_year",
-    "official_program_url": "https://www.example.edu/programs/master-of-computing",
+{
+  "university": {
+    "name": "Full official university name",
+    "country": "Country name",
+    "official_website": null,
     "source_urls": []
-  }
-]
+  },
+  "programs": [
+    {
+      "title": null,
+      "degree_level_code": null,
+      "degree_award": null,
+      "primary_subject": null,
+      "study_mode": null,
+      "delivery_mode": null,
+      "language_of_instruction": null,
+      "duration_months": null,
+      "tuition_min_amount": null,
+      "tuition_max_amount": null,
+      "tuition_currency": null,
+      "tuition_period": null,
+      "tuition_notes": null,
+      "application_fee_amount": null,
+      "application_fee_currency": null,
+      "application_fee_notes": null,
+      "official_url": null,
+      "application_url": null,
+      "admission_requirements": null,
+      "gpa_requirements": null,
+      "curriculum_summary": null,
+      "career_outcomes": null,
+      "source_urls": []
+    }
+  ]
+}
 ```
 
-Fields:
-
-- `title`: required for merge. Maps to `extracted_title`.
-- `degree_level_code`: required for merge. Must match an active
-  `degree_levels.code`.
-- `staging_university_id`: required for merge. Must point to a staged university
-  in the same batch whose row has already been merged.
-- `primary_subject` / `subject_area` / `subject`: optional. Exact subject-name
-  match is preferred; unknown or ambiguous values warn and are ignored.
-- `study_mode`: optional. Supported values: `full_time`, `part_time`,
-  `online`, `hybrid`. Invalid values warn and are ignored.
-- `delivery_mode`: optional. Supported values: `on_campus`, `online`,
-  `hybrid`, `distance`. Invalid values warn and are ignored.
-- `language` / `language_of_instruction`: optional.
-- `duration_months`: optional positive whole number.
-- `tuition_*`: optional. Supported directly on production programs.
-- `application_fee_*`: optional. Supported directly on production programs.
-- `official_program_url` / `official_url`: optional. Maps to
-  `programs.official_url` and can also be attached to `data_sources`.
-- `official_application_url` / `application_url`: optional. Maps to
-  `programs.application_url` and can also be attached to `data_sources`.
-- `admission_requirements_text` / `admission_requirements`: optional.
-- `gpa_requirements_text` / `gpa_requirements`: optional.
-- `curriculum_or_modules_text` / `curriculum_summary`: optional.
-- `career_outcomes_text` / `career_outcomes`: optional.
-- `english_requirements_text`, `ielts_min_score`, `toefl_min_score`, or
-  structured `english_requirements`: optional.
-- `source_urls`: optional. Best-effort attached to `data_sources` after merge.
-- Exact production duplicate detection now uses normalized `title` +
-  linked production university + degree level. Bulk merge skips exact unique
-  matches by default instead of creating new duplicate slugs.
-- `content_status` / `verification_status`: ignored if present.
-- `deadline` / `application_deadline`: staging-only context for review. Phase
-  66E does not create `program_intakes`.
-
-### Scholarships
-
-Minimum operational fields:
-
-```json
-[
-  {
-    "name": "Example Merit Scholarship",
-    "amount": 5000,
-    "deadline": "2026-09-01"
-  }
-]
-```
-
-Fields:
-
-- `name`: required for merge. Maps to `extracted_name`.
-- `amount`: optional numeric value. Maps to `extracted_amount`.
-- `deadline`: optional text value. Maps to `extracted_deadline`.
-
-### Articles
-
-Minimum operational fields:
-
-```json
-[
-  {
-    "title": "Example Application Guide",
-    "slug": "example-application-guide",
-    "category": "guide",
-    "content": "Example article content for template shape only."
-  }
-]
-```
-
-Fields:
-
-- `title`: required for merge. Maps to `extracted_title`.
-- `slug`: required for merge. Must be lowercase URL-safe slug text.
-- `category`: optional text value. Category FK mapping is not automatic.
-- `content`: optional but recommended for article usefulness.
-
-## Importing Programs Against Existing Production Universities
-
-Programs require a merged staging university row (one with `match_university_id` set) in the
-same batch. When those universities already exist in production from a previous phase, follow
-this sequence to link them without creating duplicates.
-
-**Step 1 — Create a mixed batch.**
-Open `/admin/imports` and create a new batch with batch type `mixed`. This allows universities
-and programs to share a single batch so programs can reference their staging university UUIDs.
-
-**Step 2 — Import the university stubs.**
-Bulk-import the universities JSON into the mixed batch under the `universities` entity type.
-These rows arrive in `pending` or `validated` status.
-
-**Step 3 — Run quality checks.**
-Use the quality check action to detect possible production matches. Confirm that each staged
-university corresponds to an existing production university.
-
-**Step 4 — Link to production using set_match_university_id.**
-For each approved staging university row that matches an existing production record, expand the
-"Link to existing production university" form in the row's Actions column. Paste the production
-university's UUID and submit. The form writes only `staging_universities.match_university_id`;
-no production data is written. The UUID can be found on the university's admin edit page URL or
-from the production universities list.
-
-**Step 5 — Merge each university row using update_existing.**
-With `match_university_id` now set, use the "Update Existing" merge form. This marks the staging
-row as merged and optionally patches `official_url` if currently empty in production. No
-production fields are overwritten.
-
-**Step 6 — Note staging UUIDs.**
-After merge, the staging university rows are in `merged` status. Note the staging row UUID for
-each university. These UUIDs are what the programs JSON must reference in `staging_university_id`.
-
-**Step 7 — Fill staging UUIDs into the programs JSON.**
-Edit the programs JSON to replace placeholder `staging_university_id` values with the actual
-staging UUIDs from Step 6. The staging UUID is the row's `id` in `staging_universities`, not
-the production `match_university_id`.
-
-**Step 8 — Import programs.**
-Bulk-import the updated programs JSON into the same mixed batch under the `programs` entity type.
-The import validates that each `staging_university_id` belongs to the current batch and that the
-referenced staging university has `match_university_id` set.
-
-**Step 9 — Review and merge programs.**
-Approve each program row after manual review. For each approved row:
-
-- Use **Skip Existing** when the staged row is a duplicate of an existing production program.
-- Use **Update Existing** only when you want to fill empty allowlisted rich fields on the
-  existing production program.
-- Use **Merge to Production** only when the row is genuinely new, or when you intentionally
-  want to create a second production record and have explicitly confirmed that duplicate create.
-
-Program merge resolves the linked staging university's `match_university_id` to get the
-production university UUID for the FK relationship.
-
-Bulk program merge is now duplicate-safe by default:
-
-- exact unique matches are skipped as existing,
-- unmatched rows are created normally,
-- ambiguous matches remain for manual review and are not auto-created.
-
-If older duplicate or test production rows already exist, use the admin cleanup tools instead
-of importing around them:
-
-- `/admin/programs?duplicates=1` isolates current duplicate-key groups using normalized title +
-  university + degree level.
-- Archive is the normal safe cleanup path and keeps the record for review.
-- Super-admin hard delete is pre-launch only, requires explicit confirmation, never deletes shared
-  university/media assets, and skips rows that still have AI Finder history or immutable analytics
-  history. When hard delete is blocked, archive the row instead.
-
-The `set_match_university_id` action is available only for universities and only for rows in
-`approved` status. It validates: the row belongs to the current batch, the row is not already
-merged, and the target production university UUID exists. It does not write any production data.
-
-## Warning And Error Handling
-
-Validation warnings do not always block staging insert. They mean a human must
-read the row before review or merge.
-
-Common warning sources:
-
-- Missing university name, program title, scholarship name, or article title.
-- Missing or invalid URL.
-- Country code not formatted as two uppercase characters.
-- Invalid program `staging_university_id` format or batch mismatch.
-- Non-numeric tuition or scholarship amount.
-- Article slug format issues.
-- Same-batch duplicate warning from quality checks.
-- Possible production match warning from quality checks.
-
-Failed rows are different from warned rows. Failed rows did not insert into
-staging and must be corrected in source JSON before re-importing into a new
-batch or adding a corrected row manually.
-
-Never approve a row with unresolved warnings. Resolve the warning, reject the
-bad row, or create a corrected replacement row before proceeding.
-
-## Quality Check Step
-
-After rows are staged, run quality checks from the import batch detail page.
-
-Quality checks are advisory and non-destructive. They detect same-batch
-duplicates and possible production matches. They write warning rows to
-`staging_errors`; they do not approve, reject, merge, or modify production
-records.
-
-Review every quality warning:
-
-- `same_batch_duplicate`: reject all duplicate staged rows except the one chosen
-  for review.
-- `possible_production_match`: manually compare the staged row with the existing
-  production record. Reject the row if it is a duplicate. Continue only if it is
-  clearly distinct.
-
-## Manual Review Step
-
-Manual review is required before merge.
-
-For each staged row:
-
-1. Read the extracted fields.
-2. Read validation and quality warnings.
-3. Compare against the official source page.
-4. Approve only if the row is accurate and warnings are resolved.
-5. Reject rows that are duplicate, inaccurate, unverifiable, or malformed.
-6. Skip rows that should be deferred without being treated as rejected.
-7. Use reset only when a row needs to return to pending review.
-
-Approval is not a merge. Approval only marks the staged row as ready for an
-explicit merge action.
-
-## Merge Step
-
-Merge is one row at a time. Bulk merge and auto-merge are intentionally excluded.
-
-Before merging:
-
-1. Confirm the row is approved.
-2. Confirm there are no unresolved warnings.
-3. Confirm required lookup values exist.
-4. Confirm the row is not a duplicate of production data.
-5. Confirm the operator understands that merge creates or safely patches
-   production data.
-
-Expected merge behavior:
-
-- Universities create draft, unverified production university rows.
-- Programs require a merged staged university and active degree level code.
-- Scholarships create draft, unverified production scholarship rows.
-- Articles require a valid title and slug.
-
-If merge is blocked, do not force a production edit around the workflow. Record
-the error, reject or skip the staged row as appropriate, correct the source JSON,
-and re-import through the approved process.
-
-## Post-Merge Data Source Step
-
-Program merges now try to attach source links automatically from
-`official_program_url`, `official_application_url`, `official_tuition_url`, and
-`source_urls`.
-
-Important notes:
-
-- Source attachment is best-effort and respects existing `data_sources` RLS.
-- URL duplicates are removed before insert.
-- A source-link failure does not roll back the already-created draft program.
-- If source attachment fails, add the missing links manually from the merged
-  program's admin edit page.
-
-Use the program edit page Data Sources panel for any manual additions or fixes.
-
-## Troubleshooting
-
-`JSON parse error`
-
-The pasted value is not valid JSON. Confirm it is a JSON array, uses double
-quotes, has no comments, and has no trailing commas.
-
-`Expected a JSON array`
-
-The import parser requires `[...]`, even for one row.
-
-`Array exceeds 100 rows`
-
-Split the data into smaller batches. First real operational runs should use
-5-10 rows.
-
-`Country code mismatch`
-
-The university merge requires `country_code` to match `countries.iso2`. Confirm
-the country exists and that the code is uppercase.
-
-`Degree level code not found`
-
-The program merge requires `degree_level_code` to match an active
-`degree_levels.code`.
-
-`Staged university is not merged`
-
-Programs cannot merge until their linked staged university has
-`match_university_id` set by a successful university merge.
-
-`Possible production match`
-
-Pause. Compare the staged row with production data manually. Reject duplicates.
-
-`Slug conflict`
-
-The target slug already exists or slug generation collided. Do not patch
-production directly. Correct the staged data and retry through the workflow.
-
-`Row imported with warnings`
-
-Warnings are not approval. Read and resolve warnings before approving the row.
-
-`Merge creates the wrong record`
-
-Stop the operational run. Do not continue merging nearby rows until the cause is
-understood. Use the admin UI and existing data governance process to repair or
-remove the incorrect production row, then re-import corrected data only after
-review.
+Prompt rules for researchers:
+
+- Return valid JSON only.
+- Use only the supported fields shown above.
+- Use `null` for unknown facts.
+- Do not include `content_status` or `verification_status`.
+- Do not include deadlines, `application_deadline`, intake arrays, or
+  `program_intakes`.
+- `source_urls` should include the official program page when available, plus
+  any other official source pages used for factual fields.
+- `curriculum_summary` and `career_outcomes` must be grounded in the official
+  program description. Do not invent claims.
+
+Known supported values for new research JSON:
+
+- `degree_level_code`: `bachelor`, `master`, `phd`, `diploma`,
+  `certificate`, `foundation`, `language`, `other`
+- `study_mode`: `full_time`, `part_time`, `full_time_or_part_time`, `null`
+- `delivery_mode`: `on_campus`, `online`, `hybrid`, `null`
+- `tuition_period`: `per_year`, `per_semester`, `per_credit`, `total`, `null`
+
+Primary subject guidance:
+
+- Prefer broad existing-friendly names such as `Computer Science`,
+  `Data Science`, `Business & Management`, `Law`, `Economics`, `Finance`,
+  `Marketing`, `Education`, `Psychology`, `Engineering`,
+  `Health Sciences`, `Social Sciences`, `Arts & Humanities`,
+  `Communication`, `Public Administration`, or `International Relations`.
+- If the subject is uncertain or may not exist yet, use `null`.
+- Do not invent narrow random subject names.
+
+## JSON Field Rules
+
+### Dedicated Program Import Page
+
+`/admin/imports/programs` accepts:
+
+- `[...]`
+- `{ "programs": [...] }`
+- `{ "university": { ... }, "programs": [...] }`
+
+The nested university + programs shape is preferred.
+
+### Flat Program Arrays
+
+Flat program arrays are still supported for generic batch import, but they need
+`staging_university_id` at import time. Use them only when you intentionally
+need the generic mixed/program batch flow.
+
+### Supported Program Fields
+
+Recommended supported program keys for new research JSON:
+
+- `title`
+- `degree_level_code`
+- `degree_award`
+- `primary_subject`
+- `study_mode`
+- `delivery_mode`
+- `language_of_instruction`
+- `duration_months`
+- `tuition_min_amount`
+- `tuition_max_amount`
+- `tuition_currency`
+- `tuition_period`
+- `tuition_notes`
+- `application_fee_amount`
+- `application_fee_currency`
+- `application_fee_notes`
+- `official_url`
+- `application_url`
+- `admission_requirements`
+- `gpa_requirements`
+- `curriculum_summary`
+- `career_outcomes`
+- `source_urls`
+
+Notes:
+
+- Older alias fields may still parse, but new research JSON should prefer the
+  supported keys above.
+- Imported programs still merge as `draft` + `unverified` by server logic.
+- Source attachment is best-effort and does not roll back a successful program
+  merge if source linking fails.
+
+## What Program Import Does Not Support Yet
+
+- `program_intakes`
+- deadline arrays
+- `application_deadline`
+- automatic publish as verified
+- subject auto-creation
+- direct production edits outside reviewed merge
+
+## Duplicate Handling
+
+Program import is now duplicate-safe by default.
+
+- Exact production matches are detected by normalized title + linked university +
+  degree level.
+- Re-importing the same university data should not silently create new duplicate
+  production rows.
+- Bulk merge skips exact unique matches as existing by default.
+- Ambiguous matches stay manual.
+
+Use these actions after review:
+
+- **Skip Existing** when the staged row is already represented in production.
+- **Update Existing** when you want to fill empty allowlisted production fields
+  only.
+- **Create New** only when the program is genuinely distinct, or when you have
+  explicitly confirmed that a duplicate production row is intentional.
+
+## Cleanup Rules
+
+When older duplicate or test programs already exist:
+
+- Use `/admin/programs?duplicates=1` to isolate duplicate groups.
+- Archive is the normal safe cleanup path.
+- Super-admin hard delete is pre-launch only, explicitly confirmed, and should
+  be reserved for safe duplicate/test cleanup.
+- If hard delete is blocked by preserved history or dependencies, archive the
+  program instead.
+
+## Manual QA Checklist For One University
+
+1. Open `/admin/imports/programs`.
+2. Confirm the helper copy is clear.
+3. Copy the recommended prompt.
+4. Use it with one small real university or college.
+5. Paste or upload the JSON.
+6. Confirm the preview shows useful fields.
+7. Stage rows.
+8. Approve all matching.
+9. Merge approved.
+10. Confirm duplicate handling does not create duplicates on re-import.
+11. Confirm `Update Existing` fills empty fields only.
+12. Confirm `Publish merged drafts as unverified` works.
+13. Confirm the public page shows imported rich fields.
+14. Confirm `npm run build` passes.
