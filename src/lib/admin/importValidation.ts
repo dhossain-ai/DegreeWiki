@@ -4,6 +4,19 @@ export type ValidationResult = {
   warnings: string[]
 }
 
+export type ValidationContext = {
+  rawData?: Record<string, unknown>
+  programPrimarySubject?: {
+    status: 'missing' | 'matched_by_name' | 'matched_by_slug' | 'unmatched' | 'ambiguous'
+    input: string | null
+  } | null
+}
+
+const PROGRAM_DEGREE_LEVEL_CODES = ['associate', 'bachelor', 'certificate', 'diploma', 'foundation', 'master', 'phd'] as const
+const PROGRAM_STUDY_MODE_OPTIONS = ['full_time', 'part_time', 'online', 'hybrid'] as const
+const PROGRAM_DELIVERY_MODE_OPTIONS = ['on_campus', 'online', 'hybrid', 'distance'] as const
+const PROGRAM_TUITION_PERIOD_OPTIONS = ['per_year', 'per_semester', 'total', 'per_credit'] as const
+
 export function parseRawData(
   raw: string
 ): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
@@ -23,7 +36,8 @@ export function parseRawData(
 
 export function validateStagedRecord(
   entityType: StagedEntityType,
-  values: Record<string, string>
+  values: Record<string, string>,
+  context: ValidationContext = {},
 ): ValidationResult {
   const warnings: string[] = []
 
@@ -43,8 +57,55 @@ export function validateStagedRecord(
     if (!values.extracted_title?.trim()) {
       warnings.push('Title is missing')
     }
+    if (!values.extracted_degree_level_code?.trim()) {
+      warnings.push('Degree level code is missing')
+    } else if (!(PROGRAM_DEGREE_LEVEL_CODES as readonly string[]).includes(values.extracted_degree_level_code.trim().toLowerCase())) {
+      warnings.push(`Degree level code "${values.extracted_degree_level_code.trim()}" is not supported and will block merge`)
+    }
     if (values.extracted_tuition_amount?.trim() && isNaN(Number(values.extracted_tuition_amount.trim()))) {
       warnings.push('Tuition amount is not a valid number')
+    }
+
+    const rawData = context.rawData
+    if (rawData) {
+      const studyModeValue = textField(rawData, ['study_mode', 'attendance_mode'])
+      if (studyModeValue && !normalizeEnum(studyModeValue, PROGRAM_STUDY_MODE_OPTIONS, {
+        fulltime: 'full_time',
+        full_time: 'full_time',
+        parttime: 'part_time',
+        part_time: 'part_time',
+      })) {
+        warnings.push(`Study mode "${studyModeValue}" is not supported and will be ignored`)
+      }
+
+      const deliveryModeValue = textField(rawData, ['delivery_mode', 'delivery_format'])
+      if (deliveryModeValue && !normalizeEnum(deliveryModeValue, PROGRAM_DELIVERY_MODE_OPTIONS, {
+        campus: 'on_campus',
+        in_person: 'on_campus',
+        oncampus: 'on_campus',
+      })) {
+        warnings.push(`Delivery mode "${deliveryModeValue}" is not supported and will be ignored`)
+      }
+
+      const tuitionPeriodValue = textField(rawData, ['tuition_period', 'tuition_frequency'])
+      if (tuitionPeriodValue && !normalizeEnum(tuitionPeriodValue, PROGRAM_TUITION_PERIOD_OPTIONS, {
+        year: 'per_year',
+        yearly: 'per_year',
+        annual: 'per_year',
+        annually: 'per_year',
+        per_annum: 'per_year',
+        semester: 'per_semester',
+        credit: 'per_credit',
+      })) {
+        warnings.push(`Tuition period "${tuitionPeriodValue}" is not supported and will be ignored`)
+      }
+    }
+
+    const primarySubject = context.programPrimarySubject
+    if (primarySubject?.status === 'unmatched' && primarySubject.input) {
+      warnings.push(`Primary subject "${primarySubject.input}" does not match any existing subject and will be ignored`)
+    } else if (primarySubject?.status === 'ambiguous' && primarySubject.input) {
+      warnings.push(`Primary subject "${primarySubject.input}" matched multiple existing subjects and will be ignored`)
     }
   } else if (entityType === 'scholarships') {
     if (!values.extracted_name?.trim()) {
@@ -77,4 +138,24 @@ function isValidUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+function textField(raw: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = raw[key]
+    if (value === null || value === undefined || typeof value === 'object') continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return null
+}
+
+function normalizeEnum(
+  value: string,
+  allowed: readonly string[],
+  aliases: Record<string, string> = {},
+): string | null {
+  const key = value.toLowerCase().replace(/[\s-]+/g, '_').trim()
+  const normalized = aliases[key] ?? key
+  return allowed.includes(normalized) ? normalized : null
 }
