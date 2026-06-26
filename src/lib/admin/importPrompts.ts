@@ -2,6 +2,7 @@ export type PromptEntityType = 'universities' | 'programs' | 'scholarships' | 'a
 
 const SHARED_RULES = `Rules:
 - Use null for any field you cannot confirm from an official source. Do not guess or invent values.
+- Use only the fields shown in the schema. Do not add extra keys.
 - Return only valid JSON. No markdown code fences, no explanation text before or after.
 - No trailing commas in JSON.`
 
@@ -30,15 +31,17 @@ Universities to research:
 Use official university program pages as sources.
 
 ${SHARED_RULES}
-- degree_level_code must be one of: bachelor, master, phd, foundation, diploma, certificate, associate
-- primary_subject should use the closest existing subject name when obvious (for example "Computer Science"). Do not invent new subjects.
-- study_mode must be one of: full_time, part_time, online, hybrid, or null.
-- delivery_mode must be one of: on_campus, online, hybrid, distance, or null.
-- tuition_period must be one of: per_year, per_semester, total, per_credit, or null.
-- Use official_program_url for the canonical program page and official_application_url when available.
-- You may include source_urls as an array of useful source links.
+- Use only supported import fields.
+- degree_level_code should use one of: bachelor, master, phd, diploma, certificate, foundation, language, other.
+- primary_subject should use a broad existing-friendly subject when obvious (for example "Computer Science" or "Business & Management"). If unsure, use null. Do not invent narrow random subjects.
+- study_mode should use one of: full_time, part_time, full_time_or_part_time, or null.
+- delivery_mode should use one of: on_campus, online, hybrid, or null.
+- tuition_period should use one of: per_year, per_semester, per_credit, total, or null.
+- Use official_url for the canonical official program page and application_url when available.
+- source_urls should include the official program page when available, plus any other official source pages used for factual fields.
+- career_outcomes and curriculum_summary must be grounded in the official program description. Do not invent claims.
 - Do not include content_status or verification_status.
-- Do not include intakes or deadlines arrays in this phase.
+- Do not include intake arrays, deadline arrays, deadline text, or application_deadline in this phase.
 - staging_university_id: Do not include this field in your JSON response — it is a batch-internal UUID that only exists after universities are staged in DegreeWiki and cannot be known in advance. The admin will add it manually to each program object before importing.
 - One object per program.
 
@@ -49,9 +52,9 @@ Required schema:
     "degree_level_code": "master",
     "degree_award": null,
     "primary_subject": null,
-    "language_of_instruction": null,
     "study_mode": null,
     "delivery_mode": null,
+    "language_of_instruction": null,
     "duration_months": null,
     "tuition_min_amount": null,
     "tuition_max_amount": null,
@@ -61,15 +64,12 @@ Required schema:
     "application_fee_amount": null,
     "application_fee_currency": null,
     "application_fee_notes": null,
-    "official_program_url": null,
-    "official_application_url": null,
-    "admission_requirements_text": null,
-    "gpa_requirements_text": null,
-    "english_requirements_text": null,
-    "ielts_min_score": null,
-    "toefl_min_score": null,
-    "curriculum_or_modules_text": null,
-    "career_outcomes_text": null,
+    "official_url": null,
+    "application_url": null,
+    "admission_requirements": null,
+    "gpa_requirements": null,
+    "curriculum_summary": null,
+    "career_outcomes": null,
     "source_urls": []
   }
 ]
@@ -119,19 +119,21 @@ Required schema:
 Articles to write or research:
 [LIST ARTICLE TOPICS HERE — one per line]`,
 
-  research_pack: `Research one university and its degree programs, then return a nested university + programs research pack in the exact schema below.
+  research_pack: `Research one university and its degree programs, then return the nested JSON object below.
 Use official university pages as primary sources. Include source URLs for every program whenever possible.
 
 ${SHARED_RULES}
-- This shape is for a DegreeWiki mixed import batch.
-- The importer stages the university first, then links every staged program to that staged university.
-- degree_level must be one of: bachelor, master, phd, foundation, diploma, certificate, associate.
-- study_mode must be one of: full_time, part_time, online, hybrid, or null.
-- delivery_mode must be one of: on_campus, online, hybrid, distance, or null.
-- tuition_period may be year, semester, total, credit, or null.
-- Use official_program_url for the canonical program page.
-- source_confidence must be high, medium, low, or unknown.
-- Do not include intakes or deadlines arrays in this phase.
+- This is the preferred university-by-university Program Import shape for DegreeWiki.
+- Use only supported import fields shown below.
+- Unknown factual data must be null.
+- degree_level_code should use one of: bachelor, master, phd, diploma, certificate, foundation, language, other.
+- study_mode should use one of: full_time, part_time, full_time_or_part_time, or null.
+- delivery_mode should use one of: on_campus, online, hybrid, or null.
+- tuition_period should use one of: per_year, per_semester, per_credit, total, or null.
+- primary_subject should use a broad existing-friendly subject when obvious. Suggested examples: Computer Science, Data Science, Business & Management, Law, Economics, Finance, Marketing, Education, Psychology, Engineering, Health Sciences, Social Sciences, Arts & Humanities, Communication, Public Administration, International Relations. If the subject is uncertain or may not exist in DegreeWiki, use null.
+- source_urls should include the official program page when available, plus any other official source pages used for factual fields.
+- career_outcomes and curriculum_summary must be grounded in the official program description. Do not invent claims.
+- Do not include intakes, deadlines, application_deadline, content_status, or verification_status.
 - Do not include content_status or verification_status.
 
 Required schema:
@@ -139,45 +141,34 @@ Required schema:
   "university": {
     "name": "Full official university name",
     "country": "Country name",
-    "country_code": "XX",
-    "city": "City name or null",
-    "official_url": "https://...",
+    "official_website": null,
     "source_urls": []
   },
   "programs": [
     {
       "title": "Full official program title",
-      "degree_level": "master",
+      "degree_level_code": "master",
       "degree_award": null,
-      "subject_area": null,
-      "language_of_instruction": null,
+      "primary_subject": null,
       "study_mode": null,
       "delivery_mode": null,
-      "duration_text": null,
+      "language_of_instruction": null,
       "duration_months": null,
-      "tuition_amount": null,
+      "tuition_min_amount": null,
+      "tuition_max_amount": null,
       "tuition_currency": null,
       "tuition_period": null,
       "tuition_notes": null,
       "application_fee_amount": null,
       "application_fee_currency": null,
       "application_fee_notes": null,
-      "admission_requirements_text": null,
-      "academic_requirements_text": null,
-      "english_requirements_text": null,
-      "ielts_min_score": null,
-      "toefl_min_score": null,
-      "required_documents_text": null,
-      "curriculum_or_modules_text": null,
-      "career_outcomes_text": null,
-      "scholarship_notes": null,
-      "official_program_url": null,
-      "official_application_url": null,
-      "official_tuition_url": null,
-      "source_urls": [],
-      "source_confidence": "unknown",
-      "missing_fields": [],
-      "notes": null
+      "official_url": null,
+      "application_url": null,
+      "admission_requirements": null,
+      "gpa_requirements": null,
+      "curriculum_summary": null,
+      "career_outcomes": null,
+      "source_urls": []
     }
   ]
 }
