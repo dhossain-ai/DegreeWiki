@@ -259,6 +259,16 @@ Bulk program merge is now duplicate-safe by default:
 - unmatched rows are created normally,
 - ambiguous matches remain for manual review and are not auto-created.
 
+If older duplicate or test production rows already exist, use the admin cleanup tools instead
+of importing around them:
+
+- `/admin/programs?duplicates=1` isolates current duplicate-key groups using normalized title +
+  university + degree level.
+- Archive is the normal safe cleanup path and keeps the record for review.
+- Super-admin hard delete is pre-launch only, requires explicit confirmation, never deletes shared
+  university/media assets, and skips rows that still have AI Finder history or immutable analytics
+  history. When hard delete is blocked, archive the row instead.
+
 The `set_match_university_id` action is available only for universities and only for rows in
 `approved` status. It validates: the row belongs to the current batch, the row is not already
 merged, and the target production university UUID exists. It does not write any production data.
