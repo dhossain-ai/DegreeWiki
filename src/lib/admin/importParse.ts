@@ -118,9 +118,9 @@ function mapProgram(item: Record<string, unknown>): BulkParsedRow {
     fields: {
       extracted_title: str(item.title),
       extracted_degree_level_code: degreeCode(item.degree_level_code ?? item.degree_level),
-      extracted_language: str(item.language ?? item.language_of_instruction),
-      extracted_tuition_amount: num(item.tuition_amount ?? item.tuition_min_amount),
-      extracted_deadline: str(item.deadline),
+      extracted_language: str(item.language_of_instruction ?? item.language ?? item.instruction_language),
+      extracted_tuition_amount: num(item.tuition_amount ?? item.tuition_min_amount ?? item.tuition),
+      extracted_deadline: str(item.deadline ?? item.application_deadline),
       staging_university_id,
     },
     parseWarnings,
