@@ -1,11 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type MergeEntityType = 'universities' | 'scholarships' | 'articles' | 'programs'
-export type MergeAction = 'create_new' | 'update_existing'
+export type MergeAction = 'create_new' | 'update_existing' | 'skip_existing'
 export type MergeStatusFilter = 'all' | 'pending' | 'validated' | 'needs_review' | 'approved' | 'rejected' | 'skipped' | 'merged' | 'error'
 
 const CREATE_NEW_TYPES: readonly MergeEntityType[] = ['universities', 'scholarships', 'articles', 'programs']
-const UPDATE_EXISTING_TYPES: readonly string[] = ['universities', 'scholarships', 'articles']
+const UPDATE_EXISTING_TYPES: readonly string[] = ['universities', 'scholarships', 'articles', 'programs']
+const SKIP_EXISTING_TYPES: readonly string[] = ['programs']
 const VALID_MERGE_STATUS_FILTERS: readonly MergeStatusFilter[] = [
   'all', 'pending', 'validated', 'needs_review', 'approved', 'rejected', 'skipped', 'merged', 'error',
 ]
@@ -30,9 +31,10 @@ export async function mergeApprovedRow(
     rowId: string
     batchId: string
     action?: MergeAction
+    allowDuplicateCreate?: boolean
   }
 ): Promise<{ ok: true; productionId: string; warning?: string } | { ok: false; error: string }> {
-  const { entityType, rowId, batchId, action = 'create_new' } = params
+  const { entityType, rowId, batchId, action = 'create_new', allowDuplicateCreate = false } = params
 
   if (!UUID_RE.test(rowId)) return { ok: false, error: 'Invalid row ID.' }
   if (!UUID_RE.test(batchId)) return { ok: false, error: 'Invalid batch ID.' }
@@ -41,7 +43,14 @@ export async function mergeApprovedRow(
     if (!UPDATE_EXISTING_TYPES.includes(entityType)) {
       return { ok: false, error: 'Update-existing is not supported for this entity type.' }
     }
-    return updateExistingRow(supabase, entityType as 'universities' | 'scholarships' | 'articles', rowId, batchId)
+    return updateExistingRow(supabase, entityType as 'universities' | 'scholarships' | 'articles' | 'programs', rowId, batchId)
+  }
+
+  if (action === 'skip_existing') {
+    if (!SKIP_EXISTING_TYPES.includes(entityType)) {
+      return { ok: false, error: 'Skip-existing is not supported for this entity type.' }
+    }
+    return skipExistingRow(supabase, entityType as 'programs', rowId, batchId)
   }
 
   if (!(CREATE_NEW_TYPES as readonly string[]).includes(entityType)) {
@@ -51,7 +60,7 @@ export async function mergeApprovedRow(
   const entity = entityType as MergeEntityType
   if (entity === 'universities') return mergeUniversity(supabase, rowId, batchId)
   if (entity === 'scholarships') return mergeScholarship(supabase, rowId, batchId)
-  if (entity === 'programs') return mergeProgram(supabase, rowId, batchId)
+  if (entity === 'programs') return mergeProgram(supabase, rowId, batchId, { allowDuplicateCreate })
   return mergeArticle(supabase, rowId, batchId)
 }
 
@@ -61,13 +70,23 @@ export async function mergeApprovedRow(
 
 export async function updateExistingRow(
   supabase: SupabaseClient,
-  entity: 'universities' | 'scholarships' | 'articles',
+  entity: 'universities' | 'scholarships' | 'articles' | 'programs',
   rowId: string,
   batchId: string
 ): Promise<{ ok: true; productionId: string } | { ok: false; error: string }> {
   if (entity === 'universities') return updateExistingUniversity(supabase, rowId, batchId)
   if (entity === 'scholarships') return updateExistingScholarship(supabase, rowId, batchId)
+  if (entity === 'programs') return updateExistingProgram(supabase, rowId, batchId)
   return updateExistingArticle(supabase, rowId, batchId)
+}
+
+export async function skipExistingRow(
+  supabase: SupabaseClient,
+  entity: 'programs',
+  rowId: string,
+  batchId: string
+): Promise<{ ok: true; productionId: string } | { ok: false; error: string }> {
+  return skipExistingProgram(supabase, rowId, batchId)
 }
 
 // ---------------------------------------------------------------------------
@@ -621,6 +640,26 @@ type StagedProgramRow = {
   match_program_id: string | null
 }
 
+type ProgramMatchLookupRow = Pick<StagedProgramRow, 'id' | 'extracted_title' | 'extracted_degree_level_code' | 'staging_university_id' | 'match_program_id'>
+
+export type ProgramProductionMatch = {
+  id: string
+  title: string
+  slug: string
+  university_id: string
+  degree_level_id: string
+  content_status: string
+  verification_status: string
+}
+
+export type ProgramProductionMatchResolution = {
+  rowId: string
+  status: 'missing_title' | 'missing_university_link' | 'missing_degree_level' | 'no_match' | 'matched' | 'ambiguous'
+  linkedUniversityId: string | null
+  degreeLevelId: string | null
+  matches: ProgramProductionMatch[]
+}
+
 export type ProgramPrimarySubjectResolution = {
   status: 'missing' | 'matched_by_name' | 'matched_by_slug' | 'unmatched' | 'ambiguous'
   input: string | null
@@ -638,6 +677,157 @@ export type ProgramImportPreview = {
   curriculumSnippet: string | null
   careerSnippet: string | null
   sourceUrlCount: number
+}
+
+function normalizeForExactProgramMatch(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+async function resolveProgramProductionMatchContext(
+  supabase: SupabaseClient,
+  rows: ProgramMatchLookupRow[]
+): Promise<{
+  stagingUniversityMatchMap: Map<string, string | null>
+  degreeLevelIdMap: Map<string, string>
+  candidatesByKey: Map<string, ProgramProductionMatch[]>
+}> {
+  const stagingUniversityIds = [...new Set(
+    rows
+      .map((row) => row.staging_university_id)
+      .filter((value): value is string => Boolean(value))
+  )]
+
+  const stagingUniversityMatchMap = new Map<string, string | null>()
+  if (stagingUniversityIds.length > 0) {
+    const { data: stagingUnis } = await supabase
+      .from('staging_universities')
+      .select('id, match_university_id')
+      .in('id', stagingUniversityIds)
+
+    for (const stagingUni of (stagingUnis ?? []) as Array<{ id: string; match_university_id: string | null }>) {
+      stagingUniversityMatchMap.set(stagingUni.id, stagingUni.match_university_id)
+    }
+  }
+
+  const degreeCodes = [...new Set(
+    rows
+      .map((row) => row.extracted_degree_level_code?.trim())
+      .filter((value): value is string => Boolean(value))
+  )]
+
+  const degreeLevelIdMap = new Map<string, string>()
+  if (degreeCodes.length > 0) {
+    const { data: degreeLevels } = await supabase
+      .from('degree_levels')
+      .select('id, code')
+      .in('code', degreeCodes)
+      .eq('is_active', true)
+
+    for (const degreeLevel of (degreeLevels ?? []) as Array<{ id: string; code: string }>) {
+      degreeLevelIdMap.set(degreeLevel.code.trim(), degreeLevel.id)
+    }
+  }
+
+  const linkedUniversityIds = [...new Set(
+    [...stagingUniversityMatchMap.values()].filter((value): value is string => Boolean(value))
+  )]
+  const degreeLevelIds = [...new Set(degreeLevelIdMap.values())]
+  const candidatesByKey = new Map<string, ProgramProductionMatch[]>()
+
+  if (linkedUniversityIds.length > 0 && degreeLevelIds.length > 0) {
+    const { data: productionPrograms } = await supabase
+      .from('programs')
+      .select('id, title, slug, university_id, degree_level_id, content_status, verification_status')
+      .in('university_id', linkedUniversityIds)
+      .in('degree_level_id', degreeLevelIds)
+
+    for (const program of (productionPrograms ?? []) as ProgramProductionMatch[]) {
+      const key = `${program.university_id}|${program.degree_level_id}|${normalizeForExactProgramMatch(program.title)}`
+      const existing = candidatesByKey.get(key) ?? []
+      existing.push(program)
+      candidatesByKey.set(key, existing)
+    }
+  }
+
+  return { stagingUniversityMatchMap, degreeLevelIdMap, candidatesByKey }
+}
+
+export async function resolveProgramProductionMatches(
+  supabase: SupabaseClient,
+  rows: ProgramMatchLookupRow[]
+): Promise<Map<string, ProgramProductionMatchResolution>> {
+  const results = new Map<string, ProgramProductionMatchResolution>()
+  if (rows.length === 0) return results
+
+  const { stagingUniversityMatchMap, degreeLevelIdMap, candidatesByKey } = await resolveProgramProductionMatchContext(supabase, rows)
+
+  for (const row of rows) {
+    const title = row.extracted_title?.trim() ?? ''
+    if (!title) {
+      results.set(row.id, {
+        rowId: row.id,
+        status: 'missing_title',
+        linkedUniversityId: null,
+        degreeLevelId: null,
+        matches: [],
+      })
+      continue
+    }
+
+    const linkedUniversityId = row.staging_university_id
+      ? (stagingUniversityMatchMap.get(row.staging_university_id) ?? null)
+      : null
+    if (!linkedUniversityId) {
+      results.set(row.id, {
+        rowId: row.id,
+        status: 'missing_university_link',
+        linkedUniversityId: null,
+        degreeLevelId: null,
+        matches: [],
+      })
+      continue
+    }
+
+    const degreeCode = row.extracted_degree_level_code?.trim() ?? ''
+    const degreeLevelId = degreeCode ? (degreeLevelIdMap.get(degreeCode) ?? null) : null
+    if (!degreeLevelId) {
+      results.set(row.id, {
+        rowId: row.id,
+        status: 'missing_degree_level',
+        linkedUniversityId,
+        degreeLevelId: null,
+        matches: [],
+      })
+      continue
+    }
+
+    const key = `${linkedUniversityId}|${degreeLevelId}|${normalizeForExactProgramMatch(title)}`
+    const matches = candidatesByKey.get(key) ?? []
+
+    results.set(row.id, {
+      rowId: row.id,
+      status: matches.length === 0 ? 'no_match' : matches.length === 1 ? 'matched' : 'ambiguous',
+      linkedUniversityId,
+      degreeLevelId,
+      matches,
+    })
+  }
+
+  return results
+}
+
+async function resolveSingleProgramProductionMatch(
+  supabase: SupabaseClient,
+  row: ProgramMatchLookupRow
+): Promise<ProgramProductionMatchResolution> {
+  const resolutions = await resolveProgramProductionMatches(supabase, [row])
+  return resolutions.get(row.id) ?? {
+    rowId: row.id,
+    status: 'no_match',
+    linkedUniversityId: null,
+    degreeLevelId: null,
+    matches: [],
+  }
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -977,11 +1167,88 @@ function collectProgramSourceRows(
   return rows
 }
 
+async function attachProgramSourceRows(
+  supabase: SupabaseClient,
+  productionId: string,
+  raw: Record<string, unknown>
+): Promise<string | undefined> {
+  const sourceRows = collectProgramSourceRows(productionId, raw)
+  if (sourceRows.length === 0) return undefined
+
+  let rowsToInsert = sourceRows
+  const { data: existingSourceRows, error: existingSourceErr } = await supabase
+    .from('data_sources')
+    .select('source_url')
+    .eq('entity_type', 'program')
+    .eq('entity_id', productionId)
+
+  if (existingSourceErr) {
+    console.error('[importMerge] attachProgramSourceRows: source lookup failed:', existingSourceErr.code, existingSourceErr.message)
+  } else {
+    const existingUrls = new Set(
+      ((existingSourceRows ?? []) as Array<{ source_url: string | null }>)
+        .map((row) => row.source_url?.trim())
+        .filter((value): value is string => Boolean(value))
+    )
+    rowsToInsert = sourceRows.filter((row) => {
+      const sourceUrl = typeof row.source_url === 'string' ? row.source_url.trim() : ''
+      return sourceUrl && !existingUrls.has(sourceUrl)
+    })
+  }
+
+  if (rowsToInsert.length === 0) return undefined
+
+  const { error: sourceErr } = await supabase.from('data_sources').insert(rowsToInsert)
+  if (sourceErr) {
+    console.error('[importMerge] attachProgramSourceRows: data source insert failed:', sourceErr.code, sourceErr.message)
+    return 'Production program was saved, but source links could not be attached. Add them manually from the program edit page.'
+  }
+
+  return undefined
+}
+
+function patchWhenEmpty(
+  patches: Record<string, unknown>,
+  currentValue: unknown,
+  nextValue: unknown,
+  column: string
+) {
+  if (nextValue === null || nextValue === undefined) return
+
+  if (typeof nextValue === 'string') {
+    if (!nextValue.trim()) return
+    if (typeof currentValue === 'string' && currentValue.trim()) return
+    if (currentValue !== null && currentValue !== undefined && typeof currentValue !== 'string') return
+    patches[column] = nextValue.trim()
+    return
+  }
+
+  if (typeof nextValue === 'number') {
+    if (currentValue === null || currentValue === undefined) {
+      patches[column] = nextValue
+    }
+    return
+  }
+
+  if (typeof nextValue === 'boolean') {
+    if (currentValue === null || currentValue === undefined) {
+      patches[column] = nextValue
+    }
+    return
+  }
+
+  if (currentValue === null || currentValue === undefined) {
+    patches[column] = nextValue
+  }
+}
+
 async function mergeProgram(
   supabase: SupabaseClient,
   rowId: string,
-  batchId: string
+  batchId: string,
+  options: { allowDuplicateCreate?: boolean } = {}
 ): Promise<{ ok: true; productionId: string } | { ok: false; error: string }> {
+  const { allowDuplicateCreate = false } = options
   // 1. Read staged row
   const { data: staged, error: fetchErr } = await supabase
     .from('staging_programs')
@@ -1007,6 +1274,21 @@ async function mergeProgram(
   }
   if (!row.staging_university_id) {
     return { ok: false, error: 'No linked staging university. Program merge requires staging_university_id to resolve university_id.' }
+  }
+
+  const existingMatchResolution = await resolveSingleProgramProductionMatch(supabase, row)
+  if (existingMatchResolution.status === 'matched' && !allowDuplicateCreate) {
+    const existingProgram = existingMatchResolution.matches[0]
+    return {
+      ok: false,
+      error: `Exact production match already exists: "${existingProgram.title}" (${existingProgram.slug}). Use skip-existing, update-existing, or confirm create-new anyway.`,
+    }
+  }
+  if (existingMatchResolution.status === 'ambiguous' && !allowDuplicateCreate) {
+    return {
+      ok: false,
+      error: 'Multiple exact production matches already exist for this title, university, and degree level. Link a specific program first or confirm create-new anyway.',
+    }
   }
 
   // 2. Resolve university via staging_universities.match_university_id
@@ -1133,16 +1415,7 @@ async function mergeProgram(
   }
 
   const productionId = (inserted as { id: string }).id
-  let sourceWarning: string | undefined
-
-  const sourceRows = collectProgramSourceRows(productionId, rawData)
-  if (sourceRows.length > 0) {
-    const { error: sourceErr } = await supabase.from('data_sources').insert(sourceRows)
-    if (sourceErr) {
-      console.error('[importMerge] mergeProgram: data source insert failed after production insert:', sourceErr.code, sourceErr.message)
-      sourceWarning = 'Production program created, but source links could not be attached. Add them manually from the program edit page.'
-    }
-  }
+  const sourceWarning = await attachProgramSourceRows(supabase, productionId, rawData)
 
   const { error: stagingUpdateErr } = await supabase
     .from('staging_programs')
@@ -1165,6 +1438,197 @@ async function mergeProgram(
   return sourceWarning ? { ok: true, productionId, warning: sourceWarning } : { ok: true, productionId }
 }
 
+type ProductionProgramPatchableFields = {
+  id: string
+  degree_award: string | null
+  primary_subject_id: string | null
+  study_mode: string | null
+  delivery_mode: string | null
+  language_of_instruction: string | null
+  duration_months: number | null
+  tuition_min_amount: number | null
+  tuition_max_amount: number | null
+  tuition_currency: string | null
+  tuition_period: string | null
+  tuition_notes: string | null
+  application_fee_amount: number | null
+  application_fee_currency: string | null
+  application_fee_notes: string | null
+  official_url: string | null
+  application_url: string | null
+  admission_requirements: string | null
+  english_requirements: Record<string, unknown> | null
+  gpa_requirements: string | null
+  curriculum_summary: string | null
+  career_outcomes: string | null
+}
+
+async function updateExistingProgram(
+  supabase: SupabaseClient,
+  rowId: string,
+  batchId: string
+): Promise<{ ok: true; productionId: string } | { ok: false; error: string }> {
+  const { data: staged, error: fetchErr } = await supabase
+    .from('staging_programs')
+    .select('id, import_batch_id, import_status, raw_data, extracted_title, extracted_degree_level_code, extracted_language, extracted_tuition_amount, staging_university_id, match_program_id')
+    .eq('id', rowId)
+    .eq('import_batch_id', batchId)
+    .single()
+
+  if (fetchErr || !staged) return { ok: false, error: 'Staged row not found in this batch.' }
+  const row = staged as StagedProgramRow
+
+  if (row.import_status !== 'approved') {
+    return { ok: false, error: `Row status is "${row.import_status}". Only approved rows can be updated.` }
+  }
+
+  let targetProgramId = row.match_program_id
+  if (!targetProgramId) {
+    const matchResolution = await resolveSingleProgramProductionMatch(supabase, row)
+    if (matchResolution.status === 'matched') {
+      targetProgramId = matchResolution.matches[0].id
+    } else if (matchResolution.status === 'ambiguous') {
+      return { ok: false, error: 'Multiple exact production matches were found. Link the intended production program first.' }
+    } else {
+      return { ok: false, error: 'No exact production match was found. Link a production program first or use create-new.' }
+    }
+  }
+
+  const { data: prod, error: prodErr } = await supabase
+    .from('programs')
+    .select('id, degree_award, primary_subject_id, study_mode, delivery_mode, language_of_instruction, duration_months, tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period, tuition_notes, application_fee_amount, application_fee_currency, application_fee_notes, official_url, application_url, admission_requirements, english_requirements, gpa_requirements, curriculum_summary, career_outcomes')
+    .eq('id', targetProgramId)
+    .single()
+
+  if (prodErr || !prod) {
+    return { ok: false, error: 'Target production program not found. It may have been deleted.' }
+  }
+
+  const rawData = isPlainObject(row.raw_data) ? row.raw_data : {}
+  const candidatePatches = await buildRichProgramPayload(supabase, rawData)
+  if (!candidatePatches.language_of_instruction && row.extracted_language?.trim()) {
+    candidatePatches.language_of_instruction = row.extracted_language.trim()
+  }
+  if (candidatePatches.tuition_min_amount === undefined && row.extracted_tuition_amount !== null && row.extracted_tuition_amount !== undefined) {
+    candidatePatches.tuition_min_amount = row.extracted_tuition_amount
+  }
+
+  const prodRow = prod as ProductionProgramPatchableFields
+  const patches: Record<string, unknown> = {}
+  patchWhenEmpty(patches, prodRow.degree_award, candidatePatches.degree_award, 'degree_award')
+  patchWhenEmpty(patches, prodRow.primary_subject_id, candidatePatches.primary_subject_id, 'primary_subject_id')
+  patchWhenEmpty(patches, prodRow.study_mode, candidatePatches.study_mode, 'study_mode')
+  patchWhenEmpty(patches, prodRow.delivery_mode, candidatePatches.delivery_mode, 'delivery_mode')
+  patchWhenEmpty(patches, prodRow.language_of_instruction, candidatePatches.language_of_instruction, 'language_of_instruction')
+  patchWhenEmpty(patches, prodRow.duration_months, candidatePatches.duration_months, 'duration_months')
+  patchWhenEmpty(patches, prodRow.tuition_min_amount, candidatePatches.tuition_min_amount, 'tuition_min_amount')
+  patchWhenEmpty(patches, prodRow.tuition_max_amount, candidatePatches.tuition_max_amount, 'tuition_max_amount')
+  patchWhenEmpty(patches, prodRow.tuition_currency, candidatePatches.tuition_currency, 'tuition_currency')
+  patchWhenEmpty(patches, prodRow.tuition_period, candidatePatches.tuition_period, 'tuition_period')
+  patchWhenEmpty(patches, prodRow.tuition_notes, candidatePatches.tuition_notes, 'tuition_notes')
+  patchWhenEmpty(patches, prodRow.application_fee_amount, candidatePatches.application_fee_amount, 'application_fee_amount')
+  patchWhenEmpty(patches, prodRow.application_fee_currency, candidatePatches.application_fee_currency, 'application_fee_currency')
+  patchWhenEmpty(patches, prodRow.application_fee_notes, candidatePatches.application_fee_notes, 'application_fee_notes')
+  patchWhenEmpty(patches, prodRow.official_url, candidatePatches.official_url, 'official_url')
+  patchWhenEmpty(patches, prodRow.application_url, candidatePatches.application_url, 'application_url')
+  patchWhenEmpty(patches, prodRow.admission_requirements, candidatePatches.admission_requirements, 'admission_requirements')
+  patchWhenEmpty(patches, prodRow.english_requirements, candidatePatches.english_requirements, 'english_requirements')
+  patchWhenEmpty(patches, prodRow.gpa_requirements, candidatePatches.gpa_requirements, 'gpa_requirements')
+  patchWhenEmpty(patches, prodRow.curriculum_summary, candidatePatches.curriculum_summary, 'curriculum_summary')
+  patchWhenEmpty(patches, prodRow.career_outcomes, candidatePatches.career_outcomes, 'career_outcomes')
+
+  if (Object.keys(patches).length === 0) {
+    return {
+      ok: false,
+      error: 'Nothing safe to patch: all allowlisted program fields are already set, or staging has no new values. Use skip-existing if you only want to mark the duplicate handled.',
+    }
+  }
+
+  const { error: updateErr } = await supabase.from('programs').update(patches).eq('id', prodRow.id)
+  if (updateErr) {
+    return { ok: false, error: 'Failed to update production program. Please try again.' }
+  }
+
+  const sourceWarning = await attachProgramSourceRows(supabase, prodRow.id, rawData)
+
+  const { error: stagingUpdateErr } = await supabase
+    .from('staging_programs')
+    .update({ import_status: 'merged', match_program_id: prodRow.id })
+    .eq('id', rowId)
+    .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] updateExistingProgram: staging status update failed:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: true,
+      productionId: prodRow.id,
+      warning: sourceWarning
+        ? `${sourceWarning} The staging row status update also failed. Reload the page to confirm the current state.`
+        : 'Production program patched but staging row status update failed. The row may still show "approved". Reload the page to check.',
+    }
+  }
+
+  return sourceWarning ? { ok: true, productionId: prodRow.id, warning: sourceWarning } : { ok: true, productionId: prodRow.id }
+}
+
+async function skipExistingProgram(
+  supabase: SupabaseClient,
+  rowId: string,
+  batchId: string
+): Promise<{ ok: true; productionId: string } | { ok: false; error: string }> {
+  const { data: staged, error: fetchErr } = await supabase
+    .from('staging_programs')
+    .select('id, import_batch_id, import_status, extracted_title, extracted_degree_level_code, staging_university_id, match_program_id')
+    .eq('id', rowId)
+    .eq('import_batch_id', batchId)
+    .single()
+
+  if (fetchErr || !staged) return { ok: false, error: 'Staged row not found in this batch.' }
+  const row = staged as ProgramMatchLookupRow & { import_batch_id: string; import_status: string }
+
+  if (row.import_status !== 'approved') {
+    return { ok: false, error: `Row status is "${row.import_status}". Only approved rows can be skipped as existing.` }
+  }
+
+  let targetProgramId = row.match_program_id
+  if (!targetProgramId) {
+    const matchResolution = await resolveSingleProgramProductionMatch(supabase, row)
+    if (matchResolution.status === 'matched') {
+      targetProgramId = matchResolution.matches[0].id
+    } else if (matchResolution.status === 'ambiguous') {
+      return { ok: false, error: 'Multiple exact production matches were found. Link the intended production program first.' }
+    } else {
+      return { ok: false, error: 'No exact production match was found. Link a production program first or use create-new.' }
+    }
+  }
+
+  const { data: prod, error: prodErr } = await supabase
+    .from('programs')
+    .select('id')
+    .eq('id', targetProgramId)
+    .single()
+
+  if (prodErr || !prod) {
+    return { ok: false, error: 'Target production program not found. It may have been deleted.' }
+  }
+
+  const { error: stagingUpdateErr } = await supabase
+    .from('staging_programs')
+    .update({ import_status: 'skipped', match_program_id: targetProgramId })
+    .eq('id', rowId)
+    .eq('import_batch_id', batchId)
+
+  if (stagingUpdateErr) {
+    console.error('[importMerge] skipExistingProgram: staging status update failed:', stagingUpdateErr.code, stagingUpdateErr.message)
+    return {
+      ok: false,
+      error: 'Failed to mark the staged program as skipped. Please try again.',
+    }
+  }
+
+  return { ok: true, productionId: targetProgramId }
+}
+
 export async function bulkMergeApprovedPrograms(
   supabase: SupabaseClient,
   params: {
@@ -1173,7 +1637,7 @@ export async function bulkMergeApprovedPrograms(
     statusFilter?: string
   }
 ): Promise<
-  | { ok: true; merged: number; skipped: number; failed: number; warned: number }
+  | { ok: true; created: number; updated: number; skippedExisting: number; skipped: number; failed: number; warned: number }
   | { ok: false; error: string }
 > {
   const { batchId, rowIds, statusFilter = 'all' } = params
@@ -1192,7 +1656,7 @@ export async function bulkMergeApprovedPrograms(
 
   let query = supabase
     .from('staging_programs')
-    .select('id, import_status, match_program_id')
+    .select('id, import_status, extracted_title, extracted_degree_level_code, staging_university_id, match_program_id')
     .eq('import_batch_id', batchId)
 
   if (uniqueRowIds.length > 0) {
@@ -1210,19 +1674,34 @@ export async function bulkMergeApprovedPrograms(
   const rows = (stagedRows ?? []) as Array<{
     id: string
     import_status: string
+    extracted_title: string | null
+    extracted_degree_level_code: string | null
+    staging_university_id: string | null
     match_program_id: string | null
   }>
 
   const foundRowIds = new Set(rows.map((row) => row.id))
-  let merged = 0
+  let created = 0
+  let updated = 0
+  let skippedExisting = 0
   let skipped = 0
   let failed = uniqueRowIds.length > 0
     ? uniqueRowIds.filter((rowId) => !foundRowIds.has(rowId)).length
     : 0
   let warned = 0
+  const matchResolutions = await resolveProgramProductionMatches(supabase, rows)
 
   for (const row of rows) {
     if (row.import_status !== 'approved' || row.match_program_id) {
+      skipped += 1
+      continue
+    }
+
+    const matchResolution = matchResolutions.get(row.id)
+    const mergeAction: MergeAction =
+      matchResolution?.status === 'matched' ? 'skip_existing' : 'create_new'
+
+    if (matchResolution?.status === 'ambiguous') {
       skipped += 1
       continue
     }
@@ -1231,7 +1710,7 @@ export async function bulkMergeApprovedPrograms(
       entityType: 'programs',
       rowId: row.id,
       batchId,
-      action: 'create_new',
+      action: mergeAction,
     })
 
     if (!result.ok) {
@@ -1239,11 +1718,17 @@ export async function bulkMergeApprovedPrograms(
       continue
     }
 
-    merged += 1
+    if (mergeAction === 'skip_existing') {
+      skippedExisting += 1
+    } else if (mergeAction === 'update_existing') {
+      updated += 1
+    } else {
+      created += 1
+    }
     if (result.warning) warned += 1
   }
 
-  return { ok: true, merged, skipped, failed, warned }
+  return { ok: true, created, updated, skippedExisting, skipped, failed, warned }
 }
 
 export async function bulkPublishMergedPrograms(
