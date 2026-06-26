@@ -3,6 +3,7 @@ import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
 import { parseProgramImportJson } from '../../../lib/admin/importParse'
 import { validateStagedRecord } from '../../../lib/admin/importValidation'
+import { resolveProgramPrimarySubject } from '../../../lib/admin/importMerge'
 import type { FormErrors } from '../../../lib/admin/validate'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
@@ -71,6 +72,20 @@ function validationValues(fields: Record<string, string | number | null>): Recor
     extracted_category: '',
     extracted_content: '',
   }
+}
+
+async function programValidationWarnings(
+  rawData: Record<string, unknown>,
+  fields: Record<string, string | number | null>,
+): Promise<string[]> {
+  const subjectResolution = await resolveProgramPrimarySubject(supabase, rawData)
+  return validateStagedRecord('programs', validationValues(fields), {
+    rawData,
+    programPrimarySubject: {
+      status: subjectResolution.status,
+      input: subjectResolution.input,
+    },
+  }).warnings
 }
 
 function buildHelperRawData(
@@ -252,7 +267,7 @@ if (Astro.request.method === 'POST') {
                 }
                 const rowWarnings = [
                   ...row.parseWarnings,
-                  ...validateStagedRecord('programs', validationValues(resolvedFields)).warnings,
+                  ...await programValidationWarnings(row.rawData, resolvedFields),
                 ]
                 const importStatus = rowWarnings.length === 0 ? 'validated' : 'pending'
 
@@ -473,6 +488,10 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
             <p class="text-xs uppercase tracking-wide text-gray-400">Sample titles</p>
             <p id="preview-samples" class="mt-1 text-sm text-gray-600">No sample programs yet.</p>
           </div>
+          <div class="mt-4">
+            <p class="text-xs uppercase tracking-wide text-gray-400">Sample fields</p>
+            <p id="preview-rich" class="mt-1 text-sm text-gray-600">No sample field summary yet.</p>
+          </div>
         </section>
 
         {serverError && (
@@ -522,11 +541,12 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
       var previewProgramCount = document.getElementById('preview-program-count');
       var previewSkippedCount = document.getElementById('preview-skipped-count');
       var previewSamples = document.getElementById('preview-samples');
+      var previewRich = document.getElementById('preview-rich');
       var previewSelectedUniversity = document.getElementById('preview-selected-university');
       var previewWarningBox = document.getElementById('preview-warning-box');
       var previewWarning = document.getElementById('preview-warning');
 
-      if (!universitySelect || !jsonInput || !preview || !previewShape || !previewStatus || !previewDetail || !previewProgramCount || !previewSkippedCount || !previewSamples || !previewSelectedUniversity || !previewWarningBox || !previewWarning) {
+      if (!universitySelect || !jsonInput || !preview || !previewShape || !previewStatus || !previewDetail || !previewProgramCount || !previewSkippedCount || !previewSamples || !previewRich || !previewSelectedUniversity || !previewWarningBox || !previewWarning) {
         return;
       }
 
@@ -562,11 +582,12 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
         previewProgramCount.textContent = '0';
         previewSkippedCount.textContent = '0';
         previewSamples.textContent = 'No sample programs yet.';
+        previewRich.textContent = 'No sample field summary yet.';
         previewSelectedUniversity.textContent = selectedUniversityName() || 'Not selected';
         setWarning('');
       }
 
-      function setSuccess(shapeLabel, detail, count, skipped, samples, warning) {
+      function setSuccess(shapeLabel, detail, count, skipped, samples, richSummary, warning) {
         preview.classList.remove('hidden');
         preview.classList.remove('border-red-200', 'bg-red-50');
         preview.classList.add('border-green-200', 'bg-green-50');
@@ -578,8 +599,56 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
         previewProgramCount.textContent = String(count);
         previewSkippedCount.textContent = String(skipped);
         previewSamples.textContent = samples.length > 0 ? samples.join(', ') : 'No sample programs yet.';
+        previewRich.textContent = richSummary || 'No sample field summary yet.';
         previewSelectedUniversity.textContent = selectedUniversityName() || 'Not selected';
         setWarning(warning);
+      }
+
+      function formatTuition(item) {
+        var min = item.tuition_min_amount ?? item.tuition_amount ?? item.tuition;
+        var max = item.tuition_max_amount;
+        var currency = item.tuition_currency || item.currency;
+        var period = item.tuition_period || item.tuition_frequency;
+        if (min == null && max == null && !currency && !period) return '';
+        var amount = 'Not listed';
+        if (min != null && max != null) amount = String(min) === String(max) ? String(min) : String(min) + '-' + String(max);
+        else if (min != null) amount = String(min);
+        else if (max != null) amount = String(max);
+        var suffix = [currency, period].filter(Boolean).join(' / ');
+        return suffix ? amount + ' ' + suffix : amount;
+      }
+
+      function countSourceUrls(item) {
+        var urls = [];
+        function add(value) {
+          if (!value || typeof value !== 'string') return;
+          if (urls.indexOf(value) === -1) urls.push(value);
+        }
+        add(item.official_program_url || item.official_url || item.program_url);
+        add(item.official_application_url || item.application_url || item.apply_url);
+        add(item.official_tuition_url);
+        if (Array.isArray(item.source_urls)) {
+          item.source_urls.forEach(add);
+        }
+        return urls.length;
+      }
+
+      function formatSampleFields(item) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return '';
+        var parts = [];
+        var subject = item.primary_subject || item.subject_area || item.subject;
+        var duration = item.duration_months != null ? String(item.duration_months) + ' months' : (item.duration_text || '');
+        var tuition = formatTuition(item);
+        var officialUrl = item.official_program_url || item.official_url || item.program_url;
+        var sourceUrlCount = countSourceUrls(item);
+
+        if (subject) parts.push('Subject: ' + String(subject));
+        if (duration) parts.push('Duration: ' + String(duration));
+        if (tuition) parts.push('Tuition: ' + tuition);
+        if (officialUrl) parts.push('Official URL: ' + String(officialUrl));
+        parts.push('Source URLs: ' + String(sourceUrlCount));
+
+        return parts.join(' · ');
       }
 
       function parseProgramItems(items) {
@@ -599,6 +668,7 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
           samples: objectItems.slice(0, 3).map(function (item) {
             return String(item.title || 'Untitled program');
           }),
+          richSummary: objectItems.length > 0 ? formatSampleFields(objectItems[0]) : '',
         };
       }
 
@@ -625,6 +695,7 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
             arraySummary.count,
             arraySummary.skipped,
             arraySummary.samples,
+            arraySummary.richSummary,
             ''
           );
           return;
@@ -659,6 +730,7 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
           programsSummary.count,
           programsSummary.skipped,
           programsSummary.samples,
+          programsSummary.richSummary,
           warning
         );
       }
