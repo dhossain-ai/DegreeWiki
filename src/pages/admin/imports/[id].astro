@@ -10,6 +10,7 @@ import {
   bulkPublishMergedPrograms,
   mergeApprovedRow,
   resolveProgramPrimarySubject,
+  resolveProgramProductionMatches,
   type MergeAction,
 } from '../../../lib/admin/importMerge'
 import { parseBulkJson, parseResearchPackJson } from '../../../lib/admin/importParse'
@@ -582,10 +583,13 @@ if (Astro.request.method === 'POST') {
           return redirectToBatch({
             batchAction: 'merge_selected_programs',
             batchScope: 'selected',
-            batchSuccess: result.merged,
+            batchSuccess: result.created + result.updated + result.skippedExisting,
             batchSkipped: result.skipped,
             batchFailed: result.failed,
             batchWarned: result.warned > 0 ? result.warned : null,
+            batchCreated: result.created > 0 ? result.created : null,
+            batchUpdated: result.updated > 0 ? result.updated : null,
+            batchSkippedExisting: result.skippedExisting > 0 ? result.skippedExisting : null,
           })
         }
 
@@ -606,10 +610,13 @@ if (Astro.request.method === 'POST') {
           return redirectToBatch({
             batchAction: 'merge_matching_programs',
             batchScope: 'matching',
-            batchSuccess: result.merged,
+            batchSuccess: result.created + result.updated + result.skippedExisting,
             batchSkipped: result.skipped,
             batchFailed: result.failed,
             batchWarned: result.warned > 0 ? result.warned : null,
+            batchCreated: result.created > 0 ? result.created : null,
+            batchUpdated: result.updated > 0 ? result.updated : null,
+            batchSkippedExisting: result.skippedExisting > 0 ? result.skippedExisting : null,
           })
         }
 
@@ -650,7 +657,11 @@ if (Astro.request.method === 'POST') {
       const rawEntityType = fd.get('entity_type')?.toString().trim() ?? ''
       const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
       const rawMergeAction = fd.get('merge_action')?.toString().trim() ?? 'create_new'
-      const mergeAction: MergeAction = rawMergeAction === 'update_existing' ? 'update_existing' : 'create_new'
+      const allowDuplicateCreate = fd.get('allow_duplicate_create')?.toString().trim() === 'yes'
+      const mergeAction: MergeAction =
+        rawMergeAction === 'update_existing' ? 'update_existing'
+          : rawMergeAction === 'skip_existing' ? 'skip_existing'
+          : 'create_new'
 
       // Batch type must match entity type unless batch is mixed.
       if (b.batch_type !== 'mixed' && b.batch_type !== rawEntityType) {
@@ -661,6 +672,7 @@ if (Astro.request.method === 'POST') {
           rowId: rawRowId,
           batchId: b.id,
           action: mergeAction,
+          allowDuplicateCreate,
         })
         if (result.ok) {
           if (result.warning) {
@@ -1126,6 +1138,51 @@ if (Astro.request.method === 'POST') {
         }
       }
     }
+  } else if (postAction === 'set_match_program_id') {
+    const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
+    const rawProdId = fd.get('production_program_id')?.toString().trim() ?? ''
+
+    if (!BATCH_UUID_RE.test(rawRowId)) {
+      setMatchError = 'Invalid staging row ID.'
+    } else if (!BATCH_UUID_RE.test(rawProdId)) {
+      setMatchError = 'Invalid production program UUID. Enter a valid UUID.'
+    } else {
+      const { data: progStagingRow, error: progStagingErr } = await supabase
+        .from('staging_programs')
+        .select('id, import_status')
+        .eq('id', rawRowId)
+        .eq('import_batch_id', b.id)
+        .single()
+
+      if (progStagingErr || !progStagingRow) {
+        setMatchError = 'Staging program row not found in this batch.'
+      } else if ((progStagingRow as { import_status: string }).import_status !== 'approved') {
+        setMatchError = 'Only approved staging rows can be linked to a production program.'
+      } else {
+        const { data: progProdRow, error: progProdErr } = await supabase
+          .from('programs')
+          .select('id')
+          .eq('id', rawProdId)
+          .single()
+
+        if (progProdErr || !progProdRow) {
+          setMatchError = 'Production program not found. Confirm the UUID is correct.'
+        } else {
+          const { error: progLinkErr } = await supabase
+            .from('staging_programs')
+            .update({ match_program_id: rawProdId })
+            .eq('id', rawRowId)
+            .eq('import_batch_id', b.id)
+
+          if (progLinkErr) {
+            console.error('[set_match_program_id] update failed:', progLinkErr.code)
+            setMatchError = 'Failed to link staging row to production program. Please try again.'
+          } else {
+            return redirectToBatch()
+          }
+        }
+      }
+    }
   } else if (postAction === 'set_match_scholarship_id') {
     const rawRowId = fd.get('row_id')?.toString().trim() ?? ''
     const rawProdId = fd.get('production_scholarship_id')?.toString().trim() ?? ''
@@ -1404,6 +1461,9 @@ const batchActionSummary = batchActionParam
       skipped: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkipped') ?? '0', 10) || 0),
       failed: Math.max(0, parseInt(Astro.url.searchParams.get('batchFailed') ?? '0', 10) || 0),
       warned: Math.max(0, parseInt(Astro.url.searchParams.get('batchWarned') ?? '0', 10) || 0),
+      created: Math.max(0, parseInt(Astro.url.searchParams.get('batchCreated') ?? '0', 10) || 0),
+      updated: Math.max(0, parseInt(Astro.url.searchParams.get('batchUpdated') ?? '0', 10) || 0),
+      skippedExisting: Math.max(0, parseInt(Astro.url.searchParams.get('batchSkippedExisting') ?? '0', 10) || 0),
     }
   : null
 
@@ -1442,6 +1502,12 @@ type StagingProgram = {
   reviewed_at: string | null
   raw_data: Record<string, unknown>
   created_at: string
+}
+type ProductionProgramSummary = {
+  id: string
+  title: string
+  slug: string
+  content_status: string
 }
 type StagingScholarship = {
   id: string
@@ -1631,6 +1697,29 @@ const visibleScholarships = activeEntity === 'scholarships'
 const visibleArticles = activeEntity === 'articles'
   ? (visibleRowsResult.data ?? []) as StagingArticle[]
   : []
+
+const visibleProgramMatchResolutions = visiblePrograms.length > 0
+  ? await resolveProgramProductionMatches(supabase, visiblePrograms)
+  : new Map()
+const visibleProgramProductionIds = [...new Set(
+  [
+    ...visiblePrograms
+      .map((row) => row.match_program_id)
+      .filter((value): value is string => value !== null),
+    ...[...visibleProgramMatchResolutions.values()].flatMap((resolution) => resolution.matches.map((match) => match.id)),
+  ]
+)]
+const productionProgramSummaryMap = new Map<string, ProductionProgramSummary>()
+if (visibleProgramProductionIds.length > 0) {
+  const { data: productionPrograms } = await supabase
+    .from('programs')
+    .select('id, title, slug, content_status')
+    .in('id', visibleProgramProductionIds)
+
+  for (const program of (productionPrograms ?? []) as ProductionProgramSummary[]) {
+    productionProgramSummaryMap.set(program.id, program)
+  }
+}
 
 const programImportHelperRows = stagingUniversities.filter((row) => isProgramImportHelperRow(row.raw_data))
 const helperUniversityRowIds = new Set(programImportHelperRows.map((row) => row.id))
@@ -2174,7 +2263,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                 <div>
                   <h3 class="text-sm font-semibold text-emerald-900">Merge actions</h3>
                   <p class="mt-1 text-xs text-emerald-800">
-                    Merge approved program rows with the existing `mergeProgram()` flow. New production programs stay draft and unverified until you review them.
+                    Merge approved program rows with duplicate-safe program handling. Exact production matches are skipped by default during bulk merge, and new production programs still stay draft and unverified until you review them.
                   </p>
                 </div>
                 <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-emerald-900">
@@ -2193,7 +2282,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                   <input type="hidden" name="merge_scope" value="selected" />
                   {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
                   <p class="text-sm font-medium text-emerald-900">Merge selected approved rows</p>
-                  <p class="mt-1 text-xs text-emerald-800">Uses the same visible-row selection as the bulk review controls below.</p>
+                  <p class="mt-1 text-xs text-emerald-800">Uses the same visible-row selection as the bulk review controls below. Exact unique production matches are marked skipped instead of creating duplicates.</p>
                   <button type="submit" class="mt-3 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
                     Merge approved programs
                   </button>
@@ -2204,6 +2293,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                   <input type="hidden" name="merge_scope" value="matching" />
                   <input type="hidden" name="status_filter" value={selectedStatusFilter} />
                   <p class="text-sm font-medium text-emerald-900">Merge all approved rows in this batch/filter</p>
+                  <p class="text-xs text-emerald-800">Bulk merge creates only unmatched rows. Exact unique matches are skipped, and ambiguous matches stay for manual review.</p>
                   <label class="flex items-start gap-2 text-sm text-emerald-900">
                     <input type="checkbox" name="confirm_merge_matching" value="yes" required class="mt-0.5 shrink-0" />
                     <span>I understand this will merge all approved program rows in this batch/filter.</span>
@@ -2314,11 +2404,14 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     <div class={`mb-4 rounded-md border px-4 py-3 text-sm ${
       batchActionSummary.action === 'publish_matching_programs'
         ? 'border-amber-200 bg-amber-50 text-amber-900'
-        : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-900'
     }`}>
       {BATCH_ACTION_LABEL[batchActionSummary.action] ?? batchActionSummary.action}
       {batchActionSummary.scope === 'selected' ? ' (selected)' : batchActionSummary.scope === 'matching' ? ' (all matching)' : ''}
       : {batchActionSummary.success} row{batchActionSummary.success !== 1 ? 's' : ''} {BATCH_ACTION_RESULT_LABEL[batchActionSummary.action] ?? 'processed'}.
+      {batchActionSummary.created > 0 && ` ${batchActionSummary.created} created.`}
+      {batchActionSummary.updated > 0 && ` ${batchActionSummary.updated} updated.`}
+      {batchActionSummary.skippedExisting > 0 && ` ${batchActionSummary.skippedExisting} skipped as existing duplicates.`}
       {batchActionSummary.skipped > 0 && ` ${batchActionSummary.skipped} skipped.`}
       {batchActionSummary.failed > 0 && ` ${batchActionSummary.failed} failed.`}
       {batchActionSummary.warned > 0 && ` ${batchActionSummary.warned} merged row${batchActionSummary.warned !== 1 ? 's' : ''} need manual follow-up.`}
@@ -3000,8 +3093,17 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                       </details>
                     </form>
                   )}
-                  {row.import_status === 'approved' && !row.match_program_id && (() => {
+                  {row.import_status === 'approved' && (() => {
                     const elig = progEligibility.get(row.id)
+                    const matchResolution = visibleProgramMatchResolutions.get(row.id)
+                    const linkedProgram = row.match_program_id ? productionProgramSummaryMap.get(row.match_program_id) : null
+                    const exactMatch = !row.match_program_id && matchResolution?.status === 'matched'
+                      ? productionProgramSummaryMap.get(matchResolution.matches[0]?.id ?? '')
+                      : null
+                    const ambiguousMatches = !row.match_program_id && matchResolution?.status === 'ambiguous'
+                      ? matchResolution.matches.map((match) => productionProgramSummaryMap.get(match.id) ?? match)
+                      : []
+
                     if (!elig) return null
                     if (!elig.canMerge) {
                       return (
@@ -3010,21 +3112,114 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                         </p>
                       )
                     }
+
                     return (
-                      <form method="POST" class="mt-2 border-t border-gray-100 pt-2 space-y-1.5">
-                        <input type="hidden" name="_action" value="merge" />
-                        <input type="hidden" name="entity_type" value="programs" />
-                        <input type="hidden" name="row_id" value={row.id} />
-                        <input type="hidden" name="merge_action" value="create_new" />
-                        <p class="text-amber-700 font-medium">This will create a new draft production program.</p>
-                        <label class="flex items-start gap-1.5 text-gray-600">
-                          <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
-                          <span>I confirm this creates a production record.</span>
-                        </label>
-                        <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                          Merge to Production
-                        </button>
-                      </form>
+                      <div class="mt-2 border-t border-gray-100 pt-2 space-y-3">
+                        {linkedProgram && (
+                          <div class="rounded border border-blue-200 bg-blue-50 px-2.5 py-2 text-blue-900">
+                            <p class="font-medium">Linked production program</p>
+                            <p class="mt-0.5 text-[11px]">{linkedProgram.title} ({linkedProgram.slug}) • {linkedProgram.content_status}</p>
+                          </div>
+                        )}
+
+                        {!linkedProgram && exactMatch && (
+                          <div class="rounded border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-900">
+                            <p class="font-medium">Exact production match detected</p>
+                            <p class="mt-0.5 text-[11px]">{exactMatch.title} ({exactMatch.slug}) • {exactMatch.content_status}</p>
+                          </div>
+                        )}
+
+                        {!linkedProgram && ambiguousMatches.length > 0 && (
+                          <div class="rounded border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-900 space-y-1">
+                            <p class="font-medium">Multiple exact production matches detected</p>
+                            {ambiguousMatches.map((match) => (
+                              <p class="text-[11px]">{match.title} ({match.slug}) • {match.content_status}</p>
+                            ))}
+                          </div>
+                        )}
+
+                        {!row.match_program_id && (
+                          <details>
+                            <summary class="cursor-pointer text-blue-600 hover:text-blue-800 text-xs">Link to existing production program…</summary>
+                            <form method="POST" class="mt-2 space-y-1.5">
+                              <input type="hidden" name="_action" value="set_match_program_id" />
+                              <input type="hidden" name="row_id" value={row.id} />
+                              <p class="text-gray-600 text-xs">Paste the production program UUID to enable update-existing or skip-existing without creating a duplicate.</p>
+                              <input
+                                type="text"
+                                name="production_program_id"
+                                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                                required
+                                class="block w-full rounded border border-gray-200 px-2 py-1 text-xs font-mono text-gray-700 placeholder-gray-300 focus:outline-none focus:border-blue-400"
+                              />
+                              <button type="submit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                                Link
+                              </button>
+                            </form>
+                          </details>
+                        )}
+
+                        {(row.match_program_id || exactMatch) && (
+                          <form method="POST" class="space-y-1.5">
+                            <input type="hidden" name="_action" value="merge" />
+                            <input type="hidden" name="entity_type" value="programs" />
+                            <input type="hidden" name="row_id" value={row.id} />
+                            <input type="hidden" name="merge_action" value="skip_existing" />
+                            <p class="text-sky-700 font-medium">Mark this staged row as an existing production duplicate.</p>
+                            <label class="flex items-start gap-1.5 text-gray-600">
+                              <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                              <span>I confirm no new production program should be created.</span>
+                            </label>
+                            <button type="submit" class="rounded bg-sky-600 px-2 py-1 text-xs font-medium text-white hover:bg-sky-700">
+                              Skip Existing
+                            </button>
+                          </form>
+                        )}
+
+                        {(row.match_program_id || exactMatch) && (
+                          <form method="POST" class="space-y-1.5">
+                            <input type="hidden" name="_action" value="merge" />
+                            <input type="hidden" name="entity_type" value="programs" />
+                            <input type="hidden" name="row_id" value={row.id} />
+                            <input type="hidden" name="merge_action" value="update_existing" />
+                            <p class="text-orange-700 font-medium">Patch only empty allowlisted fields on the existing production program.</p>
+                            <p class="text-gray-500">Never overwrites title, slug, university, degree level, status, SEO, or already-filled rich fields.</p>
+                            <label class="flex items-start gap-1.5 text-gray-600">
+                              <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                              <span>I confirm this writes only safe empty fields to the linked production record.</span>
+                            </label>
+                            <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
+                              Update Existing
+                            </button>
+                          </form>
+                        )}
+
+                        <form method="POST" class="space-y-1.5">
+                          <input type="hidden" name="_action" value="merge" />
+                          <input type="hidden" name="entity_type" value="programs" />
+                          <input type="hidden" name="row_id" value={row.id} />
+                          <input type="hidden" name="merge_action" value="create_new" />
+                          {(row.match_program_id || exactMatch || ambiguousMatches.length > 0) && (
+                            <input type="hidden" name="allow_duplicate_create" value="yes" />
+                          )}
+                          <p class="text-amber-700 font-medium">
+                            {row.match_program_id || exactMatch || ambiguousMatches.length > 0
+                              ? 'This will create a new draft production program even though a possible existing match was found.'
+                              : 'This will create a new draft production program.'}
+                          </p>
+                          <label class="flex items-start gap-1.5 text-gray-600">
+                            <input type="checkbox" name="confirm" value="yes" required class="mt-0.5 shrink-0" />
+                            <span>
+                              {row.match_program_id || exactMatch || ambiguousMatches.length > 0
+                                ? 'I understand this may intentionally create a duplicate production record.'
+                                : 'I confirm this creates a production record.'}
+                            </span>
+                          </label>
+                          <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
+                            Merge to Production
+                          </button>
+                        </form>
+                      </div>
                     )
                   })()}
                   {row.import_status === 'merged' && (
