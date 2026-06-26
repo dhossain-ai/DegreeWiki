@@ -353,9 +353,9 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
       <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Import Hub</p>
       <h1 class="mt-1 text-2xl font-bold text-gray-900">Program Import Staging</h1>
       <p class="mt-2 max-w-3xl text-sm text-gray-600">
-        Select the production university first, then paste or load program JSON for staging. This page never writes
-        programs directly to production. It creates a reviewable import batch and links every staged program to a
-        batch-local helper row for the selected university.
+        Select the university first, then paste or load importer-friendly program JSON for staging. This page never
+        writes programs directly to production. It creates a reviewable import batch and links every staged program to
+        a batch-local helper row for the selected university.
       </p>
     </div>
     <a href="/admin/imports" class="shrink-0 text-sm text-gray-500 hover:underline">Back to Import Hub</a>
@@ -363,26 +363,30 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
 
   <div class="mb-6 grid gap-4 lg:grid-cols-[minmax(0,2fr),minmax(18rem,1fr)]">
     <div class="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4">
-      <h2 class="text-sm font-semibold text-blue-900">Supported JSON shapes</h2>
-      <p class="mt-2 text-sm text-blue-800">Use any one of these:</p>
+      <h2 class="text-sm font-semibold text-blue-900">Recommended workflow</h2>
+      <ul class="mt-2 space-y-1.5 text-sm text-blue-800">
+        <li>Select the university first.</li>
+        <li>Paste or upload JSON that uses only the supported program fields.</li>
+        <li>Import stages rows only. Nothing is written directly to production here.</li>
+        <li>Merge later creates draft, unverified programs through the existing review flow.</li>
+        <li>Re-import is duplicate-safe: exact matches are detected by title + university + degree.</li>
+        <li>Update Existing fills empty production fields only.</li>
+        <li>Use Publish merged drafts as unverified after review, then verify manually later.</li>
+      </ul>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-white px-5 py-4">
+      <h2 class="text-sm font-semibold text-gray-900">Supported JSON shapes</h2>
+      <p class="mt-2 text-sm text-gray-600">Use any one of these:</p>
       <ul class="mt-2 space-y-1 text-sm text-blue-800">
         <li><code>[...]</code> raw array of program objects</li>
         <li><code>{'{'} "programs": [...] {'}'}</code></li>
         <li><code>{'{'} "university": {'{'} ... {'}'}, "programs": [...] {'}'}</code> research-pack shape</li>
       </ul>
-      <p class="mt-3 text-xs text-blue-700">
-        If the JSON contains a different university name than the one you select, the page warns and continues.
+      <p class="mt-3 text-xs text-gray-500">
+        The nested university + programs shape is preferred for university-by-university research. If the JSON names a
+        different university than the one you select, the page warns and continues.
       </p>
-    </div>
-
-    <div class="rounded-xl border border-gray-200 bg-white px-5 py-4">
-      <h2 class="text-sm font-semibold text-gray-900">What happens on submit</h2>
-      <ul class="mt-2 space-y-1.5 text-sm text-gray-600">
-        <li>A new import batch is created with staging only.</li>
-        <li>A helper staging-university row is linked to the selected production university.</li>
-        <li>Each parsed program is inserted into <code>staging_programs</code> for review.</li>
-        <li>You land on the batch detail page to approve and merge later.</li>
-      </ul>
     </div>
   </div>
 
@@ -400,7 +404,7 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
         <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
           <h2 class="text-base font-semibold text-gray-900">1. Choose the production university</h2>
           <p class="mt-1 text-sm text-gray-500">
-            Programs staged here will inherit their merge target from this university selection.
+            Programs staged here inherit their merge target from this university selection.
           </p>
           <div class="mt-4">
             <label for="selected_university_id" class="mb-1 block text-sm font-medium text-gray-700">Production university *</label>
@@ -450,11 +454,12 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
               rows="16"
               required
               class={textAreaClasses}
-              placeholder={`{\n  "programs": [\n    {\n      "title": "MSc Computer Science",\n      "degree_level_code": "master",\n      "language": "English",\n      "tuition_amount": 15000,\n      "deadline": "2026-09-01"\n    }\n  ]\n}`}
+              placeholder={`{\n  "university": {\n    "name": "Example University",\n    "country": "Finland",\n    "official_website": "https://example.fi",\n    "source_urls": [\n      "https://example.fi"\n    ]\n  },\n  "programs": [\n    {\n      "title": "MSc Computer Science",\n      "degree_level_code": "master",\n      "primary_subject": "Computer Science",\n      "study_mode": "full_time",\n      "delivery_mode": "on_campus",\n      "language_of_instruction": "English",\n      "duration_months": 24,\n      "tuition_min_amount": 15000,\n      "tuition_max_amount": 18000,\n      "tuition_currency": "EUR",\n      "tuition_period": "per_year",\n      "official_url": "https://example.fi/programs/computer-science",\n      "application_url": null,\n      "admission_requirements": null,\n      "gpa_requirements": null,\n      "curriculum_summary": null,\n      "career_outcomes": null,\n      "source_urls": [\n        "https://example.fi/programs/computer-science"\n      ]\n    }\n  ]\n}`}
             >{values.json_input}</textarea>
             {formErrors.json_input && <p class="mt-1 text-xs text-red-600">{formErrors.json_input}</p>}
             <p class="mt-2 text-xs text-gray-400">
-              Maximum {100} program rows per submission. Non-object array items are skipped and counted as failures.
+              Maximum {100} program rows per submission. Use only supported program fields. Do not include intakes,
+              deadlines, content_status, or verification_status. Non-object array items are skipped and counted as failures.
             </p>
           </div>
         </section>
@@ -508,11 +513,13 @@ const textAreaClasses = `${inputClasses} resize-y font-mono text-xs`
 
       <aside class="space-y-4">
         <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
-          <h2 class="text-sm font-semibold text-gray-900">Staging notes</h2>
+          <h2 class="text-sm font-semibold text-gray-900">Importer reminders</h2>
           <ul class="mt-3 space-y-2 text-sm text-gray-600">
             <li>Programs with no validation warnings start as <code>validated</code>.</li>
             <li>Programs with warnings start as <code>pending</code>.</li>
             <li>The helper university row is auto-linked to the selected production university.</li>
+            <li><code>source_urls</code> should contain official source pages, especially the main program page.</li>
+            <li><code>primary_subject</code> should be broad and existing-friendly, or <code>null</code> when unsure.</li>
             <li>Program merge still happens later from the batch detail page.</li>
           </ul>
         </section>
