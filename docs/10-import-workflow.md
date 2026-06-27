@@ -26,8 +26,11 @@ The preferred operational path for program imports is one university at a time.
    rich fields.
 6. Submit to create a staging-only import batch.
 7. Review staged rows and warnings on `/admin/imports/[id]`.
-8. Approve matching rows after manual QA.
-9. Merge approved rows.
+8. Approve matching rows after manual QA. Approve marks staged rows as reviewed
+   only; it does not update production.
+9. Choose the production action:
+   - First import: merge approved new programs.
+   - Enrichment: update exact existing matched programs.
 10. Use **Publish merged drafts as unverified** only after review.
 11. Verify manually later.
 
@@ -40,6 +43,17 @@ What this flow does:
 - `Update Existing` fills empty allowlisted production fields only.
 - Bulk Update Existing Matched Programs fills empty allowlisted production
   fields only on exact existing matches and never creates duplicates.
+
+## Import Hub Guidance
+
+Use `/admin/imports` as the hub.
+
+- **Program Import Staging** is the normal recommended path for program imports.
+- **General Batch Creation** is Advanced / Legacy. Use it for universities,
+  scholarships, articles, mixed research packs, and manual staging.
+- Recent batch history can be filtered by type, status, and active/recent state.
+- Active batches needing review should be opened from the batch history and
+  advanced through the staged-row review workflow.
 
 ## Recommended Research Prompt
 
@@ -192,10 +206,10 @@ Program import is now duplicate-safe by default.
 Use these actions after review:
 
 - **Skip Existing** when the staged row is already represented in production.
-- **Update Existing** when you want to fill empty allowlisted production fields
-  only.
-- **Bulk Update Existing Matched Programs** after a richer second import when
-  you want to patch many exact existing matches in one pass.
+- **Enrichment: Update existing matched programs** when you want to fill empty
+  allowlisted production fields only.
+- **Enrichment: Update existing matched programs** in bulk after a richer second
+  import when you want to patch many exact existing matches in one pass.
 - **Create New** only when the program is genuinely distinct, or when you have
   explicitly confirmed that a duplicate production row is intentional.
 
@@ -224,6 +238,44 @@ Enrichment-pass rules:
 
 ## Cleanup Rules
 
+### Import Batch Cleanup
+
+Super-admins can delete old import batches from `/admin/imports/[id]` when the
+batch is no longer useful.
+
+The delete flow requires:
+
+- super-admin role
+- confirmation checkbox
+- typed `DELETE`
+
+What it deletes:
+
+- `staging_programs`
+- `staging_universities`
+- `staging_scholarships`
+- `staging_articles`
+- `staging_errors`
+- `import_files`
+- the selected `import_batches` row
+
+What it does not delete:
+
+- production programs
+- production universities
+- production scholarships
+- production articles
+- media assets
+- production `data_sources`
+
+Deleting an import batch removes staging/review records only. Production content
+already created by merge is not deleted.
+
+If RLS or permissions block cleanup, the page reports a friendly failure and
+does not use a service role or RLS bypass.
+
+### Production Duplicate Cleanup
+
 When older duplicate or test programs already exist:
 
 - Use `/admin/programs?duplicates=1` to isolate duplicate groups.
@@ -235,17 +287,23 @@ When older duplicate or test programs already exist:
 
 ## Manual QA Checklist For One University
 
-1. Open `/admin/imports/programs`.
-2. Confirm the helper copy is clear.
-3. Copy the recommended prompt.
-4. Use it with one small real university or college.
-5. Paste or upload the JSON.
-6. Confirm the preview shows useful fields.
-7. Stage rows.
-8. Approve all matching.
-9. Merge approved.
-10. Confirm duplicate handling does not create duplicates on re-import.
-11. Confirm `Update Existing` fills empty fields only.
-12. Confirm `Publish merged drafts as unverified` works.
-13. Confirm the public page shows imported rich fields.
-14. Confirm `npm run build` passes.
+1. Open `/admin/imports`.
+2. Confirm Program Import is the clear primary path.
+3. Confirm General Batch Creation is Advanced / Legacy.
+4. Confirm recent batch history is easier to understand and filter.
+5. Open `/admin/imports/programs`.
+6. Confirm first-import and enrichment instructions are clear.
+7. Paste or upload JSON for one small real university or college.
+8. Confirm the preview shows useful fields.
+9. Stage rows.
+10. Open an import batch with staged programs.
+11. Confirm approve vs merge vs update existing vs publish is clearly explained.
+12. Approve rows and confirm the page does not imply production is updated by approve alone.
+13. Confirm enrichment action is easy to find.
+14. Confirm first-import merge action is clearly labeled.
+15. Confirm publish action is clearly labeled as only for draft/unverified publishing.
+16. Delete one old test import batch as super-admin if safe.
+17. Confirm production programs from that batch still exist.
+18. Confirm duplicate handling does not create duplicates on re-import.
+19. Confirm enrichment updates fill empty fields only.
+20. Confirm `npm run build` passes.

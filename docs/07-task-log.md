@@ -22,6 +22,51 @@ Older detail lives in `docs/archive/`.
 - `archive/task-log/task-log-phase-51-54-student-fit-finder-ai-runtime.md`
 - `archive/task-log/task-log-phase-55-56-public-redesign-auth-routing.md`
 
+## 2026-06-26 - Phase 68: Import Pipeline Polish Bundle
+
+Tool:
+- Codex GPT-5
+
+Goal:
+- Polish the import pipeline UX without changing import semantics, schema, dependencies, or security boundaries.
+
+Files modified:
+- `src/lib/admin/importCleanup.ts`
+- `src/pages/admin/imports.astro`
+- `src/pages/admin/imports/programs.astro`
+- `src/pages/admin/imports/[id].astro`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+- `docs/10-import-workflow.md`
+
+Implementation:
+- Made Program Import Staging the primary recommended path on `/admin/imports`.
+- Moved General Batch Creation into an Advanced / Legacy framing and clarified that it is for universities, scholarships, articles, mixed research packs, and manual staging, not the normal program workflow.
+- Added recent-batch filters for type, status, and active/recent windows, plus direct links for Program Import, active batches needing review, and batch history.
+- Clarified `/admin/imports/programs` as a five-step staging flow: select university, paste/upload JSON, create staging batch, open batch, then choose first import or enrichment.
+- Reorganized `/admin/imports/[id]` around Step 1 review, Step 2 production action, Step 3 publish only if needed, and Advanced tools.
+- Added lightweight contextual recommendations from visible program rows: enrichment for approved exact matches, first-import merge for approved rows without exact matches, and publish when merged draft programs are ready.
+- Renamed key actions to reduce confusion: approve selected rows, first-import merge, enrichment update-existing, and publish merged drafts as unverified.
+- Added super-admin-only import batch cleanup guarded by a checkbox and typed `DELETE`.
+- Cleanup deletes only `staging_programs`, `staging_universities`, `staging_scholarships`, `staging_articles`, `staging_errors`, `import_files`, and the `import_batches` row for the batch.
+
+Safety:
+- No migration.
+- No new dependency.
+- No `set:html`.
+- No `innerHTML`.
+- No service role or `createServiceClient`.
+- No RLS bypass.
+- No merge/update/publish/review behavior change.
+- No production program, university, scholarship, article, media, or production `data_sources` deletion from import batch cleanup.
+- No auto-overwrite of non-empty production fields.
+- No subject auto-creation.
+- No intake/deadline import.
+
+Validation:
+- `npm run build`: PASS.
+- Required security greps on modified source files for `innerHTML`, `set:html`, `service_role`, `SERVICE_ROLE`, and `createServiceClient`: PASS (no matches).
+
 ## Phase 55A-55F Short Summary
 
 - Phase 55A: locked the public design reference files and normalized the design-direction docs so later UI work had a stable target.
