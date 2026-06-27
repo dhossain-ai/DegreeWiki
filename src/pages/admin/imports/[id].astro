@@ -17,6 +17,8 @@ import {
 import { parseBulkJson, parseResearchPackJson } from '../../../lib/admin/importParse'
 import { IMPORT_TEMPLATES, TEMPLATE_FIELD_NOTES, type EntityTemplateType } from '../../../lib/admin/importTemplates'
 import { AI_PROMPTS } from '../../../lib/admin/importPrompts'
+import { hardDeleteImportBatchStaging } from '../../../lib/admin/importCleanup'
+import { userIsSuperAdmin } from '../../../lib/admin/programCleanup'
 import {
   detectUniSameBatchDuplicates,
   detectUniProductionMatches,
@@ -89,6 +91,7 @@ const FLASH_QUERY_KEYS = [
   'batchSkipped',
   'batchFailed',
   'batchWarned',
+  'cleanupError',
 ] as const
 
 function buildBatchHref(
@@ -169,8 +172,10 @@ let setMatchError: string | null = null
 let bulkImportError: string | null = null
 let bulkReviewError: string | null = null
 let batchActionError: string | null = null
+let cleanupError: string | null = null
 let qualityError: string | null = null
 const BATCH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const isSuperAdmin = await userIsSuperAdmin(supabase)
 
 type BulkErrorEntry = {
   import_batch_id: string
@@ -444,7 +449,22 @@ if (Astro.request.method === 'POST') {
   const redirectToBatch = (updates: Record<string, string | number | null | undefined> = {}) =>
     Astro.redirect(buildBatchHref(b.id, Astro.url.searchParams, updates))
 
-  if (postAction === 'review') {
+  if (postAction === 'delete_import_batch') {
+    const confirmChecked = fd.get('confirm_staging_delete')?.toString().trim() === 'yes'
+    const typedConfirm = fd.get('typed_delete')?.toString().trim() ?? ''
+
+    if (!isSuperAdmin) {
+      cleanupError = 'Only super-admins can delete import batches.'
+    } else if (!confirmChecked || typedConfirm !== 'DELETE') {
+      cleanupError = 'Check the confirmation box and type DELETE to remove this import batch.'
+    } else {
+      const result = await hardDeleteImportBatchStaging(supabase, b.id)
+      if (result.ok) {
+        return Astro.redirect('/admin/imports?cleanupDeleted=1')
+      }
+      cleanupError = result.message
+    }
+  } else if (postAction === 'review') {
     const result = await applyReviewAction(supabase, {
       entityType: fd.get('entity_type')?.toString().trim() ?? '',
       rowId: fd.get('row_id')?.toString().trim() ?? '',
@@ -1983,6 +2003,30 @@ if (currentFilterMergedProgramIds.length > 0) {
   mergedDraftProgramsReadyToPublishCount = (publishablePrograms ?? []).length
 }
 
+const visibleApprovedProgramsWithExactMatches = activeEntity === 'programs'
+  ? visiblePrograms.filter((row) => {
+      if (row.import_status !== 'approved') return false
+      if (row.match_program_id) return true
+      return visibleProgramMatchResolutions.get(row.id)?.status === 'matched'
+    }).length
+  : 0
+const visibleApprovedProgramsWithoutExactMatches = activeEntity === 'programs'
+  ? visiblePrograms.filter((row) => {
+      if (row.import_status !== 'approved' || row.match_program_id) return false
+      const resolution = visibleProgramMatchResolutions.get(row.id)
+      return !resolution || resolution.status === 'no_match'
+    }).length
+  : 0
+const recommendedBatchAction = activeEntity === 'programs'
+  ? mergedDraftProgramsReadyToPublishCount > 0
+    ? 'Step 3 recommendation: Publish merged drafts as unverified when review is complete. Verification stays manual.'
+    : visibleApprovedProgramsWithExactMatches > 0
+      ? 'Step 2 recommendation: Enrichment: Update existing matched programs. Visible approved rows include exact existing production matches.'
+      : visibleApprovedProgramsWithoutExactMatches > 0
+        ? 'Step 2 recommendation: First import: Merge approved new programs. Visible approved rows do not show exact existing matches.'
+        : ''
+  : ''
+
 // Guidance message for "what to do next" banner.
 let nextStepMessage = ''
 if (actionableStaged === 0) {
@@ -1990,9 +2034,9 @@ if (actionableStaged === 0) {
 } else if (!qualityChecksRun) {
   nextStepMessage = `${actionableStaged} row${actionableStaged !== 1 ? 's' : ''} staged. Run quality checks to detect same-batch duplicates and possible existing production records.`
 } else if (statusCounts.awaitingReview > 0) {
-  nextStepMessage = `${statusCounts.awaitingReview} row${statusCounts.awaitingReview !== 1 ? 's' : ''} awaiting review. Approve, reject, or skip each staged row below.`
+  nextStepMessage = `${statusCounts.awaitingReview} row${statusCounts.awaitingReview !== 1 ? 's' : ''} awaiting review. Approve marks staged rows as reviewed only; it does not update production.`
 } else if (statusCounts.approved > 0) {
-  nextStepMessage = `${statusCounts.approved} approved row${statusCounts.approved !== 1 ? 's' : ''} ready to merge. Use the Merge form on each approved row.`
+  nextStepMessage = `${statusCounts.approved} approved row${statusCounts.approved !== 1 ? 's' : ''} ready for a production action. Choose first import merge or enrichment update.`
 } else if (actionableStaged > 0 && statusCounts.awaitingReview === 0 && statusCounts.approved === 0) {
   nextStepMessage = 'All rows have been processed. This batch is complete.'
 }
@@ -2016,11 +2060,11 @@ const REVIEW_ACTION_LABEL: Record<string, string> = {
   reset: 'reset',
 }
 const BATCH_ACTION_LABEL: Record<string, string> = {
-  approve_matching: 'Approve all matching',
-  merge_selected_programs: 'Merge approved programs',
-  merge_matching_programs: 'Merge approved programs',
-  update_existing_selected_programs: 'Update existing matched programs',
-  update_existing_matching_programs: 'Update existing matched programs',
+  approve_matching: 'Approve selected rows',
+  merge_selected_programs: 'First import: Merge approved new programs',
+  merge_matching_programs: 'First import: Merge approved new programs',
+  update_existing_selected_programs: 'Enrichment: Update existing matched programs',
+  update_existing_matching_programs: 'Enrichment: Update existing matched programs',
   publish_matching_programs: 'Publish merged drafts as unverified',
 }
 const BATCH_ACTION_RESULT_LABEL: Record<string, string> = {
@@ -2273,10 +2317,10 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
   <!-- Lifecycle steps -->
   <div class="mb-4 flex items-stretch rounded-lg border border-gray-200 bg-white overflow-hidden text-xs divide-x divide-gray-200">
     {[
-      { step: 1, label: 'Import rows', done: actionableStaged > 0 },
-      { step: 2, label: 'Quality checks', done: qualityChecksRun },
-      { step: 3, label: 'Review rows', done: actionableStaged > 0 && statusCounts.awaitingReview === 0 },
-      { step: 4, label: 'Merge approved', done: statusCounts.merged > 0 && statusCounts.approved === 0 && actionableStaged > 0 },
+      { step: 1, label: 'Review staged rows', done: actionableStaged > 0 && statusCounts.awaitingReview === 0 },
+      { step: 2, label: 'Choose production action', done: statusCounts.merged > 0 },
+      { step: 3, label: 'Publish only if needed', done: mergedDraftProgramsReadyToPublishCount === 0 && statusCounts.merged > 0 },
+      { step: 4, label: 'Advanced tools', done: qualityChecksRun },
     ].map(({ step, label, done }) => (
       <div class={`flex-1 flex items-center gap-2 px-3 py-3 ${done ? 'bg-green-50' : ''}`}>
         <span class={`flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${done ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
@@ -2298,11 +2342,38 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     </div>
   )}
 
+  <div class="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-4">
+    <h2 class="text-base font-semibold text-gray-900">Workflow guide</h2>
+    <div class="mt-3 grid gap-3 lg:grid-cols-4">
+      <div class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-3">
+        <p class="text-sm font-semibold text-blue-900">Step 1: Review staged rows</p>
+        <p class="mt-1 text-xs text-blue-800">Approve selected rows only marks staging rows as reviewed. Approve does not update production.</p>
+      </div>
+      <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+        <p class="text-sm font-semibold text-emerald-900">Step 2: Choose production action</p>
+        <p class="mt-1 text-xs text-emerald-800">First import merge creates draft/unverified programs. Enrichment updates exact existing matches and fills empty fields only.</p>
+      </div>
+      <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+        <p class="text-sm font-semibold text-amber-900">Step 3: Publish only if needed</p>
+        <p class="mt-1 text-xs text-amber-800">Publish merged drafts makes draft programs public as unverified. Verify manually later.</p>
+      </div>
+      <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+        <p class="text-sm font-semibold text-gray-900">Advanced tools</p>
+        <p class="mt-1 text-xs text-gray-600">Quality checks, manual staging, templates, generic imports, raw JSON, and cleanup live below.</p>
+      </div>
+    </div>
+    {recommendedBatchAction && (
+      <div class="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+        {recommendedBatchAction}
+      </div>
+    )}
+  </div>
+
   {filteredRowCount > 0 && (
     <div class="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-4">
       <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div class="max-w-3xl">
-          <h2 class="text-base font-semibold text-gray-900">Batch actions</h2>
+          <h2 class="text-base font-semibold text-gray-900">Step 2: Choose production action</h2>
           <p class="mt-1 text-sm text-gray-500">
             These actions stay scoped to batch <span class="font-mono text-xs text-gray-600">{b.id}</span>, entity <span class="font-medium text-gray-700">{activeEntity}</span>, and status filter <span class="font-medium text-gray-700">{selectedStatusFilter}</span>.
           </p>
@@ -2316,9 +2387,9 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
         <div class="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
           <div class="flex items-start justify-between gap-3">
             <div>
-              <h3 class="text-sm font-semibold text-blue-900">Review actions</h3>
+              <h3 class="text-sm font-semibold text-blue-900">Step 1: Review staged rows</h3>
               <p class="mt-1 text-xs text-blue-800">
-                Approve every matching row in this batch/filter. Merged, processing, error, and helper rows are skipped automatically.
+                Approve selected rows marks staging rows as reviewed. It does not write to production. Merged, processing, error, and helper rows are skipped automatically.
               </p>
             </div>
             <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-blue-900">
@@ -2336,7 +2407,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             </label>
             <div class="flex flex-wrap items-center gap-3">
               <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-                Approve all matching
+                Approve selected rows
               </button>
               <span class="text-xs text-blue-800">Hidden pages are affected only through this confirmed action.</span>
             </div>
@@ -2348,9 +2419,9 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <div class="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
               <div class="flex items-start justify-between gap-3">
                 <div>
-                  <h3 class="text-sm font-semibold text-emerald-900">Merge actions</h3>
+                  <h3 class="text-sm font-semibold text-emerald-900">First import: merge approved new programs</h3>
                   <p class="mt-1 text-xs text-emerald-800">
-                    Merge approved program rows with duplicate-safe program handling. Exact production matches are skipped by default during bulk merge, and new production programs still stay draft and unverified until you review them.
+                    Use this for a first import when approved rows do not have exact existing production matches. New production programs are created as draft and unverified.
                   </p>
                 </div>
                 <div class="rounded-full bg-white px-3 py-1 text-xs font-medium text-emerald-900">
@@ -2371,7 +2442,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                   <p class="text-sm font-medium text-emerald-900">Merge selected approved rows</p>
                   <p class="mt-1 text-xs text-emerald-800">Uses the same visible-row selection as the bulk review controls below. Exact unique production matches are marked skipped instead of creating duplicates.</p>
                   <button type="submit" class="mt-3 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-                    Merge approved programs
+                    First import: Merge approved new programs
                   </button>
                 </form>
 
@@ -2379,14 +2450,14 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                   <input type="hidden" name="_action" value="bulk_merge_programs" />
                   <input type="hidden" name="merge_scope" value="matching" />
                   <input type="hidden" name="status_filter" value={selectedStatusFilter} />
-                  <p class="text-sm font-medium text-emerald-900">Merge all approved rows in this batch/filter</p>
+                  <p class="text-sm font-medium text-emerald-900">Merge all approved new rows in this batch/filter</p>
                   <p class="text-xs text-emerald-800">Bulk merge creates only unmatched rows. Exact unique matches are skipped, and ambiguous matches stay for manual review.</p>
                   <label class="flex items-start gap-2 text-sm text-emerald-900">
                     <input type="checkbox" name="confirm_merge_matching" value="yes" required class="mt-0.5 shrink-0" />
                     <span>I understand this will merge all approved program rows in this batch/filter.</span>
                   </label>
                   <button type="submit" class="rounded border border-emerald-300 bg-emerald-100 px-4 py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-200">
-                    Merge all approved programs
+                    First import: Merge approved new programs
                   </button>
                 </form>
               </div>
@@ -2395,7 +2466,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <div class="rounded-lg border border-sky-200 bg-sky-50/80 p-4">
               <div class="flex items-start justify-between gap-3">
                 <div>
-                  <h3 class="text-sm font-semibold text-sky-900">Enrichment pass</h3>
+                  <h3 class="text-sm font-semibold text-sky-900">Enrichment: update existing matched programs</h3>
                   <p class="mt-1 text-xs text-sky-800">
                     Use this after a second research pass to fill missing fields. It only updates existing exact matches, only fills empty fields, never creates duplicates, and does not publish or verify programs.
                   </p>
@@ -2424,7 +2495,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                     <span>I understand this updates only empty fields on exact existing program matches and never creates new programs.</span>
                   </label>
                   <button type="submit" class="rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">
-                    Update existing matched programs
+                    Enrichment: Update existing matched programs
                   </button>
                 </form>
 
@@ -2441,7 +2512,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                     <span>I understand this enriches exact existing matches only in the current batch/filter.</span>
                   </label>
                   <button type="submit" class="rounded border border-sky-300 bg-sky-100 px-4 py-2 text-sm font-medium text-sky-900 hover:bg-sky-200">
-                    Bulk Update Existing Matched Programs
+                    Enrichment: Update existing matched programs
                   </button>
                 </form>
               </div>
@@ -2450,7 +2521,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
               <div class="flex items-start justify-between gap-3">
                 <div>
-                  <h3 class="text-sm font-semibold text-amber-900">Publish actions</h3>
+                  <h3 class="text-sm font-semibold text-amber-900">Step 3: Publish only if needed</h3>
                   <p class="mt-1 text-xs text-amber-800">
                     Publish linked production programs from merged staging rows only. This makes them public, but verification remains manual.
                   </p>
@@ -2501,6 +2572,12 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
   {batchActionError && (
     <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
       Batch action failed: {batchActionError}
+    </div>
+  )}
+
+  {cleanupError && (
+    <div class="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      Cleanup failed: {cleanupError}
     </div>
   )}
 
@@ -2586,12 +2663,21 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
     </div>
   )}
 
+  <details
+    class="mb-6 rounded-lg border border-gray-200 bg-white"
+    {...(bulkImportError !== null || formError !== null || qualityError !== null || cleanupError !== null ? { open: true } : {})}
+  >
+    <summary class="cursor-pointer select-none rounded-lg px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+      Advanced tools
+      <span class="ml-2 text-xs font-normal text-gray-400">Generic batch import, manual staging, quality checks, raw templates, and safe cleanup</span>
+    </summary>
+    <div class="border-t border-gray-100 px-4 pt-4">
   <!-- Templates & AI Prompts section -->
   {templateEntityTypes.length > 0 && (
     <details class="mb-4 rounded-lg border border-indigo-200 bg-white" id="tpl-section">
       <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
         <span class="text-indigo-400 font-mono text-base leading-none">{'{}'}</span>
-        Templates &amp; AI Prompts
+        Advanced templates &amp; AI prompts
         <span class="ml-auto text-xs font-normal text-gray-400">JSON templates and copyable research prompts</span>
       </summary>
       <div class="border-t border-gray-100">
@@ -2674,7 +2760,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
   <details class="mb-4 rounded-lg border border-blue-200 bg-white" {...(bulkImportError !== null ? { open: true } : {})}>
     <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
       <span class="text-blue-500 text-base leading-none">↑</span>
-      Bulk JSON Import
+      Generic batch JSON import
     </summary>
     <div class="px-4 py-4 border-t border-gray-100">
       <form method="POST" class="space-y-4">
@@ -2749,7 +2835,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
   <details class="mb-6 rounded-lg border border-gray-200 bg-white" {...(formError !== null ? { open: true } : {})}>
     <summary class="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg list-none flex items-center gap-2">
       <span class="text-gray-400 text-base leading-none">+</span>
-      Add Staged Record
+      Add staged record manually
     </summary>
     <div class="px-4 py-4 border-t border-gray-100">
       {formError && (
@@ -2897,7 +2983,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
         )}
 
         <div>
-          <label class={LABEL_CLS}>Raw Data (JSON, optional)</label>
+          <label class={LABEL_CLS}>Advanced raw data (JSON, optional)</label>
           <textarea name="raw_data" rows="3" class={INPUT_CLS} placeholder={'{"source": "manual"}'}></textarea>
           <p class="mt-1 text-xs text-gray-400">Must be a valid JSON object if provided. Leave blank to default to {}.</p>
         </div>
@@ -2912,7 +2998,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
   </details>
 
   {actionableStaged > 0 && (
-    <div class="mb-4 flex items-center gap-3">
+    <div class="mb-4 flex items-center gap-3 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3">
       <form method="POST">
         <input type="hidden" name="_action" value="run_quality_checks" />
         <button
@@ -2925,6 +3011,47 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
       <span class="text-xs text-gray-400">Checks for same-batch duplicates and possible production matches. Warnings appear in the Actions column below.</span>
     </div>
   )}
+
+  {isSuperAdmin && (
+    <details class="mb-4 rounded-lg border border-red-200 bg-red-50">
+      <summary class="cursor-pointer select-none rounded-lg px-4 py-3 text-sm font-semibold text-red-900 hover:bg-red-100">
+        Delete this import batch
+      </summary>
+      <div class="border-t border-red-200 px-4 py-4">
+        <p class="text-sm font-medium text-red-900">
+          Deleting this batch removes staging/review records only. Production content already created by merge is not deleted.
+        </p>
+        <p class="mt-2 text-sm text-red-800">
+          This removes staging_programs, staging_universities, staging_scholarships, staging_articles, staging_errors, import_files, and the import_batches row for this batch. It does not delete production programs, universities, scholarships, articles, media, or production data_sources.
+        </p>
+        <form method="POST" class="mt-4 space-y-3">
+          <input type="hidden" name="_action" value="delete_import_batch" />
+          <label class="flex items-start gap-2 text-sm text-red-900">
+            <input type="checkbox" name="confirm_staging_delete" value="yes" required class="mt-0.5 shrink-0" />
+            <span>I understand this deletes only import staging and review records for this batch.</span>
+          </label>
+          <div>
+            <label for="typed_delete" class="mb-1 block text-xs font-medium text-red-900">Type DELETE to confirm</label>
+            <input
+              id="typed_delete"
+              name="typed_delete"
+              type="text"
+              pattern="DELETE"
+              required
+              class="block w-full max-w-xs rounded border border-red-300 px-3 py-2 text-sm text-red-900 placeholder-red-300 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+              placeholder="DELETE"
+            />
+          </div>
+          <button type="submit" class="rounded bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800">
+            Delete import/staging batch
+          </button>
+        </form>
+      </div>
+    </details>
+  )}
+
+    </div>
+  </details>
 
   {actionableStaged === 0 && stagingErrors.length === 0 ? (
     <p class="text-sm text-gray-500 py-2">No staged records or errors for this batch yet.</p>
@@ -2953,7 +3080,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <input type="hidden" name="entity_type" value="universities" />
             {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
             <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
-              <option value="approve">Approve selected</option>
+              <option value="approve">Approve selected rows</option>
               <option value="reject">Reject selected</option>
               <option value="skip">Skip selected</option>
               <option value="reset">Reset selected</option>
@@ -2983,7 +3110,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
               <th class="px-4 py-3">Actions</th>
-              <th class="px-4 py-3">Raw Data</th>
+              <th class="px-4 py-3">Preview / raw JSON</th>
             </tr>
           </thead>
           <tbody>
@@ -3041,7 +3168,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                       <input type="hidden" name="entity_type" value="universities" />
                       <input type="hidden" name="row_id" value={row.id} />
                       <div class="flex flex-wrap gap-1">
-                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve row</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
@@ -3084,7 +3211,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                           <span>I confirm this creates a production record.</span>
                         </label>
                         <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                          Merge to Production
+                          First import: Merge approved new programs
                         </button>
                       </form>
                     </div>
@@ -3102,7 +3229,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                         <span>I confirm this writes to a production record.</span>
                       </label>
                       <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
-                        Update Existing
+                        Enrichment: Update existing matched programs
                       </button>
                     </form>
                   )}
@@ -3146,7 +3273,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <input type="hidden" name="entity_type" value="programs" />
             {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
             <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
-              <option value="approve">Approve selected</option>
+              <option value="approve">Approve selected rows</option>
               <option value="reject">Reject selected</option>
               <option value="skip">Skip selected</option>
               <option value="reset">Reset selected</option>
@@ -3176,7 +3303,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
               <th class="px-4 py-3">Actions</th>
-              <th class="px-4 py-3">Raw Data</th>
+              <th class="px-4 py-3">Preview / raw JSON</th>
             </tr>
           </thead>
           <tbody>
@@ -3229,7 +3356,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                       <input type="hidden" name="entity_type" value="programs" />
                       <input type="hidden" name="row_id" value={row.id} />
                       <div class="flex flex-wrap gap-1">
-                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve row</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
@@ -3336,7 +3463,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                               <span>I confirm this writes only safe empty fields to the linked production record.</span>
                             </label>
                             <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
-                              Update Existing
+                              Enrichment: Update existing matched programs
                             </button>
                           </form>
                         )}
@@ -3363,7 +3490,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                             </span>
                           </label>
                           <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                            Merge to Production
+                            First import: Merge approved new programs
                           </button>
                         </form>
                       </div>
@@ -3433,7 +3560,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <input type="hidden" name="entity_type" value="scholarships" />
             {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
             <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
-              <option value="approve">Approve selected</option>
+              <option value="approve">Approve selected rows</option>
               <option value="reject">Reject selected</option>
               <option value="skip">Skip selected</option>
               <option value="reset">Reset selected</option>
@@ -3462,7 +3589,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
               <th class="px-4 py-3">Actions</th>
-              <th class="px-4 py-3">Raw Data</th>
+              <th class="px-4 py-3">Preview / raw JSON</th>
             </tr>
           </thead>
           <tbody>
@@ -3510,7 +3637,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                       <input type="hidden" name="entity_type" value="scholarships" />
                       <input type="hidden" name="row_id" value={row.id} />
                       <div class="flex flex-wrap gap-1">
-                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve row</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
@@ -3551,7 +3678,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                           <span>I confirm this creates a production record.</span>
                         </label>
                         <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                          Merge to Production
+                          First import: Merge approved new programs
                         </button>
                       </form>
                     </div>
@@ -3569,7 +3696,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                         <span>I confirm this writes to a production record.</span>
                       </label>
                       <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
-                        Update Existing
+                        Enrichment: Update existing matched programs
                       </button>
                     </form>
                   )}
@@ -3613,7 +3740,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
             <input type="hidden" name="entity_type" value="articles" />
             {visibleRowIds.map((rowId) => <input type="hidden" name="visible_row_ids" value={rowId} />)}
             <select name="review_action" class={INPUT_CLS} aria-label="Bulk review action">
-              <option value="approve">Approve selected</option>
+              <option value="approve">Approve selected rows</option>
               <option value="reject">Reject selected</option>
               <option value="skip">Skip selected</option>
               <option value="reset">Reset selected</option>
@@ -3643,7 +3770,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Notes</th>
               <th class="px-4 py-3">Actions</th>
-              <th class="px-4 py-3">Raw Data</th>
+              <th class="px-4 py-3">Preview / raw JSON</th>
             </tr>
           </thead>
           <tbody>
@@ -3692,7 +3819,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                       <input type="hidden" name="entity_type" value="articles" />
                       <input type="hidden" name="row_id" value={row.id} />
                       <div class="flex flex-wrap gap-1">
-                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve</button>
+                        <button name="review_action" value="approve" class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">Approve row</button>
                         <button name="review_action" value="reject" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Reject</button>
                         <button name="review_action" value="skip" class="rounded bg-yellow-500 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-600">Skip</button>
                         <button name="review_action" value="reset" class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reset</button>
@@ -3733,7 +3860,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                           <span>I confirm this creates a production record.</span>
                         </label>
                         <button type="submit" class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700">
-                          Merge to Production
+                          First import: Merge approved new programs
                         </button>
                       </form>
                     </div>
@@ -3751,7 +3878,7 @@ const TEMPLATE_LABEL: Record<EntityTemplateType, string> = {
                         <span>I confirm this writes to a production record.</span>
                       </label>
                       <button type="submit" class="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700">
-                        Update Existing
+                        Enrichment: Update existing matched programs
                       </button>
                     </form>
                   )}
