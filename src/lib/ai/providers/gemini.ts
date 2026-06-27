@@ -49,8 +49,10 @@ export function categoryForStatus(status: number): AIProviderErrorCategory {
   if (status === 400) return 'bad_request'
   if (status === 401 || status === 403) return 'auth_error'
   if (status === 404) return 'model_not_found'
-  if (status === 429) return 'quota_or_rate_limit'
-  return 'provider_error'
+  if (status === 408) return 'timeout'
+  if (status === 429) return 'rate_limit'
+  if (status >= 500) return 'provider_5xx'
+  return 'provider_unavailable'
 }
 
 function modelPath(model: string): string {
@@ -65,6 +67,9 @@ export class GeminiProvider implements AIProvider {
   async complete(prompt: AIPrompt, config: AIProviderConfig): Promise<AIProviderResponse> {
     const model = config.model
     const url = `${GEMINI_API_BASE}/${modelPath(model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const timeoutMs = config.timeoutMs ?? 30000
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
 
     const body = {
       systemInstruction: {
@@ -88,9 +93,15 @@ export class GeminiProvider implements AIProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: controller?.signal,
       })
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new AIProviderError('Gemini request timed out', 'timeout')
+      }
       throw new AIProviderError('Gemini request failed before receiving a response', 'network_error')
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
@@ -106,18 +117,18 @@ export class GeminiProvider implements AIProvider {
     try {
       data = (await response.json()) as GeminiRestResponse
     } catch {
-      throw new AIProviderError('Gemini response was not valid JSON', 'provider_error', response.status)
+      throw new AIProviderError('Gemini response was not valid JSON', 'invalid_provider_response', response.status)
     }
 
     const candidates = data.candidates ?? []
     if (candidates.length === 0) {
-      throw new AIProviderError('Gemini returned no candidates', 'provider_error', response.status)
+      throw new AIProviderError('Gemini returned no candidates', 'invalid_provider_response', response.status)
     }
 
     const candidate = candidates[0]
     const finishReason = candidate.finishReason ?? ''
     if (finishReason === 'SAFETY' || finishReason === 'RECITATION') {
-      throw new AIProviderError(`Gemini candidate blocked: ${finishReason}`, 'provider_error', response.status)
+      throw new AIProviderError(`Gemini candidate blocked: ${finishReason}`, 'policy_refusal', response.status)
     }
 
     const parts = candidate.content?.parts ?? []
@@ -127,7 +138,7 @@ export class GeminiProvider implements AIProvider {
       .trim()
 
     if (!text) {
-      throw new AIProviderError('Gemini response missing text', 'provider_error', response.status)
+      throw new AIProviderError('Gemini response missing text', 'invalid_provider_response', response.status)
     }
 
     const promptTokens = data.usageMetadata?.promptTokenCount ?? 0

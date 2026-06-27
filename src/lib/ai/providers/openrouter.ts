@@ -32,6 +32,9 @@ export class OpenRouterProvider implements AIProvider {
 
   async complete(prompt: AIPrompt, config: AIProviderConfig): Promise<AIProviderResponse> {
     const model = config.model
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const timeoutMs = config.timeoutMs ?? 30000
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
 
     // Same final prompt/context the gateway hands to Gemini: the safety system
     // prompt plus the context-bound user turn. No prompt content is logged.
@@ -55,9 +58,15 @@ export class OpenRouterProvider implements AIProvider {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
+        signal: controller?.signal,
       })
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new AIProviderError('OpenRouter request timed out', 'timeout')
+      }
       throw new AIProviderError('OpenRouter request failed before receiving a response', 'network_error')
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
@@ -73,17 +82,17 @@ export class OpenRouterProvider implements AIProvider {
     try {
       data = (await response.json()) as OpenRouterChatResponse
     } catch {
-      throw new AIProviderError('OpenRouter response was not valid JSON', 'provider_error', response.status)
+      throw new AIProviderError('OpenRouter response was not valid JSON', 'invalid_provider_response', response.status)
     }
 
     const choices = data.choices ?? []
     if (choices.length === 0) {
-      throw new AIProviderError('OpenRouter returned no choices', 'provider_error', response.status)
+      throw new AIProviderError('OpenRouter returned no choices', 'invalid_provider_response', response.status)
     }
 
     const text = (choices[0].message?.content ?? '').trim()
     if (!text) {
-      throw new AIProviderError('OpenRouter response missing text', 'provider_error', response.status)
+      throw new AIProviderError('OpenRouter response missing text', 'invalid_provider_response', response.status)
     }
 
     const promptTokens = data.usage?.prompt_tokens ?? 0
