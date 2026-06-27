@@ -8,17 +8,24 @@ Snapshots:
 - [2026-06-21-07-task-log-before-compaction.md](snapshots/2026-06-21-07-task-log-before-compaction.md)
 
 Status archive:
-- [status-history-phase-01-56.md](status/status-history-phase-01-56.md)
+- [status-history-phase-01-10.md](status/status-history-phase-01-10.md)
+- [status-history-phase-11-20.md](status/status-history-phase-11-20.md)
+- [status-history-phase-21-30.md](status/status-history-phase-21-30.md)
+- [status-history-phase-31-40.md](status/status-history-phase-31-40.md)
+- [status-history-phase-41-50.md](status/status-history-phase-41-50.md)
+- [status-history-phase-51-60.md](status/status-history-phase-51-60.md)
+- [status-history-phase-61-68.md](status/status-history-phase-61-68.md)
 
 Task-log archives:
-- [task-log-phase-01-10-schema-auth-admin-foundation.md](task-log/task-log-phase-01-10-schema-auth-admin-foundation.md) - schema, auth, admin, and early foundation work
-- [task-log-phase-11-20-public-search-ai-matching.md](task-log/task-log-phase-11-20-public-search-ai-matching.md) - public search, SEO, and AI/matching foundation
-- [task-log-phase-21-30-ai-finder-account-hardening.md](task-log/task-log-phase-21-30-ai-finder-account-hardening.md) - AI Finder, persistence, account/profile hardening
-- [task-log-phase-31-38-ai-chat-boundaries.md](task-log/task-log-phase-31-38-ai-chat-boundaries.md) - AI chat architecture, saved-result chat, static boundaries
-- [task-log-phase-39-44-source-import-staging-merge.md](task-log/task-log-phase-39-44-source-import-staging-merge.md) - source/verification, import/staging, merge workflows
-- [task-log-phase-45-50-public-data-staging-frontend.md](task-log/task-log-phase-45-50-public-data-staging-frontend.md) - public data activation, staging, frontend completion
-- [task-log-phase-51-54-student-fit-finder-ai-runtime.md](task-log/task-log-phase-51-54-student-fit-finder-ai-runtime.md) - student dashboard, Fit Finder runtime, AI provider/runtime, async AI summary
-- [task-log-phase-55-56-public-redesign-auth-routing.md](task-log/task-log-phase-55-56-public-redesign-auth-routing.md) - public redesign, auth routing, docs compaction
+- [task-log-phase-01-10.md](task-log/task-log-phase-01-10.md)
+- [task-log-phase-11-20.md](task-log/task-log-phase-11-20.md)
+- [task-log-phase-21-30.md](task-log/task-log-phase-21-30.md)
+- [task-log-phase-31-40.md](task-log/task-log-phase-31-40.md)
+- [task-log-phase-41-50.md](task-log/task-log-phase-41-50.md)
+- [task-log-phase-51-60.md](task-log/task-log-phase-51-60.md)
+- [task-log-phase-61-68.md](task-log/task-log-phase-61-68.md)
+
+Legacy alias files remain in this folder for backward compatibility, but the split phase-range files above are the canonical archive entry points.
 
 Phase map:
 - Phase 01-10: schema/auth/admin/public foundation
