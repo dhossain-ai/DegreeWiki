@@ -30,6 +30,28 @@ export async function requireAdminUser(
 
 export const requireSuperAdmin = requireAdminUser
 
+export async function requireAdminPermission(
+  cookies: AstroCookies,
+  request: Request,
+  requestPath: string,
+  permissionCode: string,
+): Promise<GuardResult> {
+  const guard = await requireAdminUser(cookies, request, requestPath)
+  if (guard.type !== 'ok') return guard
+
+  const { data, error } = await guard.supabase.rpc('has_permission', { permission_code: permissionCode })
+  if (error) {
+    console.error(`admin guard: has_permission(${permissionCode}) failed:`, error.message)
+    return { type: 'forbidden' }
+  }
+
+  if (data !== true) {
+    return { type: 'forbidden' }
+  }
+
+  return guard
+}
+
 export function forbiddenAdminResponse(): Response {
   return new Response(
     '403 Forbidden: an admin role is required to access DegreeWiki admin pages.',
