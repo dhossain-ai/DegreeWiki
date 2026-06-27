@@ -239,6 +239,48 @@ Fallback rules:
 - If DB routing has no usable candidate, or every candidate fails, env fallback may run
   when AI_GATEWAY_ENV_FALLBACK_ENABLED=true and the use-case policy allows it.
 
+### Phase 69C Behaviour — Admin AI Gateway Dashboard
+
+Phase 69C adds an admin-only dashboard at `/admin/ai-gateway` for users with
+`manage_ai_settings`.
+
+What admins can manage:
+- Provider accounts
+- Models
+- Routing policies
+- Provider/model health rows
+- Preset-only provider/model tests
+
+Current DB-managed provider support:
+- `openai_compatible` only
+
+Planned but not DB-managed yet:
+- `gemini`
+- `openrouter_legacy`
+- `disabled`
+
+Important boundary:
+- Gemini and OpenRouter remain env-fallback providers for now.
+- The admin dashboard must not imply that DB-managed Gemini/OpenRouter accounts are live.
+
+Provider key handling rules:
+- Admin create/replace flows accept plaintext keys only in the request body.
+- Keys are encrypted immediately server-side with `encryptProviderApiKey()`.
+- The browser never receives decrypted keys or ciphertext.
+- The UI shows masked metadata only: last4, fingerprint metadata, key version, and whether a key exists.
+
+Admin testing rules:
+- Tests are preset-only and use no real student private data.
+- Tests do not store full prompt/response bodies in gateway logs.
+- Tests do not mutate production provider health/cooldown state.
+
+Current live product routing remains limited to:
+- `fit_finder_summary`
+- `chat_answer`
+
+The admin dashboard does not expand public chatbot scope or change the existing
+`/api/ai/finder-summary` or `/api/ai/chat` contracts.
+
 ### Phase 25 Behaviour — Usage Logging and Rate Limits
 
 #### Server-Only Supabase Service Client

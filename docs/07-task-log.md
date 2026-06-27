@@ -5,6 +5,24 @@
 
 ## Recent Task Log
 
+### Phase 69C - Admin AI Gateway Dashboard + Provider Testing
+
+- Added `/admin/ai-gateway`, protected by `manage_ai_settings`, and linked it in admin navigation.
+- Added admin-only API endpoints for provider accounts, models, routing policies, health reset,
+  and preset provider/model tests under `src/pages/api/admin/ai-gateway/`.
+- Added server-only admin helpers for AI Gateway API auth, strict validation, CRUD operations,
+  and isolated preset testing.
+- Implemented provider account create/edit/key-replace flows with immediate server-side encryption
+  and masked-only key metadata in the UI.
+- Implemented model and routing policy management UI for practical admin configuration.
+- Added provider health visibility plus reset action that clears failures/error/cooldown while
+  preserving historical success/failure timestamps.
+- Added preset-only admin provider/model tests that use no real student data and do not mutate
+  production provider health/cooldown state.
+- Kept DB-managed provider support scoped to `openai_compatible` only.
+- Kept Gemini/OpenRouter as env-fallback only, with no public chatbot expansion and no change to
+  `/api/ai/finder-summary` or `/api/ai/chat` contracts.
+
 ### Phase 69B - AI Gateway Foundation Bundle
 
 - Added `024_ai_gateway_foundation.sql` with:

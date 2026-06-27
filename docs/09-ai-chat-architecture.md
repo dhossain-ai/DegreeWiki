@@ -1038,6 +1038,27 @@ What did not change:
 - `ai_usage_logs` remains the quota ledger.
 - The `/api/ai/chat` response contract is unchanged.
 
+### Phase 69C — Admin AI Gateway Dashboard (complete)
+
+Phase 69C adds the admin management and test surface for the shared AI gateway:
+- `/admin/ai-gateway`
+- admin-only API endpoints under `src/pages/api/admin/ai-gateway/`
+
+What this phase adds:
+- provider account management for DB-backed `openai_compatible` providers
+- model management
+- routing policy management
+- provider/model health visibility and reset
+- preset-only admin provider/model tests
+
+What this phase does not change:
+- no public chatbot expansion
+- no new public chat route
+- no change to `/api/ai/chat` request/response contract
+- no DB-managed Gemini/OpenRouter provider accounts yet
+
+Gemini and OpenRouter remain env-fallback only in this phase.
+
 #### Files created (1)
 
 - `src/lib/ai/chat/router.ts`

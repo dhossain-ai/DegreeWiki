@@ -333,6 +333,29 @@ Expected:
 
 ---
 
+## 10B. Admin AI Gateway Setup Checklist
+
+Use `/admin/ai-gateway` for routine AI Gateway configuration after deployment.
+
+- [ ] Admin user has `manage_ai_settings`
+- [ ] Provider account created with `adapter_type = openai_compatible`
+- [ ] API key saved successfully and only masked metadata is visible in the UI
+- [ ] Model row created and linked to the intended provider account
+- [ ] Routing policy row created for the intended use case and priority
+- [ ] Health table loads and reset action clears failures/error/cooldown without wiping timestamps
+- [ ] Preset admin test succeeds or returns a safe coarse failure without exposing secrets
+
+Current support note:
+- DB-managed provider accounts support `openai_compatible` only
+- Gemini/OpenRouter remain env-fallback only in this phase
+
+Admin test safety note:
+- Admin tests are preset-only
+- No real student data is used
+- Admin tests do not poison production provider health/cooldown
+
+---
+
 ## 11. Saved-Result Persistence Verification
 
 After a Fit Finder run with a valid profile:
