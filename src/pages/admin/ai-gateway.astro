@@ -1,0 +1,972 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro'
+import { forbiddenAdminResponse, requireAdminPermission } from '../../lib/admin/guard'
+import {
+  AI_GATEWAY_DB_PROVIDER_PROTOCOLS,
+  AI_GATEWAY_LIVE_USE_CASES,
+  AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS,
+  AI_GATEWAY_TEST_PRESETS,
+  AI_GATEWAY_USE_CASES,
+} from '../../lib/ai/admin/constants'
+import { isAIGatewayEnvFallbackEnabled } from '../../lib/ai/admin/store'
+import { getAIEnv } from '../../lib/ai/env'
+
+const guard = await requireAdminPermission(
+  Astro.cookies,
+  Astro.request,
+  Astro.url.pathname,
+  'manage_ai_settings',
+)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
+
+const { user, supabase } = guard
+const aiEnv = getAIEnv(Astro.locals as Record<string, unknown>)
+const envFallbackEnabled = isAIGatewayEnvFallbackEnabled(aiEnv)
+
+const [providersRes, modelsRes, policiesRes, healthRes] = await Promise.all([
+  supabase
+    .from('ai_provider_accounts')
+    .select(`
+      id,
+      provider_code,
+      display_name,
+      adapter_type,
+      base_url,
+      endpoint_path,
+      auth_type,
+      api_key_last4,
+      api_key_fingerprint,
+      api_key_key_version,
+      timeout_ms,
+      is_active,
+      privacy_level,
+      allows_student_data,
+      allows_chat,
+      allows_fit_finder,
+      created_at,
+      updated_at
+    `)
+    .order('provider_code', { ascending: true }),
+  supabase
+    .from('ai_models')
+    .select(`
+      id,
+      provider_account_id,
+      model_name,
+      display_name,
+      is_active,
+      supports_text,
+      supports_json_mode,
+      supports_streaming,
+      supports_tool_calling,
+      max_output_tokens,
+      input_cost_per_million,
+      output_cost_per_million,
+      cost_tier,
+      created_at,
+      updated_at,
+      ai_provider_accounts (
+        provider_code,
+        display_name
+      )
+    `)
+    .order('display_name', { ascending: true }),
+  supabase
+    .from('ai_routing_policies')
+    .select(`
+      id,
+      use_case,
+      model_id,
+      priority,
+      is_active,
+      fallback_enabled,
+      max_attempts,
+      timeout_ms,
+      allow_env_fallback,
+      notes,
+      created_at,
+      updated_at,
+      ai_models (
+        model_name,
+        display_name,
+        ai_provider_accounts (
+          provider_code,
+          display_name
+        )
+      )
+    `)
+    .order('use_case', { ascending: true })
+    .order('priority', { ascending: true }),
+  supabase
+    .from('ai_provider_health')
+    .select(`
+      id,
+      provider_account_id,
+      model_id,
+      consecutive_failures,
+      last_success_at,
+      last_failure_at,
+      last_error_type,
+      cooldown_until,
+      ai_provider_accounts (
+        provider_code,
+        display_name
+      ),
+      ai_models (
+        model_name,
+        display_name
+      )
+    `)
+    .order('updated_at', { ascending: false }),
+])
+
+const providers = (providersRes.data ?? []) as any[]
+const models = (modelsRes.data ?? []) as any[]
+const policies = (policiesRes.data ?? []) as any[]
+const healthRows = (healthRes.data ?? []) as any[]
+
+const loadError = providersRes.error || modelsRes.error || policiesRes.error || healthRes.error
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function shortFingerprint(value: string | null | undefined): string {
+  if (!value) return '—'
+  if (value.length <= 18) return value
+  return `${value.slice(0, 10)}...${value.slice(-6)}`
+}
+
+function numberText(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return String(value)
+}
+
+function badgeClass(active: boolean): string {
+  return active
+    ? 'inline-flex rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700'
+    : 'inline-flex rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500'
+}
+
+function cooldownActive(cooldownUntil: string | null | undefined): boolean {
+  if (!cooldownUntil) return false
+  return new Date(cooldownUntil).getTime() > Date.now()
+}
+---
+<AdminLayout title="AI Gateway — DegreeWiki Admin" activePath="/admin/ai-gateway" userEmail={user.email ?? ''}>
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">AI Gateway</h1>
+      <p class="mt-2 max-w-3xl text-sm text-gray-600">
+        Manage DB-backed provider accounts, models, routing policies, health state, and admin-only
+        preset tests. Only <span class="font-medium text-gray-800">fit_finder_summary</span> and
+        <span class="font-medium text-gray-800"> chat_answer</span> are actively wired in product
+        behavior today.
+      </p>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+      <div>Env fallback:</div>
+      <div class={envFallbackEnabled ? badgeClass(true) : badgeClass(false)}>
+        {envFallbackEnabled ? 'enabled' : 'disabled'}
+      </div>
+    </div>
+  </div>
+
+  <div id="ai-gateway-banner" class="hidden mb-6 rounded-md border px-4 py-3 text-sm"></div>
+
+  {loadError && (
+    <div class="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      Some AI Gateway data could not be loaded. The page may be incomplete until the next refresh.
+    </div>
+  )}
+
+  <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Provider Accounts</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{providers.length}</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Models</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{models.length}</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Routing Policies</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{policies.length}</div>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Health Rows</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{healthRows.length}</div>
+    </div>
+  </div>
+
+  <div class="mb-8 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+    <p class="font-medium">DB-managed support in Phase 69C</p>
+    <p class="mt-1">
+      Provider accounts created here support <code>openai_compatible</code> only. Planned options
+      <code> gemini</code>, <code>openrouter_legacy</code>, and <code>disabled</code> are shown as
+      notes only. Gemini and OpenRouter still remain env-fallback only for now.
+    </p>
+    <p class="mt-2 text-blue-800">
+      Live product use cases today: {AI_GATEWAY_LIVE_USE_CASES.join(', ')}.
+    </p>
+  </div>
+
+  <section class="mb-10">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Provider Accounts</h2>
+      <span class="text-xs text-gray-500">Masked key metadata only. Decrypted keys are never shown.</span>
+    </div>
+
+    <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+      <h3 class="mb-4 text-sm font-semibold text-gray-800">Create Provider Account</h3>
+      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account saved." data-reload="true">
+        <input type="hidden" name="action" value="create" />
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Provider Code</label>
+          <input name="provider_code" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+          <input name="display_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Provider Protocol</label>
+          <select name="adapter_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {AI_GATEWAY_DB_PROVIDER_PROTOCOLS.map((protocol) => (
+              <option value={protocol}>{protocol}</option>
+            ))}
+          </select>
+          <p class="mt-1 text-xs text-gray-500">
+            Planned only: {AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS.join(', ')}
+          </p>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Auth Type</label>
+          <select name="auth_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            <option value="bearer">bearer</option>
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Base URL</label>
+          <input name="base_url" type="url" required placeholder="https://api.example.com/v1" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Endpoint Path</label>
+          <input name="endpoint_path" placeholder="/chat/completions" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+          <input name="timeout_ms" type="number" min="1000" max="120000" value="30000" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Privacy Level</label>
+          <select name="privacy_level" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            <option value="standard">standard</option>
+            <option value="restricted">restricted</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="mb-1 block text-sm font-medium text-gray-700">API Key</label>
+          <input name="api_key" type="password" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+          <label class="flex items-center gap-2">
+            <input name="is_active" type="checkbox" checked />
+            <span>Active</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input name="allows_student_data" type="checkbox" />
+            <span>Allows student data</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input name="allows_chat" type="checkbox" />
+            <span>Allows chat</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input name="allows_fit_finder" type="checkbox" />
+            <span>Allows Fit Finder</span>
+          </label>
+        </div>
+        <div class="md:col-span-2">
+          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Create Provider Account
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="space-y-4">
+      {providers.length === 0 ? (
+        <div class="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
+          No provider accounts configured yet.
+        </div>
+      ) : providers.map((provider) => (
+        <details class="rounded-lg border border-gray-200 bg-white" open>
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
+            <div>
+              <div class="text-sm font-semibold text-gray-900">{provider.display_name}</div>
+              <div class="text-xs text-gray-500">
+                {provider.provider_code} · {provider.adapter_type} · {provider.base_url ?? 'no base URL'}
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class={badgeClass(provider.is_active === true)}>
+                {provider.is_active ? 'active' : 'inactive'}
+              </span>
+              <span class="text-xs text-gray-400">Updated {formatDate(provider.updated_at)}</span>
+            </div>
+          </summary>
+          <div class="border-t border-gray-200 p-4">
+            <div class="mb-4 grid gap-3 rounded-md bg-gray-50 p-3 text-xs text-gray-600 md:grid-cols-4">
+              <div>
+                <div class="font-medium text-gray-700">Stored key</div>
+                <div>{provider.api_key_last4 ? `••••${provider.api_key_last4}` : 'not set'}</div>
+              </div>
+              <div>
+                <div class="font-medium text-gray-700">Fingerprint</div>
+                <div>{shortFingerprint(provider.api_key_fingerprint)}</div>
+              </div>
+              <div>
+                <div class="font-medium text-gray-700">Key version</div>
+                <div>{provider.api_key_key_version ?? '—'}</div>
+              </div>
+              <div>
+                <div class="font-medium text-gray-700">Privacy / access</div>
+                <div>{provider.privacy_level} · student={provider.allows_student_data ? 'yes' : 'no'}</div>
+              </div>
+            </div>
+
+            <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account updated." data-reload="true">
+              <input type="hidden" name="action" value="update" />
+              <input type="hidden" name="id" value={provider.id} />
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Provider Code</label>
+                <input name="provider_code" value={provider.provider_code} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+                <input name="display_name" value={provider.display_name} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Provider Protocol</label>
+                <select name="adapter_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                  <option value="openai_compatible" selected={provider.adapter_type === 'openai_compatible'}>openai_compatible</option>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Auth Type</label>
+                <select name="auth_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                  <option value="bearer" selected={provider.auth_type === 'bearer'}>bearer</option>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Base URL</label>
+                <input name="base_url" type="url" value={provider.base_url ?? ''} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Endpoint Path</label>
+                <input name="endpoint_path" value={provider.endpoint_path ?? ''} class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+                <input name="timeout_ms" type="number" min="1000" max="120000" value={provider.timeout_ms} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Privacy Level</label>
+                <select name="privacy_level" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                  <option value="standard" selected={provider.privacy_level === 'standard'}>standard</option>
+                  <option value="restricted" selected={provider.privacy_level === 'restricted'}>restricted</option>
+                </select>
+              </div>
+              <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+                <label class="flex items-center gap-2">
+                  <input name="is_active" type="checkbox" checked={provider.is_active === true} />
+                  <span>Active</span>
+                </label>
+                <label class="flex items-center gap-2">
+                  <input name="allows_student_data" type="checkbox" checked={provider.allows_student_data === true} />
+                  <span>Allows student data</span>
+                </label>
+                <label class="flex items-center gap-2">
+                  <input name="allows_chat" type="checkbox" checked={provider.allows_chat === true} />
+                  <span>Allows chat</span>
+                </label>
+                <label class="flex items-center gap-2">
+                  <input name="allows_fit_finder" type="checkbox" checked={provider.allows_fit_finder === true} />
+                  <span>Allows Fit Finder</span>
+                </label>
+              </div>
+              <div class="md:col-span-2">
+                <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                  Save Provider Metadata
+                </button>
+              </div>
+            </form>
+
+            <form class="js-api-form mt-4 grid gap-3 rounded-lg border border-gray-200 p-4 md:grid-cols-[1fr_auto]" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider API key replaced." data-reload="true">
+              <input type="hidden" name="action" value="replace_key" />
+              <input type="hidden" name="id" value={provider.id} />
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Replace API Key</label>
+                <input name="api_key" type="password" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div class="flex items-end">
+                <button type="submit" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
+                  Replace Key
+                </button>
+              </div>
+            </form>
+          </div>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <section class="mb-10">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Models</h2>
+      <span class="text-xs text-gray-500">Attach models to provider accounts and mark capabilities.</span>
+    </div>
+
+    <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+      <h3 class="mb-4 text-sm font-semibold text-gray-800">Create Model</h3>
+      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/models" data-success="Model saved." data-reload="true">
+        <input type="hidden" name="action" value="create" />
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Provider Account</label>
+          <select name="provider_account_id" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {providers.map((provider) => (
+              <option value={provider.id}>{provider.display_name} ({provider.provider_code})</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Model Name</label>
+          <input name="model_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+          <input name="display_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Cost Tier</label>
+          <input name="cost_tier" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Max Output Tokens</label>
+          <input name="max_output_tokens" type="number" min="1" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Input Cost / 1M</label>
+            <input name="input_cost_per_million" type="number" min="0" step="0.000001" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Output Cost / 1M</label>
+            <input name="output_cost_per_million" type="number" min="0" step="0.000001" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+          <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked /><span>Active</span></label>
+          <label class="flex items-center gap-2"><input name="supports_text" type="checkbox" checked /><span>Supports text</span></label>
+          <label class="flex items-center gap-2"><input name="supports_json_mode" type="checkbox" /><span>JSON mode</span></label>
+          <label class="flex items-center gap-2"><input name="supports_streaming" type="checkbox" /><span>Streaming</span></label>
+          <label class="flex items-center gap-2"><input name="supports_tool_calling" type="checkbox" /><span>Tool calling</span></label>
+        </div>
+        <div class="md:col-span-2">
+          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Create Model
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="space-y-4">
+      {models.length === 0 ? (
+        <div class="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
+          No models configured yet.
+        </div>
+      ) : models.map((model) => (
+        <details class="rounded-lg border border-gray-200 bg-white">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
+            <div>
+              <div class="text-sm font-semibold text-gray-900">{model.display_name}</div>
+              <div class="text-xs text-gray-500">
+                {model.model_name} · {model.ai_provider_accounts?.display_name ?? 'Unknown provider'}
+              </div>
+            </div>
+            <span class={badgeClass(model.is_active === true)}>
+              {model.is_active ? 'active' : 'inactive'}
+            </span>
+          </summary>
+          <div class="border-t border-gray-200 p-4">
+            <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/models" data-success="Model updated." data-reload="true">
+              <input type="hidden" name="action" value="update" />
+              <input type="hidden" name="id" value={model.id} />
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Provider Account</label>
+                <select name="provider_account_id" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                  {providers.map((provider) => (
+                    <option value={provider.id} selected={provider.id === model.provider_account_id}>
+                      {provider.display_name} ({provider.provider_code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Model Name</label>
+                <input name="model_name" value={model.model_name} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+                <input name="display_name" value={model.display_name} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Cost Tier</label>
+                <input name="cost_tier" value={model.cost_tier ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Max Output Tokens</label>
+                <input name="max_output_tokens" type="number" min="1" value={model.max_output_tokens ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Input Cost / 1M</label>
+                  <input name="input_cost_per_million" type="number" min="0" step="0.000001" value={model.input_cost_per_million ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Output Cost / 1M</label>
+                  <input name="output_cost_per_million" type="number" min="0" step="0.000001" value={model.output_cost_per_million ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+                <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked={model.is_active === true} /><span>Active</span></label>
+                <label class="flex items-center gap-2"><input name="supports_text" type="checkbox" checked={model.supports_text === true} /><span>Supports text</span></label>
+                <label class="flex items-center gap-2"><input name="supports_json_mode" type="checkbox" checked={model.supports_json_mode === true} /><span>JSON mode</span></label>
+                <label class="flex items-center gap-2"><input name="supports_streaming" type="checkbox" checked={model.supports_streaming === true} /><span>Streaming</span></label>
+                <label class="flex items-center gap-2"><input name="supports_tool_calling" type="checkbox" checked={model.supports_tool_calling === true} /><span>Tool calling</span></label>
+              </div>
+              <div class="md:col-span-2">
+                <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                  Save Model
+                </button>
+              </div>
+            </form>
+          </div>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <section class="mb-10">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Routing Policies</h2>
+      <span class="text-xs text-gray-500">Only fit_finder_summary and chat_answer currently drive live product routing.</span>
+    </div>
+
+    <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+      <h3 class="mb-4 text-sm font-semibold text-gray-800">Create Routing Policy</h3>
+      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy saved." data-reload="true">
+        <input type="hidden" name="action" value="create" />
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+          <select name="use_case" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {AI_GATEWAY_USE_CASES.map((useCase) => (
+              <option value={useCase}>{useCase}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
+          <select name="model_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {models.map((model) => (
+              <option value={model.id}>{model.display_name} ({model.model_name})</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Priority</label>
+          <input name="priority" type="number" min="1" value="1" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Max Attempts</label>
+          <input name="max_attempts" type="number" min="1" value="1" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+          <input name="timeout_ms" type="number" min="1000" max="120000" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+          <input name="notes" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+        </div>
+        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+          <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked /><span>Active</span></label>
+          <label class="flex items-center gap-2"><input name="fallback_enabled" type="checkbox" checked /><span>Fallback enabled</span></label>
+          <label class="flex items-center gap-2"><input name="allow_env_fallback" type="checkbox" /><span>Allow env fallback</span></label>
+        </div>
+        <div class="md:col-span-2">
+          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Create Routing Policy
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="space-y-4">
+      {policies.length === 0 ? (
+        <div class="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
+          No routing policies configured yet.
+        </div>
+      ) : policies.map((policy) => (
+        <details class="rounded-lg border border-gray-200 bg-white">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
+            <div>
+              <div class="text-sm font-semibold text-gray-900">{policy.use_case}</div>
+              <div class="text-xs text-gray-500">
+                Priority {policy.priority} · {policy.ai_models?.display_name ?? 'Unknown model'}
+              </div>
+            </div>
+            <span class={badgeClass(policy.is_active === true)}>
+              {policy.is_active ? 'active' : 'inactive'}
+            </span>
+          </summary>
+          <div class="border-t border-gray-200 p-4">
+            <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy updated." data-reload="true">
+              <input type="hidden" name="action" value="update" />
+              <input type="hidden" name="id" value={policy.id} />
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+                <select name="use_case" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                  {AI_GATEWAY_USE_CASES.map((useCase) => (
+                    <option value={useCase} selected={policy.use_case === useCase}>{useCase}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
+                <select name="model_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                  {models.map((model) => (
+                    <option value={model.id} selected={policy.model_id === model.id}>
+                      {model.display_name} ({model.model_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Priority</label>
+                <input name="priority" type="number" min="1" value={policy.priority} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Max Attempts</label>
+                <input name="max_attempts" type="number" min="1" value={policy.max_attempts} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+                <input name="timeout_ms" type="number" min="1000" max="120000" value={policy.timeout_ms ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+                <input name="notes" value={policy.notes ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+                <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked={policy.is_active === true} /><span>Active</span></label>
+                <label class="flex items-center gap-2"><input name="fallback_enabled" type="checkbox" checked={policy.fallback_enabled === true} /><span>Fallback enabled</span></label>
+                <label class="flex items-center gap-2"><input name="allow_env_fallback" type="checkbox" checked={policy.allow_env_fallback === true} /><span>Allow env fallback</span></label>
+              </div>
+              <div class="md:col-span-2 flex flex-wrap gap-3">
+                <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                  Save Routing Policy
+                </button>
+              </div>
+            </form>
+            <form class="js-api-form mt-3" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy deleted." data-reload="true">
+              <input type="hidden" name="action" value="delete" />
+              <input type="hidden" name="id" value={policy.id} />
+              <button type="submit" class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">
+                Delete Policy Row
+              </button>
+            </form>
+          </div>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <section class="mb-10">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Health and Cooldowns</h2>
+      <span class="text-xs text-gray-500">Reset clears failures, last error, and cooldown only.</span>
+    </div>
+
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      <table class="w-full text-left text-sm">
+        <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <tr>
+            <th class="px-4 py-3">Provider / Model</th>
+            <th class="px-4 py-3">Failures</th>
+            <th class="px-4 py-3">Last Success</th>
+            <th class="px-4 py-3">Last Failure</th>
+            <th class="px-4 py-3">Last Error</th>
+            <th class="px-4 py-3">Cooldown</th>
+            <th class="px-4 py-3">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {healthRows.length === 0 ? (
+            <tr>
+              <td colspan="7" class="px-4 py-6 text-sm text-gray-500">No provider health rows yet.</td>
+            </tr>
+          ) : healthRows.map((row) => (
+            <tr class="border-b border-gray-100 align-top">
+              <td class="px-4 py-3">
+                <div class="font-medium text-gray-900">{row.ai_provider_accounts?.display_name ?? 'Unknown provider'}</div>
+                <div class="text-xs text-gray-500">
+                  {row.ai_provider_accounts?.provider_code ?? '—'} · {row.ai_models?.display_name ?? row.ai_models?.model_name ?? 'Unknown model'}
+                </div>
+              </td>
+              <td class="px-4 py-3 text-gray-700">{row.consecutive_failures ?? 0}</td>
+              <td class="px-4 py-3 text-xs text-gray-600">{formatDate(row.last_success_at)}</td>
+              <td class="px-4 py-3 text-xs text-gray-600">{formatDate(row.last_failure_at)}</td>
+              <td class="px-4 py-3 text-xs text-gray-600">{row.last_error_type ?? '—'}</td>
+              <td class="px-4 py-3">
+                <div class="text-xs text-gray-600">{formatDate(row.cooldown_until)}</div>
+                <div class={cooldownActive(row.cooldown_until) ? badgeClass(true) : badgeClass(false)}>
+                  {cooldownActive(row.cooldown_until) ? 'cooldown active' : 'no active cooldown'}
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <form class="js-api-form" data-endpoint="/api/admin/ai-gateway/health" data-success="Provider health reset." data-reload="true">
+                  <input type="hidden" name="action" value="reset" />
+                  <input type="hidden" name="id" value={row.id} />
+                  <button type="submit" class="rounded-md border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                    Reset Health
+                  </button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Provider and Model Testing</h2>
+      <span class="text-xs text-gray-500">Preset-only safe tests. No real student data and no health mutation.</span>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <form id="ai-gateway-test-form" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Preset Test</label>
+          <select name="preset_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {AI_GATEWAY_TEST_PRESETS.map((preset) => (
+              <option value={preset.id}>{preset.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Target Mode</label>
+          <select name="target_mode" id="test-target-mode" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            <option value="use_case">Route by use case</option>
+            <option value="model">Direct model</option>
+          </select>
+        </div>
+        <div id="test-use-case-wrap">
+          <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+          <select name="use_case" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {AI_GATEWAY_USE_CASES.map((useCase) => (
+              <option value={useCase}>{useCase}</option>
+            ))}
+          </select>
+        </div>
+        <div id="test-model-wrap" class="hidden">
+          <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
+          <select name="model_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+            {models.map((model) => (
+              <option value={model.id}>{model.display_name} ({model.model_name})</option>
+            ))}
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <button type="submit" id="ai-gateway-test-submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Run Admin Test
+          </button>
+        </div>
+      </form>
+
+      <div id="ai-gateway-test-result" class="mt-6 hidden rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <div class="mb-3 text-sm font-semibold text-gray-900">Latest Test Result</div>
+        <dl class="grid gap-3 text-sm text-gray-700 md:grid-cols-2">
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Status</dt><dd id="test-result-status">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Preset</dt><dd id="test-result-preset">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Provider</dt><dd id="test-result-provider">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Model</dt><dd id="test-result-model">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Latency</dt><dd id="test-result-latency">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Tokens</dt><dd id="test-result-tokens">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Normalized Error</dt><dd id="test-result-error">—</dd></div>
+          <div><dt class="text-xs uppercase tracking-wide text-gray-500">Env Fallback</dt><dd id="test-result-fallback">—</dd></div>
+        </dl>
+        <div class="mt-4">
+          <div class="text-xs uppercase tracking-wide text-gray-500">Safe Response Preview</div>
+          <p id="test-result-preview" class="mt-1 whitespace-pre-wrap text-sm text-gray-700">—</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</AdminLayout>
+
+<script>
+  const banner = document.getElementById('ai-gateway-banner')
+
+  function showBanner(kind, message) {
+    if (!banner) return
+    banner.textContent = message
+    banner.classList.remove('hidden', 'border-red-200', 'bg-red-50', 'text-red-700', 'border-green-200', 'bg-green-50', 'text-green-700')
+
+    if (kind === 'error') {
+      banner.classList.add('border-red-200', 'bg-red-50', 'text-red-700')
+      return
+    }
+
+    banner.classList.add('border-green-200', 'bg-green-50', 'text-green-700')
+  }
+
+  function formToJson(form) {
+    const data = {}
+    const elements = Array.from(form.elements)
+
+    for (const element of elements) {
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement)) {
+        continue
+      }
+      if (!element.name || element.disabled) continue
+
+      if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+        data[element.name] = element.checked
+        continue
+      }
+
+      const raw = element.value.trim()
+      if (element.dataset.nullable === 'true' && raw === '') {
+        data[element.name] = null
+        continue
+      }
+
+      if (element instanceof HTMLInputElement && element.type === 'number') {
+        data[element.name] = raw === '' ? null : Number(raw)
+        continue
+      }
+
+      data[element.name] = raw
+    }
+
+    return data
+  }
+
+  async function handleApiFormSubmit(event) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const endpoint = form.dataset.endpoint
+    const successMessage = form.dataset.success || 'Saved.'
+    const shouldReload = form.dataset.reload === 'true'
+    const submitButton = form.querySelector('button[type="submit"]')
+
+    if (!endpoint) return
+    if (submitButton instanceof HTMLButtonElement) submitButton.disabled = true
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formToJson(form)),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.ok) {
+        showBanner('error', 'Request failed. Please review the form values and try again.')
+        return
+      }
+
+      showBanner('success', successMessage)
+      if (shouldReload) {
+        window.setTimeout(() => window.location.reload(), 500)
+      }
+    } catch {
+      showBanner('error', 'Request failed. Please try again.')
+    } finally {
+      if (submitButton instanceof HTMLButtonElement) submitButton.disabled = false
+    }
+  }
+
+  document.querySelectorAll('.js-api-form').forEach((form) => {
+    form.addEventListener('submit', handleApiFormSubmit)
+  })
+
+  const targetMode = document.getElementById('test-target-mode')
+  const testUseCaseWrap = document.getElementById('test-use-case-wrap')
+  const testModelWrap = document.getElementById('test-model-wrap')
+  const testForm = document.getElementById('ai-gateway-test-form')
+  const testSubmit = document.getElementById('ai-gateway-test-submit')
+  const testResult = document.getElementById('ai-gateway-test-result')
+
+  function syncTestMode() {
+    if (!(targetMode instanceof HTMLSelectElement)) return
+    const useCaseMode = targetMode.value === 'use_case'
+    testUseCaseWrap?.classList.toggle('hidden', !useCaseMode)
+    testModelWrap?.classList.toggle('hidden', useCaseMode)
+  }
+
+  targetMode?.addEventListener('change', syncTestMode)
+  syncTestMode()
+
+  function setText(id, value) {
+    const element = document.getElementById(id)
+    if (element) element.textContent = value
+  }
+
+  testForm?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    if (!(testForm instanceof HTMLFormElement)) return
+    if (testSubmit instanceof HTMLButtonElement) testSubmit.disabled = true
+
+    try {
+      const response = await fetch('/api/admin/ai-gateway/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formToJson(testForm)),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.ok || !data.result) {
+        showBanner('error', 'Admin test failed to start. Please check the selected target and try again.')
+        return
+      }
+
+      const result = data.result
+      testResult?.classList.remove('hidden')
+      setText('test-result-status', result.success ? 'success' : 'failure')
+      setText('test-result-preset', result.presetId)
+      setText('test-result-provider', result.providerDisplayName || result.providerCode || '—')
+      setText('test-result-model', result.modelDisplayName || result.modelName || '—')
+      setText('test-result-latency', result.latencyMs == null ? '—' : `${result.latencyMs} ms`)
+      setText('test-result-tokens', `${result.promptTokens} prompt / ${result.completionTokens} completion / ${result.totalTokens} total`)
+      setText('test-result-error', result.normalizedErrorType || '—')
+      setText('test-result-fallback', result.usedEnvFallback ? 'yes' : 'no')
+      setText('test-result-preview', result.responsePreview || 'No preview available for this failure.')
+      showBanner('success', 'Admin test completed without changing production health.')
+    } catch {
+      showBanner('error', 'Admin test request failed. Please try again.')
+    } finally {
+      if (testSubmit instanceof HTMLButtonElement) testSubmit.disabled = false
+    }
+  })
+</script>
