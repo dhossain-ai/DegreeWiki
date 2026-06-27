@@ -616,14 +616,8 @@ in a future hardening phase.
 
 ### Privacy page requirement
 
-The existing `/privacy` page covers AI usage logging and saved results (updated Phase 28).
-It does NOT yet mention stored chat sessions or chat message content.
-
-**The privacy page MUST be updated before or in the same phase as chat launches publicly.**
-Proposed addition:
-> "Chat sessions: If you use the AI chat feature on a saved Fit Finder result, your questions
-> and AI responses are stored in your account until you delete them. You can delete a chat
-> session at any time from the saved result page."
+The existing `/privacy` page now covers stored chat sessions and message content for
+saved-result AI chat and future AI chat surfaces.
 
 ---
 
@@ -1024,6 +1018,25 @@ if llm:
 Static path skips: rate-limit check, full context load, AI provider call, usage logging.
 Rate limit is intentionally skipped for static turns — they are cheap and provider-free.
 Ownership is verified separately (SSR/RLS `.select('id')`) before `getOrCreateConversation`.
+
+### Phase 69B — DB-Backed AI Gateway Foundation (complete)
+
+The saved-result chat LLM path now routes through the shared AI gateway foundation used by
+Fit Finder summaries.
+
+What changed:
+- `callAI()` still handles input guardrails and DegreeWiki quota checks first.
+- The LLM path now runs through DB-backed provider/model routing with `use_case = 'chat_answer'`.
+- Every provider attempt is logged to `ai_gateway_call_logs`.
+- Repeated recoverable provider failures update `ai_provider_health` and can trigger cooldown.
+- Env fallback remains available when `AI_GATEWAY_ENV_FALLBACK_ENABLED=true`.
+
+What did not change:
+- Static saved-result chat responses still do not call AI.
+- Chat remains bound to `ai_finder_result_id`.
+- Prompt context remains limited to saved-result programs only.
+- `ai_usage_logs` remains the quota ledger.
+- The `/api/ai/chat` response contract is unchanged.
 
 #### Files created (1)
 

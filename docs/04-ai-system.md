@@ -149,13 +149,24 @@ src/lib/ai/
                         StudentProfileSummary, AISessionType, AIRole
   env.ts                getAIEnv(locals) — extracts AIRuntimeEnv from
                         Cloudflare Workers locals.runtime.env safely;
-                        includes SUPABASE_SERVICE_ROLE_KEY (Phase 25)
+                        includes gateway encryption/env-fallback keys
   gateway.ts            callAI() — single entry point for all LLM calls;
-                        resolveProvider() — maps AI_PROVIDER to a live provider;
-                        creates service client per-call for rate limit + logging
+                        keeps app-level guardrails and quota checks, then
+                        delegates provider execution to router.ts
+  router.ts             DB-backed use-case router for existing AI calls;
+                        loads routing candidates, skips cooldown/inactive
+                        providers, logs attempts, and applies env fallback
+  call-logs.ts          writes ai_gateway_call_logs and updates
+                        ai_provider_health for success/failure tracking
+  admin/
+    crypto.ts           AES-GCM encryption/decryption helpers for provider
+                        API keys using AI_GATEWAY_MASTER_KEY
+    store.ts            service-role helpers to load provider accounts,
+                        models, routing policies, and health rows
   providers/
     interface.ts        AIProvider interface contract
     gemini.ts           Gemini REST implementation (live in Phase 23)
+    openai-compatible.ts reusable adapter for OpenAI-compatible providers
   prompts/
     finder-summary.ts   buildFinderPrompt() for AI Finder explanation
     chat-answer.ts      buildChatPrompt() for chatbot responses
@@ -184,13 +195,49 @@ callAI(request: AIRequest, env: AIRuntimeEnv): Promise<AIResponse>
 - Daily limit read from env.AI_RATE_LIMIT_USER_DAILY (default 20).
 - Rate limit checked second (checkRateLimit) — fail closed:
     no userId → denied; no service client → denied; query error → denied.
-- Provider resolved from env.AI_PROVIDER (default: gemini).
 - Prompt built: buildFinderPrompt for finder sessions, buildChatPrompt for chat.
-- Provider.complete() called with model, temperature 0.2, maxOutputTokens 2048.
+- Use-case routed through router.ts:
+    fit_finder_summary for saved Fit Finder summaries
+    chat_answer for saved-result AI chat
+- router.ts tries DB-backed routing policies first, logs every attempt to
+  ai_gateway_call_logs, applies provider health cooldowns, and only then
+  uses env fallback when AI_GATEWAY_ENV_FALLBACK_ENABLED=true.
 - Output guardrails run on provider response (checkOutput) before returning.
 - writeUsageLog() called fire-and-forget after output guardrail passes.
 - Every failure path returns a valid AIResponse — callAI never throws.
 - callAI must only be called from server endpoints.
+
+### Phase 69B Behaviour — DB-Backed Gateway Foundation
+
+The AI gateway now supports a DB-backed provider foundation while preserving the
+existing env-based fallback path.
+
+Gateway tables:
+- ai_provider_accounts
+- ai_models
+- ai_routing_policies
+- ai_provider_health
+- ai_gateway_call_logs
+
+Current live product routing:
+- Fit Finder async summary → use_case = fit_finder_summary
+- Saved-result chat LLM path → use_case = chat_answer
+- Static saved-result chat responses still bypass AI entirely
+
+Provider keys:
+- Stored encrypted in ai_provider_accounts only
+- Encrypted with AES-GCM using AI_GATEWAY_MASTER_KEY
+- IV stored separately as base64
+- Key version stored in api_key_key_version using AI_GATEWAY_ACTIVE_KEY_VERSION
+- Only last4/fingerprint metadata is stored alongside ciphertext
+- Decrypted keys are never returned to browser code and never logged
+
+Fallback rules:
+- App-level validation, context checks, static chat routing, and DegreeWiki quota checks
+  happen before provider fallback.
+- DB routing falls across provider/model candidates only for recoverable provider failures.
+- If DB routing has no usable candidate, or every candidate fails, env fallback may run
+  when AI_GATEWAY_ENV_FALLBACK_ENABLED=true and the use-case policy allows it.
 
 ### Phase 25 Behaviour — Usage Logging and Rate Limits
 
@@ -331,6 +378,10 @@ Environment variables for the AI module:
 
 ```
 # Required secrets — server-only, never exposed with PUBLIC_
+AI_GATEWAY_MASTER_KEY       # Base64-encoded 32-byte AES key for DB-stored provider
+                            # credential encryption/decryption.
+AI_GATEWAY_ACTIVE_KEY_VERSION
+                            # Active encryption key version label, e.g. v1.
 GEMINI_API_KEY             # Server/worker only. Required for AI to run.
                             # Production Cloudflare: set in the Cloudflare dashboard
                             # or via wrangler secret (see docs/08-ai-deployment-checklist.md).
@@ -344,6 +395,8 @@ SUPABASE_SERVICE_ROLE_KEY  # Server/worker only. Required for AI to run.
 # Optional server/runtime env vars — set in Cloudflare Pages dashboard or wrangler.toml
 AI_PROVIDER             # Active provider name: gemini | openrouter (default: gemini)
 AI_MODEL                # Model string passed to provider (default: gemini-2.5-flash)
+AI_GATEWAY_ENV_FALLBACK_ENABLED
+                        # true | false. Allows env-based fallback after DB routing fails.
 AI_RATE_LIMIT_ANON_DAILY    # Max AI calls per anonymous session per day (default 5, not yet enforced)
 AI_RATE_LIMIT_USER_DAILY    # Max AI calls per logged-in user per day (default 20)
 ```

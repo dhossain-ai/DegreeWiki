@@ -5,7 +5,9 @@
 
 ## Current Project Status
 
-Phase 68 is complete. The import pipeline is in a stable polish state, and the next focus is Phase 69A - AI Provider Routing Inspection Only.
+Phase 69B is complete. DegreeWiki now has a DB-backed AI Gateway foundation with encrypted
+provider credentials, use-case routing, structured gateway call logs, provider health/cooldown
+tracking, and env fallback preserved for existing AI features.
 
 Current branch: `main`
 
@@ -33,6 +35,9 @@ Very short import pipeline summary:
 
 ## Known Open Notes
 
+- No full `/admin/ai-gateway` dashboard yet; Phase 69B only adds backend foundation.
+- DB-backed provider routing is ready, but it still depends on future provider/account rows
+  before it replaces env fallback in practice.
 - Cloudinary still needs the SHA-256 signature setup, or `CLOUDINARY_SIGNATURE_ALGORITHM=sha1` as a fallback.
 - Default site OG image is still not configured.
 - CSV import and persistent uploaded-file import storage remain deferred.

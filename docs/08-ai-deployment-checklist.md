@@ -20,11 +20,13 @@ They must never use the `PUBLIC_` prefix. Never commit real values to the reposi
 
 | Secret | Purpose |
 |---|---|
+| `AI_GATEWAY_MASTER_KEY` | Base64-encoded 32-byte AES key used to decrypt DB-stored provider API keys |
+| `AI_GATEWAY_ACTIVE_KEY_VERSION` | Active encryption key version label used for DB-stored provider credentials |
 | `GEMINI_API_KEY` | Authenticates calls to the Gemini REST API (when `AI_PROVIDER=gemini`) |
 | `OPENROUTER_API_KEY` | Authenticates calls to OpenRouter (when `AI_PROVIDER=openrouter`) — local AI testing |
 | `SUPABASE_SERVICE_ROLE_KEY` | Rate-limit checks, AI usage logging, saved-result persistence |
 
-Only the API key for the active `AI_PROVIDER` is required. Both keys are server-only and
+Only the API key for the active env fallback `AI_PROVIDER` is required. All secrets above are server-only and
 must never use the `PUBLIC_` prefix.
 
 ---
@@ -40,6 +42,7 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 | `PUBLIC_SITE_URL` | No | `https://degreewiki.com` | Canonical site URL |
 | `AI_PROVIDER` | No | `gemini` | Active provider name: `gemini` or `openrouter` |
 | `AI_MODEL` | No | `gemini-2.5-flash` | Model string passed to provider |
+| `AI_GATEWAY_ENV_FALLBACK_ENABLED` | No | `false` | Enables env-based provider fallback when DB routing fails |
 | `AI_RATE_LIMIT_USER_DAILY` | No | `20` | Max AI calls per logged-in user per day |
 | `AI_RATE_LIMIT_ANON_DAILY` | No | `5` | Reserved; anonymous AI not yet enforced |
 
@@ -153,6 +156,13 @@ npx wrangler secret list         # Workers
 
 Confirm these exist before deploying AI features.
 
+- [ ] `ai_provider_accounts` table exists; RLS enabled; no public access
+- [ ] `ai_models` table exists; RLS enabled; no public access
+- [ ] `ai_routing_policies` table exists; RLS enabled; no public access
+- [ ] `ai_provider_health` table exists; RLS enabled; no public access
+- [ ] `ai_gateway_call_logs` table exists; RLS enabled
+  - Readable only by `view_ai_logs`, `manage_ai_settings`, or `super_admin`
+  - No authenticated browser INSERT/UPDATE/DELETE policies
 - [ ] `ai_usage_logs` table exists; RLS enabled; service role can INSERT
 - [ ] `ai_finder_results` table exists; RLS enabled
   - Service role can INSERT and UPDATE
@@ -308,6 +318,19 @@ Expected for a successful Fit Finder run:
 If no row appears after a successful AI summary, `SUPABASE_SERVICE_ROLE_KEY` may be
 misconfigured — the usage log is written fire-and-forget after a successful AI call.
 
+## 10A. Gateway Call Log Verification
+
+After a successful routed AI call, verify `ai_gateway_call_logs` contains an attempt row for:
+
+- `use_case = 'fit_finder_summary'` for Fit Finder summaries
+- `use_case = 'chat_answer'` for saved-result chat LLM turns
+
+Expected:
+- `status = 'success'` or `env_fallback_success`
+- no prompt or response body stored
+- provider/model metadata present when a DB provider candidate was used
+- `was_fallback = true` only when a later candidate or env fallback was used
+
 ---
 
 ## 11. Saved-Result Persistence Verification
@@ -345,6 +368,8 @@ Check server logs for `ai_finder_program_matches insert failed`.
 
 | Failure mode | AI summary | Rule-based matches | Persistence | User sees |
 |---|---|---|---|---|
+| DB routing has no active candidate, env fallback enabled | Not shown if env fallback also fails | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note |
+| DB provider decrypt/master-key failure, env fallback enabled | Depends on env fallback | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note |
 | `GEMINI_API_KEY` absent | Not shown | Renders normally | Attempted (ai_explanation=null) | Gray unavailable note |
 | `SUPABASE_SERVICE_ROLE_KEY` absent | Not shown | Renders normally | Not attempted | Gray unavailable note |
 | Both secrets absent | Not shown | Renders normally | Not attempted | Gray unavailable note |

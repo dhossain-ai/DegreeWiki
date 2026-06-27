@@ -5,6 +5,25 @@
 
 ## Recent Task Log
 
+### Phase 69B - AI Gateway Foundation Bundle
+
+- Added `024_ai_gateway_foundation.sql` with:
+  `ai_provider_accounts`, `ai_models`, `ai_routing_policies`, `ai_provider_health`,
+  and `ai_gateway_call_logs`.
+- Seeded `manage_ai_settings` and granted it to `super_admin` without changing
+  existing `view_ai_logs` behavior or `ai_usage_logs`.
+- Added server-only AI gateway helpers for encrypted provider key storage,
+  DB-backed provider/model/policy loading, structured gateway attempt logs,
+  and provider health/cooldown updates.
+- Added a reusable OpenAI-compatible provider adapter for DB-managed accounts.
+- Refactored `callAI()` to keep app-level guardrails/quota checks in place while routing
+  existing LLM execution through use-case routing:
+  `fit_finder_summary` for Fit Finder summaries and `chat_answer` for saved-result chat.
+- Preserved current product behavior:
+  Fit Finder still renders rule-based matches first, AI summary stays async and summary-only,
+  saved-result chat stays bound to `ai_finder_result_id`, and static chat responses still avoid AI.
+- Updated privacy disclosure to mention stored AI chat messages/responses.
+
 ### Phase 68 - Import Pipeline Polish Bundle
 
 - Made Program Import Staging the primary recommended path on `/admin/imports`.
@@ -33,7 +52,7 @@
 
 ### Open Note
 
-- Next major phase: AI Provider Routing Inspection.
+- Next major phase: AI Gateway provider/account management UI on top of the 69B backend foundation.
 
 ## Archive Index
 
