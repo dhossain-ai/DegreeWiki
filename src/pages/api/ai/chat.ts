@@ -153,8 +153,10 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   // Rate limit, provider call, output guardrail, and usage logging all run inside callAI.
   const aiResponse = await callAI(
     {
+      useCase:        'chat_answer',
       sessionType:    'chat',
       chatMode:       'saved_result',
+      aiFinderResultId: resultId,
       userMessage:    message,
       context:        aiContext,
       userId:         user.id,
