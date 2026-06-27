@@ -11,6 +11,8 @@ if (guard.type === 'forbidden') return forbiddenAdminResponse()
 const { user, supabase } = guard
 
 const BATCH_TYPES = ['universities', 'programs', 'scholarships', 'articles', 'mixed'] as const
+const BATCH_STATUS_FILTERS = ['all', 'pending', 'needs_review', 'processing', 'validated', 'duplicate_detected', 'approved', 'rejected', 'error'] as const
+const ACTIVITY_FILTERS = ['all', 'active', 'recent_7', 'recent_30'] as const
 
 type Values = { batch_type: string; notes: string }
 let values: Values = { batch_type: '', notes: '' }
@@ -70,6 +72,30 @@ type ImportBatchRow = {
 }
 
 const rows = (data ?? []) as ImportBatchRow[]
+const selectedTypeFilter = Astro.url.searchParams.get('type')?.trim() ?? 'all'
+const selectedStatusFilter = Astro.url.searchParams.get('status')?.trim() ?? 'all'
+const selectedActivityFilter = Astro.url.searchParams.get('activity')?.trim() ?? 'all'
+const validTypeFilter = selectedTypeFilter === 'all' || (BATCH_TYPES as readonly string[]).includes(selectedTypeFilter)
+const validStatusFilter = (BATCH_STATUS_FILTERS as readonly string[]).includes(selectedStatusFilter)
+const validActivityFilter = (ACTIVITY_FILTERS as readonly string[]).includes(selectedActivityFilter)
+const nowMs = Date.now()
+const activeBatchStatuses = new Set(['pending', 'needs_review', 'processing', 'validated', 'duplicate_detected', 'approved', 'error'])
+const filteredRows = rows.filter((row) => {
+  const typeMatches = !validTypeFilter || selectedTypeFilter === 'all' || row.batch_type === selectedTypeFilter
+  const statusMatches = !validStatusFilter || selectedStatusFilter === 'all' || row.import_status === selectedStatusFilter
+  const createdMs = new Date(row.created_at).getTime()
+  const ageDays = Number.isFinite(createdMs) ? (nowMs - createdMs) / (1000 * 60 * 60 * 24) : Number.POSITIVE_INFINITY
+  const activityMatches = !validActivityFilter || selectedActivityFilter === 'all'
+    ? true
+    : selectedActivityFilter === 'active'
+      ? activeBatchStatuses.has(row.import_status)
+      : selectedActivityFilter === 'recent_7'
+        ? ageDays <= 7
+        : ageDays <= 30
+
+  return typeMatches && statusMatches && activityMatches
+})
+const cleanupDeleted = Astro.url.searchParams.get('cleanupDeleted') === '1'
 const LIFECYCLE_LABEL: Record<string, string> = {
   pending: 'No rows yet',
   needs_review: 'Awaiting review',
@@ -97,16 +123,22 @@ const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
         available below for universities, scholarships, articles, mixed research packs, and manual staging work.
       </p>
     </div>
-    <span class="shrink-0 text-sm text-gray-400">{rows.length} batch{rows.length !== 1 ? 'es' : ''}</span>
+    <span class="shrink-0 text-sm text-gray-400">{filteredRows.length} shown · {rows.length} total</span>
   </div>
 
-  <div class="mb-8 grid gap-4 lg:grid-cols-3">
-    <section class="rounded-xl border border-blue-200 bg-blue-50 px-5 py-5">
-      <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Recommended</p>
+  {cleanupDeleted && (
+    <div class="mb-6 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+      Import batch deleted. Only staging and review records were removed; production content was not deleted.
+    </div>
+  )}
+
+  <div class="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1.4fr),minmax(18rem,0.8fr)]">
+    <section class="rounded-xl border-2 border-blue-300 bg-blue-50 px-6 py-6 shadow-sm">
+      <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Recommended primary path</p>
       <h2 class="mt-2 text-lg font-semibold text-blue-950">Program Import Staging</h2>
       <p class="mt-2 text-sm text-blue-900">
-        Choose one production university, paste or load program JSON, preview it in the browser, then stage programs
-        into a review batch without writing directly to production.
+        Use this for the normal program workflow. Choose one production university, paste or load program JSON, preview
+        it in the browser, then stage programs into a review batch without writing directly to production.
       </p>
       <ul class="mt-4 space-y-1.5 text-sm text-blue-900">
         <li>Supports <code>[...]</code>, <code>{'{'} "programs": [...] {'}'}</code>, and research-pack JSON.</li>
@@ -115,54 +147,65 @@ const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
       </ul>
       <a
         href="/admin/imports/programs"
-        class="mt-5 inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        class="mt-5 inline-flex items-center rounded-md bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
       >
         Open Program Import
       </a>
     </section>
 
     <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
-      <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Existing Workspace</p>
+      <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Advanced / legacy</p>
       <h2 class="mt-2 text-lg font-semibold text-gray-900">General Batch Tools</h2>
       <p class="mt-2 text-sm text-gray-600">
-        Keep using the generic batch flow when you need manual staging, flat university/scholarship/article imports, or
-        a mixed batch that stages both universities and programs together.
+        Use these only for universities, scholarships, articles, mixed research packs, and manual staging. They are not
+        the normal guided program workflow.
       </p>
       <ul class="mt-4 space-y-1.5 text-sm text-gray-600">
         <li>Universities, scholarships, articles, or mixed research-pack imports.</li>
         <li>Manual per-row staging and existing template/prompt tooling.</li>
         <li>Older mixed-batch program support remains unchanged.</li>
       </ul>
-      <a href="#general-batch-tools" class="mt-5 inline-flex items-center text-sm font-medium text-blue-600 hover:underline">
-        Jump to batch creation
-      </a>
-    </section>
-
-    <section class="rounded-xl border border-gray-200 bg-white px-5 py-5">
-      <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">History</p>
-      <h2 class="mt-2 text-lg font-semibold text-gray-900">Recent Import Batches</h2>
-      <p class="mt-2 text-sm text-gray-600">
-        Open an existing batch to continue review, run quality checks, or merge approved rows into production.
-      </p>
-      <div class="mt-4 grid grid-cols-3 gap-2 text-center">
-        <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-          <p class="text-xl font-bold text-gray-900">{rows.length}</p>
-          <p class="mt-1 text-xs text-gray-400">Batches</p>
-        </div>
-        <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-          <p class="text-xl font-bold text-gray-900">{rows.filter((row) => row.import_status === 'needs_review').length}</p>
-          <p class="mt-1 text-xs text-gray-400">Awaiting review</p>
-        </div>
-        <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-          <p class="text-xl font-bold text-gray-900">{rows.filter((row) => row.error_count > 0).length}</p>
-          <p class="mt-1 text-xs text-gray-400">With errors</p>
-        </div>
+      <div class="mt-5 flex flex-wrap gap-3">
+        <a href="#general-batch-tools" class="inline-flex items-center text-sm font-medium text-blue-600 hover:underline">
+          Open legacy batch creation
+        </a>
+        <a href="#recent-batches" class="inline-flex items-center text-sm font-medium text-gray-600 hover:underline">
+          Open batch history
+        </a>
       </div>
-      <a href="#recent-batches" class="mt-5 inline-flex items-center text-sm font-medium text-blue-600 hover:underline">
-        Jump to history
-      </a>
     </section>
   </div>
+
+  <section id="recent-batches" class="mb-6 rounded-xl border border-gray-200 bg-white px-5 py-5">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">History</p>
+        <h2 class="mt-1 text-lg font-semibold text-gray-900">Recent Import Batches</h2>
+        <p class="mt-2 text-sm text-gray-600">
+          Open an existing batch to review staged rows, choose merge or enrichment actions, publish draft programs when needed, or clean up old staging batches.
+        </p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="/admin/imports/programs" class="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">Open Program Import</a>
+        <a href="/admin/imports?status=needs_review&activity=active#recent-batches" class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100">Open active batches needing review</a>
+        <a href="/admin/imports#recent-batches" class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Open batch history</a>
+      </div>
+    </div>
+    <div class="mt-4 grid grid-cols-3 gap-2 text-center">
+      <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+        <p class="text-xl font-bold text-gray-900">{rows.length}</p>
+        <p class="mt-1 text-xs text-gray-400">Batches</p>
+      </div>
+      <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+        <p class="text-xl font-bold text-gray-900">{rows.filter((row) => row.import_status === 'needs_review').length}</p>
+        <p class="mt-1 text-xs text-gray-400">Awaiting review</p>
+      </div>
+      <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+        <p class="text-xl font-bold text-gray-900">{rows.filter((row) => row.error_count > 0).length}</p>
+        <p class="mt-1 text-xs text-gray-400">With errors</p>
+      </div>
+    </div>
+  </section>
 
   <details
     id="general-batch-tools"
@@ -170,12 +213,12 @@ const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
     {...(hasFormError ? { open: true } : {})}
   >
     <summary class="cursor-pointer select-none rounded-xl px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-      General Batch Creation
+      Advanced / Legacy: General Batch Creation
     </summary>
     <div class="border-t border-gray-200 px-4 pb-4 pt-3">
       <p class="mb-3 text-xs text-gray-500">
-        Choose the type of data you are importing. Use <strong>mixed</strong> when a single batch includes both
-        universities and the programs that belong to them.
+        These tools are for universities, scholarships, articles, mixed research packs, and manual staging. For normal
+        program imports, use <strong>Program Import Staging</strong> above.
       </p>
       {serverError && (
         <div class="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</div>
@@ -216,7 +259,41 @@ const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
       <p>Use the Program Import flow above or create a general batch to get started.</p>
     </div>
   ) : (
-    <div id="recent-batches" class="overflow-x-auto rounded-lg border border-gray-200">
+    <>
+    <form method="get" class="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+      <div>
+        <label for="type" class="mb-1 block text-xs font-medium text-gray-600">Type</label>
+        <select id="type" name="type" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+          <option value="all" selected={selectedTypeFilter === 'all'}>All types</option>
+          {BATCH_TYPES.map((type) => <option value={type} selected={selectedTypeFilter === type}>{type}</option>)}
+        </select>
+      </div>
+      <div>
+        <label for="status" class="mb-1 block text-xs font-medium text-gray-600">Status</label>
+        <select id="status" name="status" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+          {BATCH_STATUS_FILTERS.map((status) => <option value={status} selected={selectedStatusFilter === status}>{status === 'all' ? 'All statuses' : status}</option>)}
+        </select>
+      </div>
+      <div>
+        <label for="activity" class="mb-1 block text-xs font-medium text-gray-600">Active / recent</label>
+        <select id="activity" name="activity" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+          <option value="all" selected={selectedActivityFilter === 'all'}>All recent batches</option>
+          <option value="active" selected={selectedActivityFilter === 'active'}>Active only</option>
+          <option value="recent_7" selected={selectedActivityFilter === 'recent_7'}>Last 7 days</option>
+          <option value="recent_30" selected={selectedActivityFilter === 'recent_30'}>Last 30 days</option>
+        </select>
+      </div>
+      <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Apply filters</button>
+      <a href="/admin/imports#recent-batches" class="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">Clear</a>
+      <span class="text-xs text-gray-400">{filteredRows.length} of {rows.length} shown</span>
+    </form>
+
+    {filteredRows.length === 0 ? (
+      <div class="rounded-lg border border-dashed border-gray-200 bg-white py-8 text-center text-sm text-gray-500">
+        No batches match these filters.
+      </div>
+    ) : (
+    <div class="overflow-x-auto rounded-lg border border-gray-200">
       <table class="w-full text-left text-sm">
         <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -230,7 +307,7 @@ const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {filteredRows.map((row) => (
             <tr class="border-b border-gray-100 hover:bg-gray-50">
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${BATCH_TYPE_BADGE[row.batch_type] ?? FALLBACK_BADGE}`}>
@@ -264,5 +341,7 @@ const hasFormError = Object.keys(formErrors).length > 0 || !!serverError
         </tbody>
       </table>
     </div>
+    )}
+    </>
   )}
 </AdminLayout>
