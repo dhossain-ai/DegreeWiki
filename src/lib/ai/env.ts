@@ -29,6 +29,15 @@ export function getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv {
   const result: AIRuntimeEnv = {
     AI_PROVIDER:               raw['AI_PROVIDER']               ?? import.meta.env.AI_PROVIDER               ?? nodeEnv['AI_PROVIDER'],
     AI_MODEL:                  raw['AI_MODEL']                  ?? import.meta.env.AI_MODEL                  ?? nodeEnv['AI_MODEL'],
+    AI_GATEWAY_MASTER_KEY:     raw['AI_GATEWAY_MASTER_KEY']     ?? import.meta.env.AI_GATEWAY_MASTER_KEY     ?? nodeEnv['AI_GATEWAY_MASTER_KEY'],
+    AI_GATEWAY_ACTIVE_KEY_VERSION:
+                               raw['AI_GATEWAY_ACTIVE_KEY_VERSION']
+                                                                  ?? import.meta.env.AI_GATEWAY_ACTIVE_KEY_VERSION
+                                                                  ?? nodeEnv['AI_GATEWAY_ACTIVE_KEY_VERSION'],
+    AI_GATEWAY_ENV_FALLBACK_ENABLED:
+                               raw['AI_GATEWAY_ENV_FALLBACK_ENABLED']
+                                                                  ?? import.meta.env.AI_GATEWAY_ENV_FALLBACK_ENABLED
+                                                                  ?? nodeEnv['AI_GATEWAY_ENV_FALLBACK_ENABLED'],
     GEMINI_API_KEY:            raw['GEMINI_API_KEY']            ?? import.meta.env.GEMINI_API_KEY            ?? nodeEnv['GEMINI_API_KEY'],
     OPENROUTER_API_KEY:        raw['OPENROUTER_API_KEY']        ?? import.meta.env.OPENROUTER_API_KEY        ?? nodeEnv['OPENROUTER_API_KEY'],
     AI_RATE_LIMIT_ANON_DAILY:  raw['AI_RATE_LIMIT_ANON_DAILY']  ?? import.meta.env.AI_RATE_LIMIT_ANON_DAILY  ?? nodeEnv['AI_RATE_LIMIT_ANON_DAILY'],
@@ -38,7 +47,9 @@ export function getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv {
 
   if (import.meta.env.DEV) {
     const keys = [
-      'AI_PROVIDER', 'AI_MODEL', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY',
+      'AI_PROVIDER', 'AI_MODEL',
+      'AI_GATEWAY_MASTER_KEY', 'AI_GATEWAY_ACTIVE_KEY_VERSION', 'AI_GATEWAY_ENV_FALLBACK_ENABLED',
+      'GEMINI_API_KEY', 'OPENROUTER_API_KEY',
       'AI_RATE_LIMIT_ANON_DAILY', 'AI_RATE_LIMIT_USER_DAILY',
       'SUPABASE_SERVICE_ROLE_KEY',
     ] as const

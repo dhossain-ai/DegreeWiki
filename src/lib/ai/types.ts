@@ -2,6 +2,15 @@ export type AISessionType = 'finder' | 'chat'
 
 export type AIRole = 'user' | 'assistant' | 'system'
 
+export type AIUseCase =
+  | 'fit_finder_summary'
+  | 'chat_answer'
+  | 'intent_detection'
+  | 'subject_mapping'
+  | 'program_comparison'
+  | 'scholarship_explanation'
+  | 'admin_article_draft'
+
 // Minimal profile summary passed into prompts.
 // All fields are optional — this is a partial view of student_profiles,
 // never the full row.
@@ -26,9 +35,11 @@ export interface AIContext {
 // What enters the AI gateway from a server endpoint.
 export interface AIRequest {
   sessionType: AISessionType
+  useCase?: AIUseCase
   // When sessionType === 'chat', set to 'saved_result' for context-bound saved-result chat.
   // Omit for generic/future chat surfaces. Only used when sessionType === 'chat'.
   chatMode?: 'saved_result'
+  aiFinderResultId?: string
   conversationId?: string
   userMessage: string
   context: AIContext
@@ -48,11 +59,27 @@ export interface AIResponse {
 }
 
 export type AIProviderErrorCategory =
+  | 'rate_limit'
+  | 'quota_exceeded'
+  | 'timeout'
+  | 'provider_unavailable'
+  | 'provider_5xx'
+  | 'network_error'
+  | 'invalid_provider_response'
   | 'auth_error'
-  | 'model_not_found'
-  | 'quota_or_rate_limit'
   | 'bad_request'
-  | 'provider_error'
+  | 'model_not_found'
+  | 'policy_refusal'
+  | 'unknown_error'
+
+export type AIGatewayLogStatus =
+  | 'success'
+  | 'failure'
+  | 'skipped_cooldown'
+  | 'skipped_inactive'
+  | 'blocked_by_policy'
+  | 'env_fallback_success'
+  | 'env_fallback_failure'
   | 'network_error'
 
 export type AIFailureReason =
@@ -87,6 +114,7 @@ export interface AIProviderConfig {
   model: string
   maxOutputTokens?: number
   temperature?: number
+  timeoutMs?: number
 }
 
 // What a provider returns after completing a prompt.
@@ -95,6 +123,123 @@ export interface AIProviderResponse {
   promptTokens: number
   completionTokens: number
   modelUsed: string
+}
+
+export interface AIGatewayProviderAccount {
+  id: string
+  providerCode: string
+  displayName: string
+  adapterType: 'openai_compatible'
+  baseUrl: string | null
+  endpointPath: string | null
+  authType: 'bearer'
+  apiKeyCiphertext: string
+  apiKeyIv: string
+  apiKeyKeyVersion: string
+  apiKeyLast4: string | null
+  apiKeyFingerprint: string | null
+  timeoutMs: number
+  isActive: boolean
+  privacyLevel: 'standard' | 'restricted'
+  allowsStudentData: boolean
+  allowsChat: boolean
+  allowsFitFinder: boolean
+}
+
+export interface AIGatewayModel {
+  id: string
+  providerAccountId: string
+  modelName: string
+  displayName: string
+  isActive: boolean
+  supportsText: boolean
+  supportsJsonMode: boolean
+  supportsStreaming: boolean
+  supportsToolCalling: boolean
+  maxOutputTokens: number | null
+  inputCostPerMillion: number | null
+  outputCostPerMillion: number | null
+  costTier: string | null
+}
+
+export interface AIGatewayRoutingPolicy {
+  id: string
+  useCase: AIUseCase
+  modelId: string
+  priority: number
+  isActive: boolean
+  fallbackEnabled: boolean
+  maxAttempts: number
+  timeoutMs: number | null
+  allowEnvFallback: boolean
+  notes: string | null
+}
+
+export interface AIGatewayProviderHealth {
+  id: string
+  providerAccountId: string
+  modelId: string
+  consecutiveFailures: number
+  lastSuccessAt: string | null
+  lastFailureAt: string | null
+  lastErrorType: AIProviderErrorCategory | null
+  cooldownUntil: string | null
+}
+
+export interface AIGatewayRoutingCandidate {
+  policy: AIGatewayRoutingPolicy
+  model: AIGatewayModel
+  providerAccount: AIGatewayProviderAccount
+  health: AIGatewayProviderHealth | null
+}
+
+export interface AIGatewayCallContext {
+  userId?: string | null
+  anonymousSessionId?: string | null
+  aiFinderResultId?: string | null
+  aiConversationId?: string | null
+  aiMessageId?: string | null
+}
+
+export interface AIGatewayCallLogEntry extends AIGatewayCallContext {
+  useCase: AIUseCase
+  providerAccountId: string | null
+  modelId: string | null
+  providerCode: string | null
+  modelName: string | null
+  status: AIGatewayLogStatus
+  normalizedErrorType?: AIProviderErrorCategory | null
+  providerHttpStatus?: number | null
+  latencyMs?: number | null
+  promptTokens?: number | null
+  completionTokens?: number | null
+  totalTokens?: number | null
+  estimatedCostUsd?: number | null
+  wasFallback: boolean
+  fallbackAttemptNumber: number
+  fallbackFromCallId?: string | null
+}
+
+export interface AIGatewayAttemptFailure {
+  providerCode: string
+  modelName: string
+  category: AIProviderErrorCategory
+  status?: number
+}
+
+export interface AIGatewaySuccess {
+  response: AIProviderResponse
+  providerCode: string
+  modelName: string
+  providerAccountId: string | null
+  modelId: string | null
+  usedEnvFallback: boolean
+  logId: string | null
+}
+
+export interface AIGatewayFailure {
+  usedEnvFallback: boolean
+  failure: AIGatewayAttemptFailure | null
 }
 
 // Usage audit entry written to ai_usage_logs (Phase 25+).
@@ -159,6 +304,9 @@ export interface ContextUsedSnapshot {
 export interface AIRuntimeEnv {
   AI_PROVIDER?: string
   AI_MODEL?: string
+  AI_GATEWAY_MASTER_KEY?: string
+  AI_GATEWAY_ACTIVE_KEY_VERSION?: string
+  AI_GATEWAY_ENV_FALLBACK_ENABLED?: string
   GEMINI_API_KEY?: string
   // Server-only. Never expose with PUBLIC_ prefix. Used only when
   // AI_PROVIDER=openrouter for local AI testing via the OpenRouter provider.
