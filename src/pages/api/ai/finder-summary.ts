@@ -178,7 +178,9 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
 
   const aiResponse = await callAI(
     {
+      useCase: 'fit_finder_summary',
       sessionType: 'finder',
+      aiFinderResultId: result.id,
       userMessage: 'Explain the shortlisted programs for this student.',
       context: aiContext,
       userId: user.id,
