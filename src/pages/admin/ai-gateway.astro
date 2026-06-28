@@ -152,35 +152,98 @@ function numberText(value: number | null | undefined): string {
 
 function badgeClass(active: boolean): string {
   return active
-    ? 'inline-flex rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700'
-    : 'inline-flex rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500'
+    ? 'inline-flex rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700'
+    : 'inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600'
 }
 
 function cooldownActive(cooldownUntil: string | null | undefined): boolean {
   if (!cooldownUntil) return false
   return new Date(cooldownUntil).getTime() > Date.now()
 }
+
+function formatMoney(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return `$${Number(value).toFixed(4)}`
+}
+
+function capabilityList(model: any): string[] {
+  const capabilities: string[] = []
+  if (model.supports_text) capabilities.push('text')
+  if (model.supports_json_mode) capabilities.push('json')
+  if (model.supports_streaming) capabilities.push('streaming')
+  if (model.supports_tool_calling) capabilities.push('tool-calling')
+  return capabilities
+}
+
+function accessFlags(provider: any): string[] {
+  const flags: string[] = []
+  flags.push(`privacy:${provider.privacy_level ?? 'standard'}`)
+  flags.push(`student:${provider.allows_student_data ? 'yes' : 'no'}`)
+  flags.push(`chat:${provider.allows_chat ? 'yes' : 'no'}`)
+  flags.push(`fit_finder:${provider.allows_fit_finder ? 'yes' : 'no'}`)
+  return flags
+}
+
+const modelCountByProviderId = new Map<string, number>()
+for (const model of models) {
+  if (!model.provider_account_id) continue
+  modelCountByProviderId.set(
+    model.provider_account_id,
+    (modelCountByProviderId.get(model.provider_account_id) ?? 0) + 1,
+  )
+}
+
+const policyCountByModelId = new Map<string, number>()
+for (const policy of policies) {
+  if (!policy.model_id) continue
+  policyCountByModelId.set(policy.model_id, (policyCountByModelId.get(policy.model_id) ?? 0) + 1)
+}
+
+const policyCountByProviderCode = new Map<string, number>()
+for (const policy of policies) {
+  const providerCode = policy.ai_models?.ai_provider_accounts?.provider_code
+  if (!providerCode) continue
+  policyCountByProviderCode.set(
+    providerCode,
+    (policyCountByProviderCode.get(providerCode) ?? 0) + 1,
+  )
+}
+
+const activeProviderCount = providers.filter((provider) => provider.is_active === true).length
+const activeModelCount = models.filter((model) => model.is_active === true).length
+const activePolicyCount = policies.filter((policy) => policy.is_active === true).length
+const healthIssueCount = healthRows.filter(
+  (row) =>
+    cooldownActive(row.cooldown_until) ||
+    (row.consecutive_failures ?? 0) > 0 ||
+    Boolean(row.last_error_type),
+).length
+
+const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
+  useCase,
+  isLive: AI_GATEWAY_LIVE_USE_CASES.includes(useCase),
+  rows: policies.filter((policy) => policy.use_case === useCase),
+}))
 ---
 <AdminLayout title="AI Gateway — DegreeWiki Admin" activePath="/admin/ai-gateway" userEmail={user.email ?? ''}>
-  <div class="flex items-start justify-between gap-4 mb-6">
+  <div class="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
     <div>
       <h1 class="text-xl font-bold text-gray-900">AI Gateway</h1>
-      <p class="mt-2 max-w-3xl text-sm text-gray-600">
+      <p class="mt-2 max-w-4xl text-sm text-gray-600">
         Manage DB-backed provider accounts, models, routing policies, health state, and admin-only
         preset tests. Only <span class="font-medium text-gray-800">fit_finder_summary</span> and
-        <span class="font-medium text-gray-800"> chat_answer</span> are actively wired in product
-        behavior today.
+        <span class="font-medium text-gray-800"> chat_answer</span> are live product routes today.
       </p>
     </div>
-    <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
-      <div>Env fallback:</div>
-      <div class={envFallbackEnabled ? badgeClass(true) : badgeClass(false)}>
-        {envFallbackEnabled ? 'enabled' : 'disabled'}
-      </div>
+    <div class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      <div class="font-medium">Recommended live routing</div>
+      <div class="mt-1">1. OpenRouter free</div>
+      <div>2. Xiaomi MiMo V2.5</div>
+      <div>3. Gemini env fallback</div>
     </div>
   </div>
 
-  <div id="ai-gateway-banner" class="hidden mb-6 rounded-md border px-4 py-3 text-sm"></div>
+  <div id="ai-gateway-banner" class="mb-6 hidden rounded-md border px-4 py-3 text-sm"></div>
 
   {loadError && (
     <div class="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -188,242 +251,328 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
     </div>
   )}
 
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <div class="rounded-lg border border-gray-200 bg-white p-4">
-      <div class="text-xs uppercase tracking-wide text-gray-500">Provider Accounts</div>
-      <div class="mt-2 text-2xl font-semibold text-gray-900">{providers.length}</div>
+  <div class="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Env Fallback Status</div>
+      <div class="mt-3 flex items-center justify-between gap-3">
+        <span class={envFallbackEnabled ? badgeClass(true) : badgeClass(false)}>
+          {envFallbackEnabled ? 'enabled' : 'disabled'}
+        </span>
+        <span class="text-xs text-gray-500">Gemini/OpenRouter env paths only</span>
+      </div>
     </div>
-    <div class="rounded-lg border border-gray-200 bg-white p-4">
-      <div class="text-xs uppercase tracking-wide text-gray-500">Models</div>
-      <div class="mt-2 text-2xl font-semibold text-gray-900">{models.length}</div>
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Active Providers</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{activeProviderCount}</div>
+      <div class="mt-1 text-xs text-gray-500">{providers.length} total provider accounts</div>
     </div>
-    <div class="rounded-lg border border-gray-200 bg-white p-4">
-      <div class="text-xs uppercase tracking-wide text-gray-500">Routing Policies</div>
-      <div class="mt-2 text-2xl font-semibold text-gray-900">{policies.length}</div>
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Active Models</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{activeModelCount}</div>
+      <div class="mt-1 text-xs text-gray-500">{models.length} total configured models</div>
     </div>
-    <div class="rounded-lg border border-gray-200 bg-white p-4">
-      <div class="text-xs uppercase tracking-wide text-gray-500">Health Rows</div>
-      <div class="mt-2 text-2xl font-semibold text-gray-900">{healthRows.length}</div>
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Active Routing Policies</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{activePolicyCount}</div>
+      <div class="mt-1 text-xs text-gray-500">{policies.length} total policy rows</div>
+    </div>
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Health Issues / Cooldowns</div>
+      <div class="mt-2 text-2xl font-semibold text-gray-900">{healthIssueCount}</div>
+      <div class="mt-1 text-xs text-gray-500">{healthRows.length} total provider health rows</div>
+    </div>
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500">Live Use Cases</div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        {AI_GATEWAY_LIVE_USE_CASES.map((useCase) => (
+          <span class="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
+            {useCase}
+          </span>
+        ))}
+      </div>
     </div>
   </div>
 
-  <div class="mb-8 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-    <p class="font-medium">DB-managed support in Phase 69C</p>
-    <p class="mt-1">
-      Provider accounts created here support <code>openai_compatible</code> only. Planned options
-      <code> gemini</code>, <code>openrouter_legacy</code>, and <code>disabled</code> are shown as
-      notes only. Gemini and OpenRouter still remain env-fallback only for now.
-    </p>
-    <p class="mt-2 text-blue-800">
-      Live product use cases today: {AI_GATEWAY_LIVE_USE_CASES.join(', ')}.
-    </p>
+  <div class="mb-8 grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+    <section class="rounded-xl border border-blue-200 bg-blue-50 p-5">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-semibold text-blue-950">Recommended Setup</h2>
+          <p class="mt-1 text-sm text-blue-900">
+            This is the fastest safe path from empty config to live admin-verified routing.
+          </p>
+        </div>
+        <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-blue-800">Live routes only: {AI_GATEWAY_LIVE_USE_CASES.join(', ')}</span>
+      </div>
+      <ol class="mt-4 space-y-3 text-sm text-blue-950">
+        <li class="rounded-lg bg-white/70 px-4 py-3">1. Add provider account</li>
+        <li class="rounded-lg bg-white/70 px-4 py-3">2. Add model</li>
+        <li class="rounded-lg bg-white/70 px-4 py-3">3. Add routing policy for <code>fit_finder_summary</code></li>
+        <li class="rounded-lg bg-white/70 px-4 py-3">4. Add routing policy for <code>chat_answer</code></li>
+        <li class="rounded-lg bg-white/70 px-4 py-3">5. Run preset admin tests</li>
+      </ol>
+    </section>
+
+    <section class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
+      <h2 class="text-base font-semibold">Scope Notes</h2>
+      <div class="mt-3 space-y-2">
+        <p>DB-managed providers currently support <code>openai_compatible</code>.</p>
+        <p>Gemini/OpenRouter env fallback remains outside the DB-managed provider list.</p>
+        <p>
+          Recommended live routing: OpenRouter free first, Xiaomi MiMo V2.5 second, Gemini env
+          fallback.
+        </p>
+      </div>
+    </section>
   </div>
 
   <section class="mb-10">
-    <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-gray-900">Provider Accounts</h2>
-      <span class="text-xs text-gray-500">Masked key metadata only. Decrypted keys are never shown.</span>
+    <div class="mb-4 flex items-center justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Provider Accounts</h2>
+        <p class="mt-1 text-sm text-gray-500">
+          Masked key metadata only. Decrypted keys and ciphertext are never shown.
+        </p>
+      </div>
     </div>
 
-    <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4">
-      <h3 class="mb-4 text-sm font-semibold text-gray-800">Create Provider Account</h3>
-      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account saved." data-reload="true">
-        <input type="hidden" name="action" value="create" />
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Provider Code</label>
-          <input name="provider_code" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
-          <input name="display_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Provider Protocol</label>
-          <select name="adapter_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-            {AI_GATEWAY_DB_PROVIDER_PROTOCOLS.map((protocol) => (
-              <option value={protocol}>{protocol}</option>
-            ))}
-          </select>
-          <p class="mt-1 text-xs text-gray-500">
-            Planned only: {AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS.join(', ')}
-          </p>
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Auth Type</label>
-          <select name="auth_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-            <option value="bearer">bearer</option>
-          </select>
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Base URL</label>
-          <input name="base_url" type="url" required placeholder="https://api.example.com/v1" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Endpoint Path</label>
-          <input name="endpoint_path" placeholder="/chat/completions" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
-          <input name="timeout_ms" type="number" min="1000" max="120000" value="30000" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Privacy Level</label>
-          <select name="privacy_level" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-            <option value="standard">standard</option>
-            <option value="restricted">restricted</option>
-          </select>
-        </div>
-        <div class="md:col-span-2">
-          <label class="mb-1 block text-sm font-medium text-gray-700">API Key</label>
-          <input name="api_key" type="password" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
-          <label class="flex items-center gap-2">
-            <input name="is_active" type="checkbox" checked />
-            <span>Active</span>
-          </label>
-          <label class="flex items-center gap-2">
-            <input name="allows_student_data" type="checkbox" />
-            <span>Allows student data</span>
-          </label>
-          <label class="flex items-center gap-2">
-            <input name="allows_chat" type="checkbox" />
-            <span>Allows chat</span>
-          </label>
-          <label class="flex items-center gap-2">
-            <input name="allows_fit_finder" type="checkbox" />
-            <span>Allows Fit Finder</span>
-          </label>
-        </div>
-        <div class="md:col-span-2">
-          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            Create Provider Account
-          </button>
-        </div>
-      </form>
-    </div>
+    <details class="mb-6 rounded-xl border border-gray-200 bg-white" open={providers.length === 0}>
+      <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-gray-900">
+        Create Provider Account
+      </summary>
+      <div class="border-t border-gray-200 p-4">
+        <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account saved." data-reload="true">
+          <input type="hidden" name="action" value="create" />
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Provider Code</label>
+            <input name="provider_code" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+            <input name="display_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Provider Protocol</label>
+            <select name="adapter_type" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+              {AI_GATEWAY_DB_PROVIDER_PROTOCOLS.map((protocol) => (
+                <option value={protocol}>{protocol}</option>
+              ))}
+            </select>
+            <p class="mt-1 text-xs text-gray-500">
+              Planned only: {AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS.join(', ')}
+            </p>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Auth Type</label>
+            <select name="auth_type" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+              <option value="bearer">bearer</option>
+            </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Base URL</label>
+            <input name="base_url" type="url" required placeholder="https://api.example.com/v1" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Endpoint Path</label>
+            <input name="endpoint_path" placeholder="/chat/completions" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+            <input name="timeout_ms" type="number" min="1000" max="120000" value="30000" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Privacy Level</label>
+            <select name="privacy_level" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+              <option value="standard">standard</option>
+              <option value="restricted">restricted</option>
+            </select>
+          </div>
+          <div class="md:col-span-2">
+            <label class="mb-1 block text-sm font-medium text-gray-700">API Key</label>
+            <input name="api_key" type="password" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+            <label class="flex items-center gap-2">
+              <input name="is_active" type="checkbox" checked />
+              <span>Active</span>
+            </label>
+            <label class="flex items-center gap-2">
+              <input name="allows_student_data" type="checkbox" />
+              <span>Allows student data</span>
+            </label>
+            <label class="flex items-center gap-2">
+              <input name="allows_chat" type="checkbox" />
+              <span>Allows chat</span>
+            </label>
+            <label class="flex items-center gap-2">
+              <input name="allows_fit_finder" type="checkbox" />
+              <span>Allows Fit Finder</span>
+            </label>
+          </div>
+          <div class="md:col-span-2">
+            <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              Create Provider Account
+            </button>
+          </div>
+        </form>
+      </div>
+    </details>
 
     <div class="space-y-4">
       {providers.length === 0 ? (
-        <div class="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
+        <div class="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
           No provider accounts configured yet.
         </div>
       ) : providers.map((provider) => (
-        <details class="rounded-lg border border-gray-200 bg-white" open>
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
+        <details class="rounded-xl border border-gray-200 bg-white" open>
+          <summary class="flex cursor-pointer list-none flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div class="text-sm font-semibold text-gray-900">{provider.display_name}</div>
-              <div class="text-xs text-gray-500">
-                {provider.provider_code} · {provider.adapter_type} · {provider.base_url ?? 'no base URL'}
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="text-base font-semibold text-gray-900">{provider.display_name}</h3>
+                <span class={badgeClass(provider.is_active === true)}>
+                  {provider.is_active ? 'active' : 'inactive'}
+                </span>
               </div>
+              <div class="mt-1 text-sm text-gray-600">{provider.provider_code}</div>
             </div>
-            <div class="flex items-center gap-2">
-              <span class={badgeClass(provider.is_active === true)}>
-                {provider.is_active ? 'active' : 'inactive'}
-              </span>
-              <span class="text-xs text-gray-400">Updated {formatDate(provider.updated_at)}</span>
-            </div>
-          </summary>
-          <div class="border-t border-gray-200 p-4">
-            <div class="mb-4 grid gap-3 rounded-md bg-gray-50 p-3 text-xs text-gray-600 md:grid-cols-4">
+            <div class="grid gap-3 text-xs text-gray-500 sm:grid-cols-2 lg:min-w-[32rem] lg:grid-cols-3">
               <div>
-                <div class="font-medium text-gray-700">Stored key</div>
+                <div class="font-medium text-gray-700">Protocol / Base URL</div>
+                <div>{provider.adapter_type}</div>
+                <div class="break-all">{provider.base_url ?? '—'}</div>
+              </div>
+              <div>
+                <div class="font-medium text-gray-700">Masked Key</div>
                 <div>{provider.api_key_last4 ? `••••${provider.api_key_last4}` : 'not set'}</div>
-              </div>
-              <div>
-                <div class="font-medium text-gray-700">Fingerprint</div>
                 <div>{shortFingerprint(provider.api_key_fingerprint)}</div>
               </div>
               <div>
-                <div class="font-medium text-gray-700">Key version</div>
+                <div class="font-medium text-gray-700">Counts</div>
+                <div>{modelCountByProviderId.get(provider.id) ?? 0} models</div>
+                <div>{policyCountByProviderCode.get(provider.provider_code) ?? 0} routing policies</div>
+              </div>
+            </div>
+          </summary>
+
+          <div class="border-t border-gray-200 p-4">
+            <div class="mb-4 grid gap-3 rounded-xl bg-gray-50 p-4 text-sm text-gray-700 md:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-gray-500">Endpoint Path</div>
+                <div class="mt-1 break-all">{provider.endpoint_path ?? '—'}</div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-gray-500">Timeout / Key Version</div>
+                <div class="mt-1">{numberText(provider.timeout_ms)} ms</div>
                 <div>{provider.api_key_key_version ?? '—'}</div>
               </div>
               <div>
-                <div class="font-medium text-gray-700">Privacy / access</div>
-                <div>{provider.privacy_level} · student={provider.allows_student_data ? 'yes' : 'no'}</div>
+                <div class="text-xs uppercase tracking-wide text-gray-500">Privacy / Access</div>
+                <div class="mt-1 flex flex-wrap gap-2">
+                  {accessFlags(provider).map((flag) => (
+                    <span class="rounded-full bg-white px-2 py-1 text-xs text-gray-700">{flag}</span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-gray-500">Updated</div>
+                <div class="mt-1">{formatDate(provider.updated_at)}</div>
               </div>
             </div>
 
-            <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account updated." data-reload="true">
-              <input type="hidden" name="action" value="update" />
-              <input type="hidden" name="id" value={provider.id} />
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Provider Code</label>
-                <input name="provider_code" value={provider.provider_code} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <section class="rounded-xl border border-gray-200 p-4">
+              <div class="mb-3">
+                <h4 class="text-sm font-semibold text-gray-900">Edit Metadata</h4>
+                <p class="mt-1 text-xs text-gray-500">Safe for labels, routing eligibility flags, protocol settings, and timeouts.</p>
               </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
-                <input name="display_name" value={provider.display_name} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Provider Protocol</label>
-                <select name="adapter_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-                  <option value="openai_compatible" selected={provider.adapter_type === 'openai_compatible'}>openai_compatible</option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Auth Type</label>
-                <select name="auth_type" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-                  <option value="bearer" selected={provider.auth_type === 'bearer'}>bearer</option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Base URL</label>
-                <input name="base_url" type="url" value={provider.base_url ?? ''} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Endpoint Path</label>
-                <input name="endpoint_path" value={provider.endpoint_path ?? ''} class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
-                <input name="timeout_ms" type="number" min="1000" max="120000" value={provider.timeout_ms} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Privacy Level</label>
-                <select name="privacy_level" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-                  <option value="standard" selected={provider.privacy_level === 'standard'}>standard</option>
-                  <option value="restricted" selected={provider.privacy_level === 'restricted'}>restricted</option>
-                </select>
-              </div>
-              <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
-                <label class="flex items-center gap-2">
-                  <input name="is_active" type="checkbox" checked={provider.is_active === true} />
-                  <span>Active</span>
-                </label>
-                <label class="flex items-center gap-2">
-                  <input name="allows_student_data" type="checkbox" checked={provider.allows_student_data === true} />
-                  <span>Allows student data</span>
-                </label>
-                <label class="flex items-center gap-2">
-                  <input name="allows_chat" type="checkbox" checked={provider.allows_chat === true} />
-                  <span>Allows chat</span>
-                </label>
-                <label class="flex items-center gap-2">
-                  <input name="allows_fit_finder" type="checkbox" checked={provider.allows_fit_finder === true} />
-                  <span>Allows Fit Finder</span>
-                </label>
-              </div>
-              <div class="md:col-span-2">
-                <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
-                  Save Provider Metadata
-                </button>
-              </div>
-            </form>
+              <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account updated." data-reload="true">
+                <input type="hidden" name="action" value="update" />
+                <input type="hidden" name="id" value={provider.id} />
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Provider Code</label>
+                  <input name="provider_code" value={provider.provider_code} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+                  <input name="display_name" value={provider.display_name} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Provider Protocol</label>
+                  <select name="adapter_type" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                    <option value="openai_compatible" selected={provider.adapter_type === 'openai_compatible'}>openai_compatible</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Auth Type</label>
+                  <select name="auth_type" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                    <option value="bearer" selected={provider.auth_type === 'bearer'}>bearer</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Base URL</label>
+                  <input name="base_url" type="url" value={provider.base_url ?? ''} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Endpoint Path</label>
+                  <input name="endpoint_path" value={provider.endpoint_path ?? ''} class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+                  <input name="timeout_ms" type="number" min="1000" max="120000" value={provider.timeout_ms} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">Privacy Level</label>
+                  <select name="privacy_level" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                    <option value="standard" selected={provider.privacy_level === 'standard'}>standard</option>
+                    <option value="restricted" selected={provider.privacy_level === 'restricted'}>restricted</option>
+                  </select>
+                </div>
+                <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+                  <label class="flex items-center gap-2">
+                    <input name="is_active" type="checkbox" checked={provider.is_active === true} />
+                    <span>Active</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input name="allows_student_data" type="checkbox" checked={provider.allows_student_data === true} />
+                    <span>Allows student data</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input name="allows_chat" type="checkbox" checked={provider.allows_chat === true} />
+                    <span>Allows chat</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input name="allows_fit_finder" type="checkbox" checked={provider.allows_fit_finder === true} />
+                    <span>Allows Fit Finder</span>
+                  </label>
+                </div>
+                <div class="md:col-span-2">
+                  <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                    Save Provider Metadata
+                  </button>
+                </div>
+              </form>
+            </section>
 
-            <form class="js-api-form mt-4 grid gap-3 rounded-lg border border-gray-200 p-4 md:grid-cols-[1fr_auto]" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider API key replaced." data-reload="true">
-              <input type="hidden" name="action" value="replace_key" />
-              <input type="hidden" name="id" value={provider.id} />
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Replace API Key</label>
-                <input name="api_key" type="password" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <section class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div class="mb-3">
+                <h4 class="text-sm font-semibold text-amber-950">Replace Stored API Key</h4>
+                <p class="mt-1 text-xs text-amber-900">
+                  Warning: this overwrites the currently stored encrypted key. Only masked metadata remains visible after save.
+                </p>
               </div>
-              <div class="flex items-end">
-                <button type="submit" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
-                  Replace Key
-                </button>
-              </div>
-            </form>
+              <form class="js-api-form grid gap-3 md:grid-cols-[1fr_auto]" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider API key replaced." data-reload="true">
+                <input type="hidden" name="action" value="replace_key" />
+                <input type="hidden" name="id" value={provider.id} />
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700">New API Key</label>
+                  <input name="api_key" type="password" required class="w-full rounded-md border border-amber-300 px-3 py-2 text-sm" />
+                </div>
+                <div class="flex items-end">
+                  <button type="submit" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
+                    Replace Key
+                  </button>
+                </div>
+              </form>
+            </section>
           </div>
         </details>
       ))}
@@ -431,89 +580,127 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
   </section>
 
   <section class="mb-10">
-    <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-gray-900">Models</h2>
-      <span class="text-xs text-gray-500">Attach models to provider accounts and mark capabilities.</span>
+    <div class="mb-4 flex items-center justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Models</h2>
+        <p class="mt-1 text-sm text-gray-500">
+          Attach models to provider accounts, mark capabilities, and review routing coverage.
+        </p>
+      </div>
     </div>
 
-    <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4">
-      <h3 class="mb-4 text-sm font-semibold text-gray-800">Create Model</h3>
-      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/models" data-success="Model saved." data-reload="true">
-        <input type="hidden" name="action" value="create" />
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Provider Account</label>
-          <select name="provider_account_id" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-            {providers.map((provider) => (
-              <option value={provider.id}>{provider.display_name} ({provider.provider_code})</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Model Name</label>
-          <input name="model_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
-          <input name="display_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Cost Tier</label>
-          <input name="cost_tier" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Max Output Tokens</label>
-          <input name="max_output_tokens" type="number" min="1" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">Input Cost / 1M</label>
-            <input name="input_cost_per_million" type="number" min="0" step="0.000001" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+    <details class="mb-6 rounded-xl border border-gray-200 bg-white" open={models.length === 0}>
+      <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-gray-900">
+        Create Model
+      </summary>
+      <div class="border-t border-gray-200 p-4">
+        {providers.length === 0 ? (
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Add a provider account first, then create models.
           </div>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">Output Cost / 1M</label>
-            <input name="output_cost_per_million" type="number" min="0" step="0.000001" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-          </div>
-        </div>
-        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
-          <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked /><span>Active</span></label>
-          <label class="flex items-center gap-2"><input name="supports_text" type="checkbox" checked /><span>Supports text</span></label>
-          <label class="flex items-center gap-2"><input name="supports_json_mode" type="checkbox" /><span>JSON mode</span></label>
-          <label class="flex items-center gap-2"><input name="supports_streaming" type="checkbox" /><span>Streaming</span></label>
-          <label class="flex items-center gap-2"><input name="supports_tool_calling" type="checkbox" /><span>Tool calling</span></label>
-        </div>
-        <div class="md:col-span-2">
-          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            Create Model
-          </button>
-        </div>
-      </form>
-    </div>
+        ) : (
+          <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/models" data-success="Model saved." data-reload="true">
+            <input type="hidden" name="action" value="create" />
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Provider Account</label>
+              <select name="provider_account_id" required class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                {providers.map((provider) => (
+                  <option value={provider.id}>{provider.display_name} ({provider.provider_code})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Model Name</label>
+              <input name="model_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
+              <input name="display_name" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Cost Tier</label>
+              <input name="cost_tier" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Max Output Tokens</label>
+              <input name="max_output_tokens" type="number" min="1" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Input Cost / 1M</label>
+                <input name="input_cost_per_million" type="number" min="0" step="0.000001" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Output Cost / 1M</label>
+                <input name="output_cost_per_million" type="number" min="0" step="0.000001" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+              <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked /><span>Active</span></label>
+              <label class="flex items-center gap-2"><input name="supports_text" type="checkbox" checked /><span>Supports text</span></label>
+              <label class="flex items-center gap-2"><input name="supports_json_mode" type="checkbox" /><span>JSON mode</span></label>
+              <label class="flex items-center gap-2"><input name="supports_streaming" type="checkbox" /><span>Streaming</span></label>
+              <label class="flex items-center gap-2"><input name="supports_tool_calling" type="checkbox" /><span>Tool calling</span></label>
+            </div>
+            <div class="md:col-span-2">
+              <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                Create Model
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </details>
 
     <div class="space-y-4">
       {models.length === 0 ? (
-        <div class="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
+        <div class="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
           No models configured yet.
         </div>
       ) : models.map((model) => (
-        <details class="rounded-lg border border-gray-200 bg-white">
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
-            <div>
-              <div class="text-sm font-semibold text-gray-900">{model.display_name}</div>
-              <div class="text-xs text-gray-500">
-                {model.model_name} · {model.ai_provider_accounts?.display_name ?? 'Unknown provider'}
+        <details class="rounded-xl border border-gray-200 bg-white">
+          <summary class="cursor-pointer list-none px-4 py-4">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-base font-semibold text-gray-900">{model.display_name}</h3>
+                  <span class={badgeClass(model.is_active === true)}>
+                    {model.is_active ? 'active' : 'inactive'}
+                  </span>
+                </div>
+                <div class="mt-1 text-sm text-gray-600">{model.model_name}</div>
+              </div>
+              <div class="grid gap-3 text-xs text-gray-500 sm:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <div class="font-medium text-gray-700">Provider</div>
+                  <div>{model.ai_provider_accounts?.display_name ?? 'Unknown provider'}</div>
+                  <div>{model.ai_provider_accounts?.provider_code ?? '—'}</div>
+                </div>
+                <div>
+                  <div class="font-medium text-gray-700">Cost Tier</div>
+                  <div>{model.cost_tier ?? '—'}</div>
+                  <div>{formatMoney(model.input_cost_per_million)} in / {formatMoney(model.output_cost_per_million)} out</div>
+                </div>
+                <div>
+                  <div class="font-medium text-gray-700">Capabilities</div>
+                  <div>{capabilityList(model).length > 0 ? capabilityList(model).join(', ') : '—'}</div>
+                </div>
+                <div>
+                  <div class="font-medium text-gray-700">Linked Policies</div>
+                  <div>{policyCountByModelId.get(model.id) ?? 0}</div>
+                  <div>Max output {numberText(model.max_output_tokens)}</div>
+                </div>
               </div>
             </div>
-            <span class={badgeClass(model.is_active === true)}>
-              {model.is_active ? 'active' : 'inactive'}
-            </span>
           </summary>
+
           <div class="border-t border-gray-200 p-4">
             <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/models" data-success="Model updated." data-reload="true">
               <input type="hidden" name="action" value="update" />
               <input type="hidden" name="id" value={model.id} />
               <div>
                 <label class="mb-1 block text-sm font-medium text-gray-700">Provider Account</label>
-                <select name="provider_account_id" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+                <select name="provider_account_id" required class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
                   {providers.map((provider) => (
                     <option value={provider.id} selected={provider.id === model.provider_account_id}>
                       {provider.display_name} ({provider.provider_code})
@@ -567,147 +754,220 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
   </section>
 
   <section class="mb-10">
-    <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-gray-900">Routing Policies</h2>
-      <span class="text-xs text-gray-500">Only fit_finder_summary and chat_answer currently drive live product routing.</span>
+    <div class="mb-4 flex items-center justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Routing Policies</h2>
+        <p class="mt-1 text-sm text-gray-500">
+          Only <code>fit_finder_summary</code> and <code>chat_answer</code> currently drive live product routing.
+        </p>
+      </div>
     </div>
 
-    <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4">
-      <h3 class="mb-4 text-sm font-semibold text-gray-800">Create Routing Policy</h3>
-      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy saved." data-reload="true">
-        <input type="hidden" name="action" value="create" />
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
-          <select name="use_case" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-            {AI_GATEWAY_USE_CASES.map((useCase) => (
-              <option value={useCase}>{useCase}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
-          <select name="model_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-            {models.map((model) => (
-              <option value={model.id}>{model.display_name} ({model.model_name})</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Priority</label>
-          <input name="priority" type="number" min="1" value="1" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Max Attempts</label>
-          <input name="max_attempts" type="number" min="1" value="1" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
-          <input name="timeout_ms" type="number" min="1000" max="120000" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
-          <input name="notes" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        </div>
-        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
-          <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked /><span>Active</span></label>
-          <label class="flex items-center gap-2"><input name="fallback_enabled" type="checkbox" checked /><span>Fallback enabled</span></label>
-          <label class="flex items-center gap-2"><input name="allow_env_fallback" type="checkbox" /><span>Allow env fallback</span></label>
-        </div>
-        <div class="md:col-span-2">
-          <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            Create Routing Policy
-          </button>
-        </div>
-      </form>
-    </div>
-
-    <div class="space-y-4">
-      {policies.length === 0 ? (
-        <div class="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
-          No routing policies configured yet.
-        </div>
-      ) : policies.map((policy) => (
-        <details class="rounded-lg border border-gray-200 bg-white">
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
+    <details class="mb-6 rounded-xl border border-gray-200 bg-white" open={policies.length === 0}>
+      <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-gray-900">
+        Create Routing Policy
+      </summary>
+      <div class="border-t border-gray-200 p-4">
+        {models.length === 0 ? (
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Add at least one model first, then create routing policies.
+          </div>
+        ) : (
+          <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy saved." data-reload="true">
+            <input type="hidden" name="action" value="create" />
             <div>
-              <div class="text-sm font-semibold text-gray-900">{policy.use_case}</div>
-              <div class="text-xs text-gray-500">
-                Priority {policy.priority} · {policy.ai_models?.display_name ?? 'Unknown model'}
+              <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+              <select name="use_case" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                {AI_GATEWAY_USE_CASES.map((useCase) => (
+                  <option value={useCase}>{useCase}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
+              <select name="model_id" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                {models.map((model) => (
+                  <option value={model.id}>{model.display_name} ({model.model_name})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Priority</label>
+              <input name="priority" type="number" min="1" value="1" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Max Attempts</label>
+              <input name="max_attempts" type="number" min="1" value="1" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+              <input name="timeout_ms" type="number" min="1000" max="120000" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+              <input name="notes" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+              <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked /><span>Active</span></label>
+              <label class="flex items-center gap-2"><input name="fallback_enabled" type="checkbox" checked /><span>Fallback enabled</span></label>
+              <label class="flex items-center gap-2"><input name="allow_env_fallback" type="checkbox" /><span>Allow env fallback</span></label>
+            </div>
+            <div class="md:col-span-2">
+              <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                Create Routing Policy
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </details>
+
+    <div class="space-y-5">
+      {groupedPolicies.map((group) => (
+        <section class="rounded-xl border border-gray-200 bg-white">
+          <div class="flex flex-col gap-3 border-b border-gray-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="text-base font-semibold text-gray-900">{group.useCase}</h3>
+                <span class={group.isLive ? 'inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700' : 'inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600'}>
+                  {group.isLive ? 'live product route' : 'not live in product'}
+                </span>
+              </div>
+              <p class="mt-1 text-sm text-gray-500">
+                {group.isLive
+                  ? 'Priority order below can affect active product traffic once rows are enabled.'
+                  : 'This use case is available for planning, but it is not wired into live product behavior today.'}
+              </p>
+            </div>
+            <div class="text-sm text-gray-500">{group.rows.length} policy row{group.rows.length === 1 ? '' : 's'}</div>
+          </div>
+
+          {group.rows.length === 0 ? (
+            <div class="px-4 py-5 text-sm text-gray-500">No routing policies configured for this use case yet.</div>
+          ) : (
+            <div class="space-y-3 p-4">
+              <div class="overflow-x-auto rounded-lg border border-gray-200">
+                <table class="w-full text-left text-sm">
+                  <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                    <tr>
+                      <th class="px-4 py-3">Priority</th>
+                      <th class="px-4 py-3">Model</th>
+                      <th class="px-4 py-3">Provider</th>
+                      <th class="px-4 py-3">Status</th>
+                      <th class="px-4 py-3">Env Fallback</th>
+                      <th class="px-4 py-3">Timeout / Attempts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.rows.map((policy) => (
+                      <tr class="border-b border-gray-100 align-top">
+                        <td class="px-4 py-3 font-medium text-gray-900">{policy.priority}</td>
+                        <td class="px-4 py-3">
+                          <div class="font-medium text-gray-900">{policy.ai_models?.display_name ?? 'Unknown model'}</div>
+                          <div class="text-xs text-gray-500">{policy.ai_models?.model_name ?? '—'}</div>
+                        </td>
+                        <td class="px-4 py-3">
+                          <div class="text-gray-900">{policy.ai_models?.ai_provider_accounts?.display_name ?? 'Unknown provider'}</div>
+                          <div class="text-xs text-gray-500">{policy.ai_models?.ai_provider_accounts?.provider_code ?? '—'}</div>
+                        </td>
+                        <td class="px-4 py-3">
+                          <span class={badgeClass(policy.is_active === true)}>
+                            {policy.is_active ? 'active' : 'inactive'}
+                          </span>
+                        </td>
+                        <td class="px-4 py-3 text-gray-700">{policy.allow_env_fallback ? 'allowed' : 'not allowed'}</td>
+                        <td class="px-4 py-3 text-gray-700">
+                          <div>{numberText(policy.timeout_ms)} ms</div>
+                          <div class="text-xs text-gray-500">max attempts {numberText(policy.max_attempts)}</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="space-y-3">
+                {group.rows.map((policy) => (
+                  <details class="rounded-lg border border-gray-200">
+                    <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium text-gray-900">
+                      Edit priority {policy.priority}: {policy.ai_models?.display_name ?? 'Unknown model'}
+                    </summary>
+                    <div class="border-t border-gray-200 p-4">
+                      <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy updated." data-reload="true">
+                        <input type="hidden" name="action" value="update" />
+                        <input type="hidden" name="id" value={policy.id} />
+                        <div>
+                          <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+                          <select name="use_case" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                            {AI_GATEWAY_USE_CASES.map((useCase) => (
+                              <option value={useCase} selected={policy.use_case === useCase}>{useCase}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
+                          <select name="model_id" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                            {models.map((model) => (
+                              <option value={model.id} selected={policy.model_id === model.id}>
+                                {model.display_name} ({model.model_name})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label class="mb-1 block text-sm font-medium text-gray-700">Priority</label>
+                          <input name="priority" type="number" min="1" value={policy.priority} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                        </div>
+                        <div>
+                          <label class="mb-1 block text-sm font-medium text-gray-700">Max Attempts</label>
+                          <input name="max_attempts" type="number" min="1" value={policy.max_attempts} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                        </div>
+                        <div>
+                          <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
+                          <input name="timeout_ms" type="number" min="1000" max="120000" value={policy.timeout_ms ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                        </div>
+                        <div>
+                          <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+                          <input name="notes" value={policy.notes ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                        </div>
+                        <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
+                          <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked={policy.is_active === true} /><span>Active</span></label>
+                          <label class="flex items-center gap-2"><input name="fallback_enabled" type="checkbox" checked={policy.fallback_enabled === true} /><span>Fallback enabled</span></label>
+                          <label class="flex items-center gap-2"><input name="allow_env_fallback" type="checkbox" checked={policy.allow_env_fallback === true} /><span>Allow env fallback</span></label>
+                        </div>
+                        <div class="md:col-span-2 flex flex-wrap gap-3">
+                          <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                            Save Routing Policy
+                          </button>
+                        </div>
+                      </form>
+                      <form class="js-api-form mt-3" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy deleted." data-reload="true">
+                        <input type="hidden" name="action" value="delete" />
+                        <input type="hidden" name="id" value={policy.id} />
+                        <button type="submit" class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">
+                          Delete Policy Row
+                        </button>
+                      </form>
+                    </div>
+                  </details>
+                ))}
               </div>
             </div>
-            <span class={badgeClass(policy.is_active === true)}>
-              {policy.is_active ? 'active' : 'inactive'}
-            </span>
-          </summary>
-          <div class="border-t border-gray-200 p-4">
-            <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy updated." data-reload="true">
-              <input type="hidden" name="action" value="update" />
-              <input type="hidden" name="id" value={policy.id} />
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
-                <select name="use_case" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-                  {AI_GATEWAY_USE_CASES.map((useCase) => (
-                    <option value={useCase} selected={policy.use_case === useCase}>{useCase}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
-                <select name="model_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
-                  {models.map((model) => (
-                    <option value={model.id} selected={policy.model_id === model.id}>
-                      {model.display_name} ({model.model_name})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Priority</label>
-                <input name="priority" type="number" min="1" value={policy.priority} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Max Attempts</label>
-                <input name="max_attempts" type="number" min="1" value={policy.max_attempts} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Timeout (ms)</label>
-                <input name="timeout_ms" type="number" min="1000" max="120000" value={policy.timeout_ms ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
-                <input name="notes" value={policy.notes ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-              <div class="md:col-span-2 flex flex-wrap gap-4 text-sm text-gray-700">
-                <label class="flex items-center gap-2"><input name="is_active" type="checkbox" checked={policy.is_active === true} /><span>Active</span></label>
-                <label class="flex items-center gap-2"><input name="fallback_enabled" type="checkbox" checked={policy.fallback_enabled === true} /><span>Fallback enabled</span></label>
-                <label class="flex items-center gap-2"><input name="allow_env_fallback" type="checkbox" checked={policy.allow_env_fallback === true} /><span>Allow env fallback</span></label>
-              </div>
-              <div class="md:col-span-2 flex flex-wrap gap-3">
-                <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
-                  Save Routing Policy
-                </button>
-              </div>
-            </form>
-            <form class="js-api-form mt-3" data-endpoint="/api/admin/ai-gateway/policies" data-success="Routing policy deleted." data-reload="true">
-              <input type="hidden" name="action" value="delete" />
-              <input type="hidden" name="id" value={policy.id} />
-              <button type="submit" class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">
-                Delete Policy Row
-              </button>
-            </form>
-          </div>
-        </details>
+          )}
+        </section>
       ))}
     </div>
   </section>
 
   <section class="mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-gray-900">Health and Cooldowns</h2>
-      <span class="text-xs text-gray-500">Reset clears failures, last error, and cooldown only.</span>
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Health and Cooldowns</h2>
+        <p class="mt-1 text-sm text-gray-500">Reset clears failures, last error, and cooldown only.</p>
+      </div>
     </div>
 
-    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+    <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <table class="w-full text-left text-sm">
         <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -761,15 +1021,17 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
 
   <section>
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-gray-900">Provider and Model Testing</h2>
-      <span class="text-xs text-gray-500">Preset-only safe tests. No real student data and no health mutation.</span>
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Provider and Model Testing</h2>
+        <p class="mt-1 text-sm text-gray-500">Preset-only safe tests. No real student data and no health mutation.</p>
+      </div>
     </div>
 
-    <div class="rounded-lg border border-gray-200 bg-white p-4">
+    <div class="rounded-xl border border-gray-200 bg-white p-4">
       <form id="ai-gateway-test-form" class="grid gap-4 md:grid-cols-2">
         <div>
           <label class="mb-1 block text-sm font-medium text-gray-700">Preset Test</label>
-          <select name="preset_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+          <select name="preset_id" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
             {AI_GATEWAY_TEST_PRESETS.map((preset) => (
               <option value={preset.id}>{preset.label}</option>
             ))}
@@ -777,14 +1039,14 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-gray-700">Target Mode</label>
-          <select name="target_mode" id="test-target-mode" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+          <select name="target_mode" id="test-target-mode" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
             <option value="use_case">Route by use case</option>
             <option value="model">Direct model</option>
           </select>
         </div>
         <div id="test-use-case-wrap">
           <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
-          <select name="use_case" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+          <select name="use_case" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
             {AI_GATEWAY_USE_CASES.map((useCase) => (
               <option value={useCase}>{useCase}</option>
             ))}
@@ -792,7 +1054,7 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
         </div>
         <div id="test-model-wrap" class="hidden">
           <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
-          <select name="model_id" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+          <select name="model_id" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
             {models.map((model) => (
               <option value={model.id}>{model.display_name} ({model.model_name})</option>
             ))}
@@ -805,8 +1067,11 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
         </div>
       </form>
 
-      <div id="ai-gateway-test-result" class="mt-6 hidden rounded-lg border border-gray-200 bg-gray-50 p-4">
-        <div class="mb-3 text-sm font-semibold text-gray-900">Latest Test Result</div>
+      <div id="ai-gateway-test-result" class="mt-6 hidden rounded-xl border border-gray-200 bg-gray-50 p-4">
+        <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="text-sm font-semibold text-gray-900">Latest Test Result</div>
+          <div id="test-result-recommendation" class="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700">—</div>
+        </div>
         <dl class="grid gap-3 text-sm text-gray-700 md:grid-cols-2">
           <div><dt class="text-xs uppercase tracking-wide text-gray-500">Status</dt><dd id="test-result-status">—</dd></div>
           <div><dt class="text-xs uppercase tracking-wide text-gray-500">Preset</dt><dd id="test-result-preset">—</dd></div>
@@ -934,6 +1199,23 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
     if (element) element.textContent = value
   }
 
+  function getTestRecommendation(result) {
+    if (result.success) return 'Good candidate for routing.'
+
+    const errorType = String(result.normalizedErrorType || '').toLowerCase()
+    if (errorType === 'rate_limit') {
+      return 'Keep inactive or lower priority until quota/rate limit is resolved.'
+    }
+    if (errorType === 'invalid_provider_response') {
+      return 'Check model name, endpoint, or provider compatibility.'
+    }
+    if (errorType.includes('timeout') || errorType.includes('network')) {
+      return 'Use as lower-priority fallback only after retest.'
+    }
+
+    return 'Retest before using this model in a live priority slot.'
+  }
+
   testForm?.addEventListener('submit', async (event) => {
     event.preventDefault()
     if (!(testForm instanceof HTMLFormElement)) return
@@ -962,6 +1244,7 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
       setText('test-result-error', result.normalizedErrorType || '—')
       setText('test-result-fallback', result.usedEnvFallback ? 'yes' : 'no')
       setText('test-result-preview', result.responsePreview || 'No preview available for this failure.')
+      setText('test-result-recommendation', getTestRecommendation(result))
       showBanner('success', 'Admin test completed without changing production health.')
     } catch {
       showBanner('error', 'Admin test request failed. Please try again.')

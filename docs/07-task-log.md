@@ -5,6 +5,22 @@
 
 ## Recent Task Log
 
+### Phase 69C-UX - AI Gateway Admin UX Polish
+
+- Reworked `/admin/ai-gateway` into a clearer operating dashboard with top summary cards for env
+  fallback, active providers/models/policies, health issues, and live use cases.
+- Added a visible recommended setup panel that walks admins through provider, model, policy, and
+  preset-test steps for the two live routes: `fit_finder_summary` and `chat_answer`.
+- Polished provider account cards to surface protocol/base URL, masked key metadata,
+  privacy/access flags, linked model/policy counts, and clearer separation between metadata edits
+  and warning-labeled key replacement.
+- Collapsed the create forms for provider/model/policy management when records already exist to
+  reduce page overwhelm, while keeping provider creation open by default on empty state.
+- Grouped routing policies by use case, made live versus non-live routes obvious, and surfaced
+  priority order, env fallback allowance, and timeout/attempt controls more clearly.
+- Improved admin test result guidance with recommendation copy for success, rate limits,
+  compatibility errors, and timeout/network failures without exposing raw provider bodies.
+
 ### Phase 69C - Admin AI Gateway Dashboard + Provider Testing
 
 - Added `/admin/ai-gateway`, protected by `manage_ai_settings`, and linked it in admin navigation.
@@ -70,7 +86,8 @@
 
 ### Open Note
 
-- Next major phase: AI Gateway provider/account management UI on top of the 69B backend foundation.
+- Next major AI Gateway work can build on the polished admin UX without changing the existing
+  public AI endpoints or provider-key privacy boundaries.
 
 ## Archive Index
 

@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 69C is complete. DegreeWiki now has an admin-only AI Gateway dashboard for managing
-DB-backed `openai_compatible` provider accounts, models, routing policies, provider health,
-and preset provider/model tests on top of the Phase 69B gateway foundation.
+Phase 69C-UX is complete. DegreeWiki now has a polished admin-only AI Gateway dashboard for
+managing DB-backed `openai_compatible` provider accounts, models, routing policies, provider
+health, and preset provider/model tests on top of the Phase 69B gateway foundation.
 
 Current branch: `main`
 
@@ -35,10 +35,12 @@ Very short import pipeline summary:
 
 ## Known Open Notes
 
-- DB-backed provider routing is ready, but it still depends on future provider/account rows
+- DB-backed provider routing is ready, but it still depends on provider/account/model/policy rows
   before it replaces env fallback in practice.
 - DB-managed provider accounts currently support `openai_compatible` only.
-- Gemini and OpenRouter remain env-fallback only for now.
+- Gemini and OpenRouter remain env-fallback only for now, outside the DB-managed provider list.
+- The AI Gateway admin page now highlights the recommended setup order, live routes
+  (`fit_finder_summary`, `chat_answer`), grouped routing priorities, and safe test guidance.
 - Cloudinary still needs the SHA-256 signature setup, or `CLOUDINARY_SIGNATURE_ALGORITHM=sha1` as a fallback.
 - Default site OG image is still not configured.
 - CSV import and persistent uploaded-file import storage remain deferred.
