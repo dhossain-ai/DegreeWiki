@@ -723,3 +723,37 @@ Admin rules:
 - `manage_ai_settings` controls access to the AI Knowledge Base admin surface
 - JSON import validates shape first and always imports rows as `draft`
 - publish remains a separate reviewed action
+
+## Phase 69G Behaviour — Public Chatbot UX Polish
+
+Phase 69G keeps the Phase 69D/69E routing order and adds UI-facing metadata for the
+public site chat widget.
+
+Route order remains:
+
+1. hardcoded safety/refusal routes
+2. published preset answers
+3. anonymous login-required notice
+4. logged-in AI through `chat_answer`
+
+Site-chat response metadata:
+
+- `answer_source = "knowledge_base"` for preset DB answers and general static/help/navigation answers
+- `answer_source = "safety_notice"` for refusal/guarantee/out-of-scope safety answers
+- `answer_source = "assistant"` for logged-in AI answers
+- `answer_source = "system_notice"` for anonymous login-required notices and operational status/error responses
+
+Persistence rules:
+
+- Site-chat assistant/static turns store source metadata in `ai_messages.context_used`
+- `GET /api/ai/site-chat-session` restores source metadata for prior assistant turns
+- Older turns without explicit metadata are inferred conservatively for badge display only
+
+Rendering rules:
+
+- Site-chat remains plain text only
+- no Markdown rendering
+- no HTML rendering
+- no `innerHTML`
+- no `set:html`
+- browser code renders user/assistant content with `textContent` only

@@ -1507,3 +1507,55 @@ Explicit exclusions:
 - no RAG
 - no internet browsing
 - no live AI generation at request time for preset answers
+
+### 19.8 Phase 69G — Public Chatbot UX Polish
+
+Phase 69G keeps the existing site-chat route order and adds additive response metadata
+for UI trust signals and restored-history badges.
+
+Route order remains:
+
+- hardcoded safety/refusal routes
+- published preset answers from `ai_static_answers`
+- anonymous sign-in / Fit Finder prompt
+- logged-in AI through `chat_answer`
+
+Response metadata:
+
+- `POST /api/ai/site-chat` returns `answer_source`
+- `GET /api/ai/site-chat-session` restores `answer_source` on assistant turns
+- allowed values:
+  - `knowledge_base`
+  - `assistant`
+  - `safety_notice`
+  - `system_notice`
+
+Source mapping:
+
+- preset DB answers -> `knowledge_base`
+- general static/help/navigation answers -> `knowledge_base`
+- refusal/guarantee/out-of-scope safety answers -> `safety_notice`
+- logged-in AI answers -> `assistant`
+- anonymous login-required fallback -> `system_notice`
+
+Persistence:
+
+- new site-chat turns store `answerSource` in the existing `ai_messages.context_used` snapshot
+- older turns without explicit source metadata are inferred conservatively when session history is restored
+
+Widget rendering constraints:
+
+- plain text only
+- no Markdown rendering
+- no HTML rendering
+- no `innerHTML`
+- no `set:html`
+- browser-side message rendering uses `textContent` only
+
+Widget UX behavior:
+
+- launcher label toggles between `Ask DegreeWiki` and `Close chat`
+- suggested question chips come from `welcome_options` with safe client-side defaults before session load
+- anonymous users do not see the login CTA immediately on open
+- the login CTA appears only after the anonymous login-required response path
+- assistant and static/safety/system answers are visually separated with source badges
