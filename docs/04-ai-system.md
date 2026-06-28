@@ -47,11 +47,12 @@ The chatbot should answer from DegreeWiki context first.
 Preferred order:
 
 1. Static/rule-based response
-2. Structured database query
-3. Existing articles/guides
-4. RAG/vector search later
-5. LLM explanation
-6. Fallback/clarification
+2. Reviewed preset Q&A
+3. Structured database query
+4. Existing articles/guides
+5. RAG/vector search later
+6. LLM explanation
+7. Fallback/clarification
 
 ## AI Orchestration Pipeline
 
@@ -701,3 +702,24 @@ Behaviour rules:
   does not attach the latest Finder result or matched programs to global site chat.
 - Phase 69D does not add RAG, vector search, internet browsing, admin data access, or
   student-profile context beyond authentication state.
+
+## Phase 69E Behaviour — Static Knowledge Base / Preset Q&A Admin
+
+Phase 69E adds a reviewed preset-answer layer for site chat through
+`ai_static_answers` and `/admin/ai-knowledge`.
+
+Behaviour rules:
+
+- hardcoded safety/refusal routes still win first
+- published preset answers are checked next
+- anonymous non-matches still return the static sign-in / Fit Finder prompt
+- logged-in non-matches may still use `chat_answer` through the existing AI Gateway
+- preset answers are plain text only
+- no Markdown rendering, no HTML rendering, no embeddings, no RAG, and no live AI generation
+  at request time for preset answers
+
+Admin rules:
+
+- `manage_ai_settings` controls access to the AI Knowledge Base admin surface
+- JSON import validates shape first and always imports rows as `draft`
+- publish remains a separate reviewed action

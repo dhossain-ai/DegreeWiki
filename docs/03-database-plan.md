@@ -109,6 +109,7 @@ Planned tables:
 - ai_messages
 - ai_usage_logs
 - ai_rate_limits
+- ai_static_answers
 
 ## Data Source / Verification Tables
 
@@ -124,6 +125,26 @@ Later:
 - entity_field_sources
 - broken_link_checks
 - source_change_detections
+
+## Static AI Knowledge Base
+
+Reviewed preset Q&A for site chat lives in:
+
+- ai_static_answers
+
+Purpose:
+
+- answer common study-planning questions without calling AI
+- keep common site-chat guidance deterministic
+- store reviewed plain-text answers only
+
+Rules:
+
+- published rows may be used in site chat
+- draft and archived rows remain admin-only
+- no HTML rendering
+- no Markdown rendering
+- no embeddings, RAG, or live internet lookup
 
 ## Import / Staging Tables
 

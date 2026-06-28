@@ -1481,3 +1481,29 @@ Not allowed in Phase 69D:
   tuition, deadlines, scholarships, admission outcomes, or visa outcomes.
 - Site chat must redirect users to DegreeWiki search, Fit Finder, guides, or official sources
   when exact facts are needed.
+
+### 19.7 Phase 69E — Static Knowledge Base / Preset Q&A Layer
+
+Phase 69E adds a reviewed preset-answer layer for site chat.
+
+Route order:
+
+- hardcoded safety/refusal routes
+- published preset answers from `ai_static_answers`
+- anonymous sign-in / Fit Finder prompt
+- logged-in AI through `chat_answer`
+
+Admin surface:
+
+- `/admin/ai-knowledge`
+- guarded by `manage_ai_settings`
+- plain-text answers only
+- JSON import validates first and always imports rows as `draft`
+
+Explicit exclusions:
+
+- no embeddings
+- no vector search
+- no RAG
+- no internet browsing
+- no live AI generation at request time for preset answers
