@@ -42,7 +42,7 @@ export const SITE_LOGIN_REQUIRED_RESPONSE =
 
 const GREETING_RE = /^(hi|hello|hey)[!.,?]?\s*$/i
 const HELP_RE =
-  /\b(help|what\s+can\s+you\s+do|how\s+can\s+you\s+help|what\s+can\s+i\s+ask(\s+you)?)\b/i
+  /\b(help|who\s+are\s+you|what\s+can\s+you\s+do|how\s+can\s+you\s+help|what\s+can\s+i\s+ask(\s+you)?)\b/i
 const FIND_PROGRAMS_RE =
   /\b(find|search|browse|look\s+for)\s+programs?\b|\bfind\s+(a|some)\s+(program|degree|course)\b/i
 const FIT_FINDER_RE = /\bfit\s+finder\b|\bmatch\s+me\s+to\s+programs?\b/i
