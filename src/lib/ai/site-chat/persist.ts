@@ -122,6 +122,11 @@ export interface PersistSiteStaticTurnParams {
   userMessage: string
   assistantText: string
   safetyPolicyVersion: string
+  promptTemplateVersion?: string
+  responseSource?: 'static' | 'preset'
+  staticCategory?: string | null
+  presetAnswerId?: string | null
+  presetCategory?: string | null
 }
 
 export async function persistSiteStaticTurn(
@@ -138,10 +143,14 @@ export async function persistSiteStaticTurn(
       completionTokens: 0,
       contextUsed: {
         chatMode: 'site',
-        promptTemplateVersion: STATIC_PROMPT_TEMPLATE_VERSION,
+        promptTemplateVersion: params.promptTemplateVersion ?? STATIC_PROMPT_TEMPLATE_VERSION,
         safetyPolicyVersion: params.safetyPolicyVersion,
         currentPath: params.currentPath,
         pageType: params.pageType,
+        responseSource: params.responseSource ?? 'static',
+        staticCategory: params.staticCategory ?? null,
+        presetAnswerId: params.presetAnswerId ?? null,
+        presetCategory: params.presetCategory ?? null,
       },
     },
     env,
