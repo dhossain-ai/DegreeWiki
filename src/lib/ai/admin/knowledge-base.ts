@@ -6,6 +6,7 @@ export const AI_KNOWLEDGE_STATUSES = ['draft', 'published', 'archived'] as const
 export const AI_KNOWLEDGE_MATCH_TYPES = ['exact', 'keyword', 'hybrid'] as const
 export const AI_KNOWLEDGE_IMPORT_MAX_ROWS = 100
 export const AI_KNOWLEDGE_MAX_LIST_ITEMS = 30
+export const AI_KNOWLEDGE_MAX_BULK_IDS = 100
 
 export type AIKnowledgeAudience = typeof AI_KNOWLEDGE_AUDIENCES[number]
 export type AIKnowledgeStatus = typeof AI_KNOWLEDGE_STATUSES[number]
@@ -61,6 +62,17 @@ export interface KnowledgeImportIssue {
   index: number
   field: string
   message: string
+}
+
+export interface KnowledgeBulkActionResult {
+  requestedCount: number
+  affectedCount: number
+}
+
+export interface KnowledgeBulkDeleteResult {
+  requestedCount: number
+  deletedCount: number
+  skippedCount: number
 }
 
 export class KnowledgeBaseValidationError extends Error {
@@ -647,6 +659,137 @@ export async function deleteKnowledgeAnswer(
   if (error) {
     console.error('ai knowledge base: delete failed:', error.message)
     throw new KnowledgeBaseValidationError('save_failed', 'Could not delete the answer.')
+  }
+}
+
+export async function bulkPublishKnowledgeAnswers(
+  supabase: SupabaseLike,
+  ids: string[],
+  userId: string,
+): Promise<KnowledgeBulkActionResult> {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('ai_static_answers')
+    .update({
+      status: 'published',
+      reviewed_by_user_id: userId,
+      reviewed_at: now,
+      updated_by_user_id: userId,
+      updated_at: now,
+    })
+    .in('id', ids)
+    .select('id')
+
+  if (error) {
+    console.error('ai knowledge base: bulk publish failed:', error.message)
+    throw new KnowledgeBaseValidationError('save_failed', 'Could not publish the selected answers.')
+  }
+
+  return {
+    requestedCount: ids.length,
+    affectedCount: (data ?? []).length,
+  }
+}
+
+export async function bulkMoveKnowledgeAnswersToDraft(
+  supabase: SupabaseLike,
+  ids: string[],
+  userId: string,
+): Promise<KnowledgeBulkActionResult> {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('ai_static_answers')
+    .update({
+      status: 'draft',
+      reviewed_by_user_id: null,
+      reviewed_at: null,
+      updated_by_user_id: userId,
+      updated_at: now,
+    })
+    .in('id', ids)
+    .select('id')
+
+  if (error) {
+    console.error('ai knowledge base: bulk draft failed:', error.message)
+    throw new KnowledgeBaseValidationError('save_failed', 'Could not move the selected answers to draft.')
+  }
+
+  return {
+    requestedCount: ids.length,
+    affectedCount: (data ?? []).length,
+  }
+}
+
+export async function bulkArchiveKnowledgeAnswers(
+  supabase: SupabaseLike,
+  ids: string[],
+  userId: string,
+): Promise<KnowledgeBulkActionResult> {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('ai_static_answers')
+    .update({
+      status: 'archived',
+      updated_by_user_id: userId,
+      updated_at: now,
+    })
+    .in('id', ids)
+    .select('id')
+
+  if (error) {
+    console.error('ai knowledge base: bulk archive failed:', error.message)
+    throw new KnowledgeBaseValidationError('save_failed', 'Could not archive the selected answers.')
+  }
+
+  return {
+    requestedCount: ids.length,
+    affectedCount: (data ?? []).length,
+  }
+}
+
+export async function bulkDeleteDraftKnowledgeAnswers(
+  supabase: SupabaseLike,
+  ids: string[],
+): Promise<KnowledgeBulkDeleteResult> {
+  const { data: draftRows, error: selectError } = await supabase
+    .from('ai_static_answers')
+    .select('id')
+    .in('id', ids)
+    .eq('status', 'draft')
+
+  if (selectError) {
+    console.error('ai knowledge base: bulk delete draft lookup failed:', selectError.message)
+    throw new KnowledgeBaseValidationError('save_failed', 'Could not verify draft answers before deletion.')
+  }
+
+  const draftIds = (draftRows ?? [])
+    .map((row: any) => (typeof row.id === 'string' ? row.id : ''))
+    .filter(Boolean)
+
+  if (draftIds.length === 0) {
+    return {
+      requestedCount: ids.length,
+      deletedCount: 0,
+      skippedCount: ids.length,
+    }
+  }
+
+  const { data: deletedRows, error: deleteError } = await supabase
+    .from('ai_static_answers')
+    .delete()
+    .in('id', draftIds)
+    .select('id')
+
+  if (deleteError) {
+    console.error('ai knowledge base: bulk delete drafts failed:', deleteError.message)
+    throw new KnowledgeBaseValidationError('save_failed', 'Could not delete the selected draft answers.')
+  }
+
+  const deletedCount = (deletedRows ?? []).length
+  return {
+    requestedCount: ids.length,
+    deletedCount,
+    skippedCount: ids.length - deletedCount,
   }
 }
 

@@ -2,6 +2,11 @@ import type { APIRoute } from 'astro'
 import { jsonResponse, parseJsonBody, requireAIAdminAccess } from '../../../../lib/ai/admin/api'
 import {
   archiveKnowledgeAnswer,
+  AI_KNOWLEDGE_MAX_BULK_IDS,
+  bulkArchiveKnowledgeAnswers,
+  bulkDeleteDraftKnowledgeAnswers,
+  bulkMoveKnowledgeAnswersToDraft,
+  bulkPublishKnowledgeAnswers,
   createKnowledgeAnswer,
   deleteKnowledgeAnswer,
   KnowledgeBaseValidationError,
@@ -12,10 +17,42 @@ import {
 } from '../../../../lib/ai/admin/knowledge-base'
 import { AdminAPIValidationError, getString, getUuid } from '../../../../lib/ai/admin/validation'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function knowledgeErrorStatus(code: string): number {
   if (code === 'not_found') return 404
   if (code === 'internal_error' || code === 'save_failed') return 500
   return 400
+}
+
+function getUuidArray(
+  body: Record<string, unknown>,
+  key: string,
+): string[] {
+  const raw = body[key]
+  if (!Array.isArray(raw)) {
+    throw new AdminAPIValidationError('invalid_request')
+  }
+
+  const ids = raw
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (ids.length === 0 || ids.length > AI_KNOWLEDGE_MAX_BULK_IDS) {
+    throw new AdminAPIValidationError('invalid_request')
+  }
+
+  const uniqueIds = [...new Set(ids)]
+  if (uniqueIds.length !== ids.length) {
+    throw new AdminAPIValidationError('invalid_request')
+  }
+
+  if (uniqueIds.some((id) => !UUID_RE.test(id))) {
+    throw new AdminAPIValidationError('invalid_request')
+  }
+
+  return uniqueIds
 }
 
 export const GET: APIRoute = async ({ cookies, request, locals }) => {
@@ -88,6 +125,45 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
       const id = getUuid(body, 'id')
       await deleteKnowledgeAnswer(auth.context.supabase, id)
       return jsonResponse(200, { ok: true })
+    }
+
+    if (action === 'bulk_publish') {
+      const ids = getUuidArray(body, 'ids')
+      const result = await bulkPublishKnowledgeAnswers(
+        auth.context.supabase,
+        ids,
+        auth.context.userId,
+      )
+      return jsonResponse(200, { ok: true, result })
+    }
+
+    if (action === 'bulk_draft') {
+      const ids = getUuidArray(body, 'ids')
+      const result = await bulkMoveKnowledgeAnswersToDraft(
+        auth.context.supabase,
+        ids,
+        auth.context.userId,
+      )
+      return jsonResponse(200, { ok: true, result })
+    }
+
+    if (action === 'bulk_archive') {
+      const ids = getUuidArray(body, 'ids')
+      const result = await bulkArchiveKnowledgeAnswers(
+        auth.context.supabase,
+        ids,
+        auth.context.userId,
+      )
+      return jsonResponse(200, { ok: true, result })
+    }
+
+    if (action === 'bulk_delete_drafts') {
+      const ids = getUuidArray(body, 'ids')
+      const result = await bulkDeleteDraftKnowledgeAnswers(
+        auth.context.supabase,
+        ids,
+      )
+      return jsonResponse(200, { ok: true, result })
     }
 
     return jsonResponse(400, { ok: false, error: 'invalid_request' })
