@@ -8,12 +8,17 @@ export type PublicMediaAsset = {
   display_name: string | null
 }
 
+function normalizeText(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 export function getPublicId(asset: PublicMediaAsset | null | undefined): string | null {
-  return asset?.cloudinary_public_id ?? null
+  const publicId = normalizeText(asset?.cloudinary_public_id)
+  return publicId || null
 }
 
 export function getAlt(asset: PublicMediaAsset | null | undefined, fallback: string): string {
-  return asset?.alt_text || asset?.display_name || fallback
+  return normalizeText(asset?.alt_text) || normalizeText(asset?.display_name) || normalizeText(fallback) || 'DegreeWiki image'
 }
 
 export function getOgImageUrl(
@@ -21,7 +26,8 @@ export function getOgImageUrl(
   primary: PublicMediaAsset | null | undefined,
   fallback?: PublicMediaAsset | null | undefined,
 ): string | null {
-  const publicId = primary?.cloudinary_public_id ?? fallback?.cloudinary_public_id ?? null
-  if (!publicId) return null
-  return cloudinaryUrl(cloudName, publicId, { width: 1200, height: 630, crop: 'fill' })
+  const normalizedCloudName = normalizeText(cloudName)
+  const publicId = getPublicId(primary) ?? getPublicId(fallback) ?? null
+  if (!normalizedCloudName || !publicId) return null
+  return cloudinaryUrl(normalizedCloudName, publicId, { width: 1200, height: 630, crop: 'fill' })
 }

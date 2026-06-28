@@ -35,6 +35,10 @@ if (!article) {
 
 const a = article as any
 
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 function formatDate(d: string | null): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
@@ -44,25 +48,30 @@ const pubDate        = formatDate(a.published_at)
 const updatedAt      = formatDate(a.updated_at)
 const lastVerifiedAt = formatDate(a.last_verified_at)
 
-const h1        = a.seo_h1 || a.title
-const pageTitle = a.seo_title || a.title
-const pageDesc  = a.seo_description || a.summary || undefined
-const canonical = a.canonical_url || `${SITE_URL}/guides/${slug}`
-const ogTitle   = a.og_title || pageTitle
-const ogDesc    = a.og_description || pageDesc
+const articleTitle = normalizeText(a.title) || 'Study Abroad Guide'
+const articleSlug = normalizeText(a.slug) || normalizeText(slug) || ''
+const articleSummary = normalizeText(a.summary)
+
+const h1 = normalizeText(a.seo_h1) || articleTitle
+const pageTitle = normalizeText(a.seo_title) || articleTitle
+const pageDesc = normalizeText(a.seo_description) || articleSummary || `Read DegreeWiki's guide on ${articleTitle}.`
+const canonical = normalizeText(a.canonical_url) || `${SITE_URL}${articleSlug ? `/guides/${articleSlug}` : '/guides'}`
+const ogTitle = normalizeText(a.og_title) || pageTitle
+const ogDesc = normalizeText(a.og_description) || pageDesc
 
 const cloudName        = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 const featuredPublicId = getPublicId(a.featured_image)
-const featuredAlt      = getAlt(a.featured_image, a.title)
+const featuredAlt      = getAlt(a.featured_image, articleTitle)
 const ogImageUrl       = getOgImageUrl(cloudName, a.og_image, a.featured_image)
 
-const wordCount   = a.content ? a.content.trim().split(/\s+/).filter(Boolean).length : 0
+const normalizedContent = normalizeText(a.content)
+const wordCount   = normalizedContent ? normalizedContent.split(/\s+/).filter(Boolean).length : 0
 const readingTime = wordCount > 0 ? Math.ceil(wordCount / 200) : null
 
-const hasArticleContent = typeof a.content === 'string' && a.content.trim().length > 0
+const hasArticleContent = normalizedContent.length > 0
 
 const categoryId   = a.article_categories?.id ?? null
-const categoryName = a.article_categories?.name ?? null
+const categoryName = normalizeText(a.article_categories?.name) || null
 
 // Related articles: same category, excluding current article, most recent first
 let relatedArticles: any[] = []
