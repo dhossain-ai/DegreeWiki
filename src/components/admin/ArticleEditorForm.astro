@@ -1,0 +1,911 @@
+---
+import MediaPicker from './MediaPicker.astro'
+import type { MediaAssetRow } from '../../lib/admin/media'
+import type { FormErrors } from '../../lib/admin/validate'
+import {
+  type ArticleCategoryOption,
+  type ArticleChecklistState,
+  type ArticleEditorValues,
+  type ArticleReadinessLevel,
+  CONTENT_STATUS_LABELS,
+  CONTENT_STATUS_OPTIONS,
+  INDEXING_LABELS,
+  INDEXING_STATUS_OPTIONS,
+  MIN_BODY_WORDS,
+  SEO_DESCRIPTION_IDEAL_MAX,
+  SEO_TITLE_IDEAL_MAX,
+  SUMMARY_IDEAL_MAX,
+  TITLE_SOFT_MAX,
+  VERIFICATION_LABELS,
+  VERIFICATION_OPTIONS,
+  WRITING_TEMPLATES,
+  calculateArticleChecklist,
+  countMarkdownHeadings,
+  countWords,
+  estimateReadingTimeMinutes,
+  getArticleReadiness,
+  getPublicGuidePath,
+  getSeoDescriptionLengthState,
+  getSeoTitleLengthState,
+  getSummaryLengthState,
+} from '../../lib/admin/articleAuthoring'
+
+interface Props {
+  mode: 'create' | 'edit'
+  values: ArticleEditorValues
+  errors: FormErrors
+  categories: ArticleCategoryOption[]
+  mediaAssets: MediaAssetRow[]
+  cloudName: string
+  backHref: string
+  returnTo?: string
+  publishedAt?: string | null
+  dataCompletenessScore?: number | null
+  sourceConfidenceScore?: number | null
+}
+
+const {
+  mode,
+  values,
+  errors,
+  categories,
+  mediaAssets,
+  cloudName,
+  backHref,
+  returnTo = '',
+  publishedAt = null,
+  dataCompletenessScore = null,
+  sourceConfidenceScore = null,
+} = Astro.props
+
+const isEdit = mode === 'edit'
+const titleCount = values.title.length
+const summaryState = getSummaryLengthState(values.summary)
+const seoTitleState = getSeoTitleLengthState(values.seo_title)
+const seoDescriptionState = getSeoDescriptionLengthState(values.seo_description)
+const wordCount = countWords(values.content)
+const readingTimeMinutes = estimateReadingTimeMinutes(wordCount)
+const headingCount = countMarkdownHeadings(values.content)
+const publicGuidePath = getPublicGuidePath(values.slug)
+const checklistItems = calculateArticleChecklist(values)
+const readiness = getArticleReadiness(checklistItems)
+const showPublicGuideLink = values.content_status === 'published' && values.slug.trim() !== ''
+const completenessWidth = Math.min(100, Math.max(0, Number(dataCompletenessScore ?? 0)))
+const confidenceWidth = Math.min(100, Math.max(0, Number(sourceConfidenceScore ?? 0)))
+
+const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = `${inputClass} bg-white`
+const labelClass = 'block text-sm font-medium text-gray-700 mb-1'
+const errorClass = 'mt-1 text-xs text-red-600'
+const hintClass = 'mt-1 text-xs text-gray-500'
+const softHintClass = 'text-xs text-gray-400'
+const sectionHeadClass = 'text-xs font-semibold uppercase tracking-wider text-gray-500'
+const cardClass = 'rounded-lg border border-gray-200 bg-white p-5'
+
+const lengthStateClass = (state: string) => {
+  if (state === 'good') return 'text-green-600'
+  if (state === 'long') return 'text-red-600'
+  if (state === 'short') return 'text-amber-600'
+  return 'text-gray-400'
+}
+
+const checklistStateClass = (state: ArticleChecklistState) => {
+  if (state === 'ready') return 'border-green-200 bg-green-50 text-green-700'
+  if (state === 'needs_attention') return 'border-amber-200 bg-amber-50 text-amber-700'
+  return 'border-red-200 bg-red-50 text-red-600'
+}
+
+const checklistStateLabel = (state: ArticleChecklistState) => {
+  if (state === 'ready') return 'Ready'
+  if (state === 'needs_attention') return 'Needs attention'
+  return 'Missing'
+}
+
+const readinessClass = (level: ArticleReadinessLevel) => {
+  if (level === 'ready_to_publish') return 'border-green-200 bg-green-50 text-green-800'
+  if (level === 'strong_draft') return 'border-blue-200 bg-blue-50 text-blue-800'
+  if (level === 'needs_polish') return 'border-amber-200 bg-amber-50 text-amber-800'
+  return 'border-gray-200 bg-gray-50 text-gray-700'
+}
+
+const currentSeoPreviewTitle = (values.seo_title.trim() || values.title.trim() || 'Article title').slice(0, 70)
+const currentSeoPreviewDescription = (values.seo_description.trim() || values.summary.trim() || 'Article description…').slice(0, 160)
+
+const canonicalHint = (() => {
+  const canonicalUrl = values.canonical_url.trim()
+  if (!canonicalUrl) return 'Optional. Leave blank unless another URL should be treated as canonical.'
+  if (!values.slug.trim()) return 'A canonical override is set, but the guide slug is still blank.'
+  return 'Use this only when search engines should prefer another public URL for the same content.'
+})()
+---
+<form method="post" data-article-editor>
+  {returnTo !== '' && <input type="hidden" name="returnTo" value={returnTo} />}
+
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+    <div class="space-y-6">
+      <section class={cardClass}>
+        <div class="mb-4 flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+          <div>
+            <h2 class={sectionHeadClass}>Basics</h2>
+            <p class="mt-1 text-sm text-gray-500">Set the guide identity, URL, category, and summary before moving into the full article draft.</p>
+          </div>
+          <p class={`text-xs font-medium ${titleCount > TITLE_SOFT_MAX ? 'text-red-600' : titleCount >= 45 ? 'text-green-600' : 'text-gray-400'}`} data-title-count>
+            {titleCount} / {TITLE_SOFT_MAX}
+          </p>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="md:col-span-2">
+            <label for="title" class={labelClass}>Title <span class="text-red-500">*</span></label>
+            <input
+              id="title"
+              name="title"
+              type="text"
+              value={values.title}
+              placeholder="e.g. How to Study Abroad in Germany"
+              class={inputClass}
+            />
+            <p class={hintClass}>Use a clear, keyword-aware title that matches how students actually search for this guide.</p>
+            {errors.title && <p class={errorClass}>{errors.title}</p>}
+          </div>
+
+          <div>
+            <label for="slug" class={labelClass}>Slug <span class="text-red-500">*</span></label>
+            <input
+              id="slug"
+              name="slug"
+              type="text"
+              value={values.slug}
+              placeholder="auto-generated from title if blank"
+              class={`${inputClass} font-mono`}
+            />
+            <p class={hintClass}>
+              {isEdit
+                ? 'Changing the slug changes the public guide path and can break existing links.'
+                : 'If left blank, the slug is auto-generated from the title when you save.'}
+            </p>
+            {errors.slug && <p class={errorClass}>{errors.slug}</p>}
+          </div>
+
+          <div>
+            <label for="article_category_id" class={labelClass}>Category / Guide Type</label>
+            <select id="article_category_id" name="article_category_id" class={selectClass}>
+              <option value="">— none —</option>
+              {categories.map(category => (
+                <option value={category.id} data-slug={category.slug} selected={values.article_category_id === category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <p class={hintClass}>Categories help organize guide discovery and related guide groupings.</p>
+            {errors.article_category_id && <p class={errorClass}>{errors.article_category_id}</p>}
+          </div>
+
+          <div class="md:col-span-2">
+            <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Guide path preview</p>
+              <p class="mt-1 font-mono text-sm text-blue-900" data-path-preview>{publicGuidePath}</p>
+              <p class="mt-1 text-xs text-blue-700">Published guides appear under `/guides/{values.slug.trim() ? values.slug.trim() : '...'}`.</p>
+            </div>
+          </div>
+
+          <div class="md:col-span-2">
+            <label for="summary" class={labelClass}>Summary</label>
+            <textarea
+              id="summary"
+              name="summary"
+              rows={3}
+              placeholder="2–3 sentences describing this article…"
+              class={inputClass}
+            >{values.summary}</textarea>
+            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p class={`text-xs font-medium ${lengthStateClass(summaryState.state)}`} data-summary-count>
+                {summaryState.count} / {SUMMARY_IDEAL_MAX} chars
+              </p>
+              <p class={`text-xs ${lengthStateClass(summaryState.state)}`} data-summary-helper>{summaryState.label}</p>
+            </div>
+            <p class={hintClass}>Used in guide cards and as the SEO description fallback when the custom meta description is blank.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>Article Content</h2>
+          <p class="mt-1 text-sm text-gray-500">Stay in plain text or Markdown. Use headings to break up long sections and keep the guide scannable.</p>
+        </div>
+
+        <div class="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Structure helper</p>
+          <div class="mt-3 grid gap-3 md:grid-cols-3">
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-3">
+              <p class="text-xs font-semibold text-gray-700">Intro</p>
+              <p class="mt-1 text-xs leading-5 text-gray-500">Open with who the guide is for, the decision it helps with, and the one-sentence promise.</p>
+            </div>
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-3">
+              <p class="text-xs font-semibold text-gray-700">Sections</p>
+              <p class="mt-1 text-xs leading-5 text-gray-500">Use `##` headings for major sections and keep each section focused on one student question.</p>
+            </div>
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-3">
+              <p class="text-xs font-semibold text-gray-700">Wrap-up</p>
+              <p class="mt-1 text-xs leading-5 text-gray-500">Close with next steps, caveats, or source reminders so the guide ends with clear direction.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <p class={labelClass}>Writing templates</p>
+          <p class={hintClass}>Starter outlines keep headings consistent. If the body already has text, you will be asked before replacing it.</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button type="button" data-template="country-guide" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Country Guide</button>
+            <button type="button" data-template="scholarship-guide" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Scholarship Guide</button>
+            <button type="button" data-template="university-guide" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">University Guide</button>
+            <button type="button" data-template="application-advice" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Application Advice</button>
+            <button type="button" data-template="general" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">General Guide</button>
+          </div>
+        </div>
+
+        <div>
+          <label for="content" class={labelClass}>Body</label>
+          <textarea
+            id="content"
+            name="content"
+            rows={22}
+            placeholder="Article body — plain text or Markdown. Use ## for headings."
+            class={`${inputClass} min-h-[26rem]`}
+          >{values.content}</textarea>
+          <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+            <p data-body-word-count>{wordCount === 0 ? '0 words' : `${wordCount} words`}</p>
+            <p data-body-reading-time>{readingTimeMinutes > 0 ? `${readingTimeMinutes} min read` : 'No reading time yet'}</p>
+            <p data-body-heading-count>{headingCount === 0 ? 'No headings yet' : `${headingCount} heading${headingCount === 1 ? '' : 's'}`}</p>
+          </div>
+          <p class={`mt-2 text-xs ${wordCount >= MIN_BODY_WORDS ? 'text-green-600' : wordCount > 0 ? 'text-amber-600' : 'text-gray-400'}`} data-body-readiness>
+            {wordCount >= MIN_BODY_WORDS
+              ? `Body length looks solid for a publish-ready guide.`
+              : wordCount > 0
+                ? `Keep drafting. Aim for at least ${MIN_BODY_WORDS} words before publishing.`
+                : `Start with the key student question, then build toward at least ${MIN_BODY_WORDS} words.`}
+          </p>
+        </div>
+      </section>
+
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>Media</h2>
+          <p class="mt-1 text-sm text-gray-500">Use reusable article media only. The featured image supports the guide itself, while the OG image supports sharing.</p>
+        </div>
+
+        <div class="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+          <p>Featured image: appears in guide cards and the public guide header.</p>
+          <p class="mt-1">OG image: used for social and share previews. If blank, the public guide can fall back to the featured image.</p>
+          <p class="mt-1">Alt text stays managed on the reusable media asset itself in this phase.</p>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <MediaPicker
+              fieldName="featured_image_id"
+              label="Featured Image"
+              currentId={values.featured_image_id || null}
+              assets={mediaAssets}
+              cloudName={cloudName}
+              defaultSubfolder="articles"
+            />
+            {errors.featured_image_id && <p class={errorClass}>{errors.featured_image_id}</p>}
+          </div>
+          <div>
+            <MediaPicker
+              fieldName="og_image_id"
+              label="OG / Social Image"
+              currentId={values.og_image_id || null}
+              assets={mediaAssets}
+              cloudName={cloudName}
+              defaultSubfolder="articles"
+              copyFromField="featured_image_id"
+              copyFromLabel="Featured Image"
+            />
+            <p class={hintClass}>If you do not choose a dedicated OG image, social sharing can fall back to the featured image.</p>
+            {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>SEO</h2>
+          <p class="mt-1 text-sm text-gray-500">Keep SEO fields intentional. The editor shows exactly what falls back when custom metadata is left blank.</p>
+        </div>
+
+        <div class="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Search preview</p>
+          <p class="mt-3 truncate font-mono text-xs text-gray-500" data-seo-preview-url>
+            degreewiki.com{publicGuidePath === '/guides/...' ? '/guides/...' : publicGuidePath}
+          </p>
+          <p class="mt-1 truncate text-base font-medium leading-snug text-blue-700" data-seo-preview-title>{currentSeoPreviewTitle || 'Article title'}</p>
+          <p class="mt-1 text-sm leading-relaxed text-gray-600" data-seo-preview-description>{currentSeoPreviewDescription || 'Article description…'}</p>
+        </div>
+
+        <div class="mb-4 grid gap-3 md:grid-cols-3">
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+            <p class="text-xs font-semibold text-gray-700">SEO title fallback</p>
+            <p class="mt-1 text-xs leading-5 text-gray-500">If blank, the public guide uses the main article title.</p>
+          </div>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+            <p class="text-xs font-semibold text-gray-700">SEO description fallback</p>
+            <p class="mt-1 text-xs leading-5 text-gray-500">If blank, the summary becomes the meta description fallback.</p>
+          </div>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+            <p class="text-xs font-semibold text-gray-700">Page H1 fallback</p>
+            <p class="mt-1 text-xs leading-5 text-gray-500">If blank, the public guide heading uses the article title.</p>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label for="seo_title" class={labelClass}>SEO Title</label>
+            <input
+              id="seo_title"
+              name="seo_title"
+              type="text"
+              value={values.seo_title}
+              placeholder="Leave blank to use the article title"
+              class={inputClass}
+            />
+            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p class={`text-xs font-medium ${lengthStateClass(seoTitleState.state)}`} data-seo-title-count>
+                {seoTitleState.count} / {SEO_TITLE_IDEAL_MAX}
+              </p>
+              <p class={`text-xs ${lengthStateClass(seoTitleState.state)}`} data-seo-title-helper>{seoTitleState.label}</p>
+            </div>
+            {errors.seo_title && <p class={errorClass}>{errors.seo_title}</p>}
+          </div>
+
+          <div>
+            <label for="seo_description" class={labelClass}>SEO Description</label>
+            <textarea
+              id="seo_description"
+              name="seo_description"
+              rows={2}
+              placeholder="Leave blank to use the article summary"
+              class={inputClass}
+            >{values.seo_description}</textarea>
+            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p class={`text-xs font-medium ${lengthStateClass(seoDescriptionState.state)}`} data-seo-description-count>
+                {seoDescriptionState.count} / {SEO_DESCRIPTION_IDEAL_MAX}
+              </p>
+              <p class={`text-xs ${lengthStateClass(seoDescriptionState.state)}`} data-seo-description-helper>{seoDescriptionState.label}</p>
+            </div>
+            {errors.seo_description && <p class={errorClass}>{errors.seo_description}</p>}
+          </div>
+
+          <div>
+            <label for="seo_h1" class={labelClass}>Page H1</label>
+            <input
+              id="seo_h1"
+              name="seo_h1"
+              type="text"
+              value={values.seo_h1}
+              placeholder="Leave blank to use the article title"
+              class={inputClass}
+            />
+            <p class={hintClass}>Use this only when the visible guide heading should differ from the article title.</p>
+            {errors.seo_h1 && <p class={errorClass}>{errors.seo_h1}</p>}
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div>
+              <label for="og_title" class={labelClass}>OG Title</label>
+              <input
+                id="og_title"
+                name="og_title"
+                type="text"
+                value={values.og_title}
+                placeholder="Defaults to the SEO title"
+                class={inputClass}
+              />
+              <p class={hintClass}>Optional override for social sharing titles.</p>
+              {errors.og_title && <p class={errorClass}>{errors.og_title}</p>}
+            </div>
+
+            <div>
+              <label for="og_description" class={labelClass}>OG Description</label>
+              <textarea
+                id="og_description"
+                name="og_description"
+                rows={2}
+                placeholder="Defaults to the SEO description"
+                class={inputClass}
+              >{values.og_description}</textarea>
+              <p class={hintClass}>Optional override for social sharing descriptions.</p>
+              {errors.og_description && <p class={errorClass}>{errors.og_description}</p>}
+            </div>
+          </div>
+
+          <div>
+            <label for="canonical_url" class={labelClass}>Canonical URL</label>
+            <input
+              id="canonical_url"
+              name="canonical_url"
+              type="url"
+              value={values.canonical_url}
+              placeholder="https://degreewiki.com/guides/your-slug"
+              class={inputClass}
+            />
+            <p class={hintClass} data-canonical-helper>{canonicalHint}</p>
+            {errors.canonical_url && <p class={errorClass}>{errors.canonical_url}</p>}
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="space-y-4 lg:sticky lg:top-6">
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>Publishing / Verification</h2>
+          <p class="mt-1 text-sm text-gray-500">Keep publishing controls familiar, but make the article state easy to review before you save.</p>
+        </div>
+
+        <div class="mb-4 flex flex-wrap gap-2 text-xs">
+          <span class="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700" data-status-summary="content_status">
+            {CONTENT_STATUS_LABELS[values.content_status] ?? values.content_status}
+          </span>
+          <span class="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700" data-status-summary="indexing_status">
+            {INDEXING_LABELS[values.indexing_status] ?? values.indexing_status}
+          </span>
+          <span class="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700" data-status-summary="verification_status">
+            {VERIFICATION_LABELS[values.verification_status] ?? values.verification_status}
+          </span>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label for="content_status" class={labelClass}>Content Status <span class="text-red-500">*</span></label>
+            <select id="content_status" name="content_status" class={selectClass}>
+              {CONTENT_STATUS_OPTIONS.map(option => (
+                <option value={option} selected={values.content_status === option}>
+                  {CONTENT_STATUS_LABELS[option] ?? option}
+                </option>
+              ))}
+            </select>
+            {errors.content_status && <p class={errorClass}>{errors.content_status}</p>}
+          </div>
+
+          <div>
+            <label for="indexing_status" class={labelClass}>Indexing <span class="text-red-500">*</span></label>
+            <select id="indexing_status" name="indexing_status" class={selectClass}>
+              {INDEXING_STATUS_OPTIONS.map(option => (
+                <option value={option} selected={values.indexing_status === option}>
+                  {INDEXING_LABELS[option] ?? option}
+                </option>
+              ))}
+            </select>
+            <p class={hintClass}>Use `Allow indexing` only when the guide is ready for search. `No-index` is fine for finished but intentionally private drafts.</p>
+            {errors.indexing_status && <p class={errorClass}>{errors.indexing_status}</p>}
+          </div>
+
+          <div>
+            <label for="verification_status" class={labelClass}>Verification Status <span class="text-red-500">*</span></label>
+            <select id="verification_status" name="verification_status" class={selectClass}>
+              {VERIFICATION_OPTIONS.map(option => (
+                <option value={option} selected={values.verification_status === option}>
+                  {VERIFICATION_LABELS[option] ?? option}
+                </option>
+              ))}
+            </select>
+            <p class={hintClass}>Phase 70A keeps verification as a UI review signal only. Saving here does not stamp `last_verified_at`.</p>
+            {errors.verification_status && <p class={errorClass}>{errors.verification_status}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>Editorial Sidebar</h2>
+          <p class="mt-1 text-sm text-gray-500">Save, publish, or jump back while keeping the article path and readiness checklist in view.</p>
+        </div>
+
+        <div class="space-y-2">
+          <button type="submit" name="action" value="save" class="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Save Draft
+          </button>
+          <button type="submit" name="action" value="publish" class="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">
+            Save and Publish
+          </button>
+          <a href={backHref} class="block py-1 text-center text-sm text-gray-500 hover:underline">Cancel</a>
+        </div>
+
+        <p class="mt-3 text-xs text-gray-500">Save Draft keeps the selected sidebar statuses as-is. Save and Publish forces `Published` plus `Allow indexing` without changing any other rules.</p>
+
+        <div class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Public guide path</p>
+          <p class="mt-1 font-mono text-sm text-gray-900" data-sidebar-path>{publicGuidePath}</p>
+          <div class="mt-2" data-open-guide-wrap={!showPublicGuideLink ? 'hidden' : undefined} hidden={!showPublicGuideLink}>
+            <a
+              href={publicGuidePath}
+              target="_blank"
+              rel="noreferrer"
+              class="text-sm font-medium text-blue-600 hover:underline"
+              data-open-guide-link
+            >
+              Open published guide
+            </a>
+          </div>
+          {!showPublicGuideLink && (
+            <p class="mt-2 text-xs text-gray-500" data-open-guide-placeholder>Open-link preview appears here once the article is published with a slug.</p>
+          )}
+        </div>
+      </section>
+
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>Readiness</h2>
+          <p class="mt-1 text-sm text-gray-500">This is editorial guidance only. It does not block save or publish actions.</p>
+        </div>
+
+        <div class={`rounded-lg border px-4 py-4 ${readinessClass(readiness.level)}`} data-readiness-box>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wide">Article readiness</p>
+              <p class="mt-1 text-base font-semibold" data-readiness-label>{readiness.label}</p>
+            </div>
+            <p class="rounded-full border border-current/20 px-2.5 py-1 text-xs font-semibold" data-readiness-score>{readiness.score}%</p>
+          </div>
+          <p class="mt-2 text-xs" data-readiness-breakdown>
+            {readiness.readyCount} ready, {readiness.needsAttentionCount} need attention, {readiness.missingCount} missing
+          </p>
+        </div>
+
+        <div class="mt-4 grid grid-cols-3 gap-2 text-center">
+          <div class="rounded-md border border-gray-200 bg-gray-50 px-2 py-3">
+            <p class="text-[11px] uppercase tracking-wide text-gray-500">Words</p>
+            <p class="mt-1 text-sm font-semibold text-gray-900" data-sidebar-word-count>{wordCount}</p>
+          </div>
+          <div class="rounded-md border border-gray-200 bg-gray-50 px-2 py-3">
+            <p class="text-[11px] uppercase tracking-wide text-gray-500">Read time</p>
+            <p class="mt-1 text-sm font-semibold text-gray-900" data-sidebar-reading-time>{readingTimeMinutes > 0 ? `${readingTimeMinutes} min` : '—'}</p>
+          </div>
+          <div class="rounded-md border border-gray-200 bg-gray-50 px-2 py-3">
+            <p class="text-[11px] uppercase tracking-wide text-gray-500">Headings</p>
+            <p class="mt-1 text-sm font-semibold text-gray-900" data-sidebar-heading-count>{headingCount}</p>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">SEO hints</p>
+          <p class={`mt-2 text-xs ${lengthStateClass(seoTitleState.state)}`} data-sidebar-seo-title-hint>{seoTitleState.label}</p>
+          <p class={`mt-1 text-xs ${lengthStateClass(seoDescriptionState.state)}`} data-sidebar-seo-description-hint>{seoDescriptionState.label}</p>
+        </div>
+
+        <div class="mt-4">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-gray-900">Completion checklist</h3>
+            <p class="text-xs text-gray-500">{readiness.readyCount} / {readiness.total} ready</p>
+          </div>
+          <ul class="space-y-2">
+            {checklistItems.map(item => (
+              <li class="rounded-lg border border-gray-200 px-3 py-3" data-checklist-key={item.key}>
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">{item.label}</p>
+                    <p class="mt-1 text-xs text-gray-500" data-checklist-detail={item.key}>{item.detail}</p>
+                  </div>
+                  <span class={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${checklistStateClass(item.state)}`} data-checklist-state={item.key}>
+                    {checklistStateLabel(item.state)}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {isEdit && (
+        <section class={cardClass}>
+          <div class="mb-4 border-b border-gray-200 pb-3">
+            <h2 class={sectionHeadClass}>Data Quality</h2>
+            <p class="mt-1 text-sm text-gray-500">Read-only article scoring remains unchanged in Phase 70A.</p>
+          </div>
+
+          <div class="space-y-3 text-xs text-gray-600">
+            <div>
+              <div class="flex items-center justify-between">
+                <span>Completeness</span>
+                <span class="font-mono font-medium">{dataCompletenessScore ?? 0} / 100</span>
+              </div>
+              <div class="mt-1 h-1.5 rounded-full bg-gray-200">
+                <div class="h-1.5 rounded-full bg-blue-500" style={`width: ${completenessWidth}%`}></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between">
+                <span>Source Confidence</span>
+                <span class="font-mono font-medium">{sourceConfidenceScore ?? 0} / 100</span>
+              </div>
+              <div class="mt-1 h-1.5 rounded-full bg-gray-200">
+                <div class="h-1.5 rounded-full bg-green-500" style={`width: ${confidenceWidth}%`}></div>
+              </div>
+            </div>
+            <p class={softHintClass}>Auto-calculated. Saving the article here does not directly change these scores.</p>
+            {publishedAt && (
+              <p class="border-t border-gray-100 pt-2 text-xs text-gray-500">
+                Published: {new Date(publishedAt).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+    </aside>
+  </div>
+</form>
+
+<script lang="ts">
+  import {
+    CONTENT_STATUS_LABELS,
+    INDEXING_LABELS,
+    MIN_BODY_WORDS,
+    SEO_DESCRIPTION_IDEAL_MAX,
+    SEO_TITLE_IDEAL_MAX,
+    SUMMARY_IDEAL_MAX,
+    TITLE_SOFT_MAX,
+    VERIFICATION_LABELS,
+    WRITING_TEMPLATES,
+    calculateArticleChecklist,
+    countMarkdownHeadings,
+    countWords,
+    estimateReadingTimeMinutes,
+    getArticleReadiness,
+    getPublicGuidePath,
+    getSeoDescriptionLengthState,
+    getSeoTitleLengthState,
+    getSummaryLengthState,
+  } from '../../lib/admin/articleAuthoring'
+
+  const CHECKLIST_STATE_LABELS = {
+    ready: 'Ready',
+    needs_attention: 'Needs attention',
+    missing: 'Missing',
+  } as const
+
+  const CHECKLIST_STATE_CLASSES = {
+    ready: 'rounded-full border px-2 py-0.5 text-[11px] font-medium border-green-200 bg-green-50 text-green-700',
+    needs_attention: 'rounded-full border px-2 py-0.5 text-[11px] font-medium border-amber-200 bg-amber-50 text-amber-700',
+    missing: 'rounded-full border px-2 py-0.5 text-[11px] font-medium border-red-200 bg-red-50 text-red-600',
+  } as const
+
+  const READINESS_CLASSES = {
+    ready_to_publish: 'rounded-lg border px-4 py-4 border-green-200 bg-green-50 text-green-800',
+    strong_draft: 'rounded-lg border px-4 py-4 border-blue-200 bg-blue-50 text-blue-800',
+    needs_polish: 'rounded-lg border px-4 py-4 border-amber-200 bg-amber-50 text-amber-800',
+    early_draft: 'rounded-lg border px-4 py-4 border-gray-200 bg-gray-50 text-gray-700',
+  } as const
+
+  function helperClass(state: 'empty' | 'short' | 'good' | 'long'): string {
+    if (state === 'good') return 'text-xs text-green-600'
+    if (state === 'long') return 'text-xs text-red-600'
+    if (state === 'short') return 'text-xs text-amber-600'
+    return 'text-xs text-gray-400'
+  }
+
+  function titleCountClass(length: number): string {
+    if (length > TITLE_SOFT_MAX) return 'text-xs font-medium text-red-600'
+    if (length >= 45) return 'text-xs font-medium text-green-600'
+    return 'text-xs font-medium text-gray-400'
+  }
+
+  function getCanonicalHelperText(canonicalUrl: string, slug: string): string {
+    const canonical = canonicalUrl.trim()
+    if (!canonical) return 'Optional. Leave blank unless another URL should be treated as canonical.'
+    if (!slug.trim()) return 'A canonical override is set, but the guide slug is still blank.'
+    return 'Use this only when search engines should prefer another public URL for the same content.'
+  }
+
+  function setText(target: Element | null, text: string): void {
+    if (target) target.textContent = text
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-article-editor]').forEach(root => {
+    const titleEl = root.querySelector<HTMLInputElement>('#title')
+    const slugEl = root.querySelector<HTMLInputElement>('#slug')
+    const summaryEl = root.querySelector<HTMLTextAreaElement>('#summary')
+    const contentEl = root.querySelector<HTMLTextAreaElement>('#content')
+    const seoTitleEl = root.querySelector<HTMLInputElement>('#seo_title')
+    const seoDescriptionEl = root.querySelector<HTMLTextAreaElement>('#seo_description')
+    const canonicalEl = root.querySelector<HTMLInputElement>('#canonical_url')
+    const featuredImageEl = root.querySelector<HTMLInputElement>('input[name="featured_image_id"]')
+    const contentStatusEl = root.querySelector<HTMLSelectElement>('#content_status')
+    const indexingStatusEl = root.querySelector<HTMLSelectElement>('#indexing_status')
+    const verificationStatusEl = root.querySelector<HTMLSelectElement>('#verification_status')
+
+    const titleCountEl = root.querySelector<HTMLElement>('[data-title-count]')
+    const summaryCountEl = root.querySelector<HTMLElement>('[data-summary-count]')
+    const summaryHelperEl = root.querySelector<HTMLElement>('[data-summary-helper]')
+    const bodyWordCountEl = root.querySelector<HTMLElement>('[data-body-word-count]')
+    const bodyReadingTimeEl = root.querySelector<HTMLElement>('[data-body-reading-time]')
+    const bodyHeadingCountEl = root.querySelector<HTMLElement>('[data-body-heading-count]')
+    const bodyReadinessEl = root.querySelector<HTMLElement>('[data-body-readiness]')
+    const seoTitleCountEl = root.querySelector<HTMLElement>('[data-seo-title-count]')
+    const seoTitleHelperEl = root.querySelector<HTMLElement>('[data-seo-title-helper]')
+    const seoDescriptionCountEl = root.querySelector<HTMLElement>('[data-seo-description-count]')
+    const seoDescriptionHelperEl = root.querySelector<HTMLElement>('[data-seo-description-helper]')
+    const seoPreviewUrlEl = root.querySelector<HTMLElement>('[data-seo-preview-url]')
+    const seoPreviewTitleEl = root.querySelector<HTMLElement>('[data-seo-preview-title]')
+    const seoPreviewDescriptionEl = root.querySelector<HTMLElement>('[data-seo-preview-description]')
+    const canonicalHelperEl = root.querySelector<HTMLElement>('[data-canonical-helper]')
+    const readinessBoxEl = root.querySelector<HTMLElement>('[data-readiness-box]')
+    const readinessLabelEl = root.querySelector<HTMLElement>('[data-readiness-label]')
+    const readinessScoreEl = root.querySelector<HTMLElement>('[data-readiness-score]')
+    const readinessBreakdownEl = root.querySelector<HTMLElement>('[data-readiness-breakdown]')
+    const sidebarWordCountEl = root.querySelector<HTMLElement>('[data-sidebar-word-count]')
+    const sidebarReadingTimeEl = root.querySelector<HTMLElement>('[data-sidebar-reading-time]')
+    const sidebarHeadingCountEl = root.querySelector<HTMLElement>('[data-sidebar-heading-count]')
+    const sidebarSeoTitleHintEl = root.querySelector<HTMLElement>('[data-sidebar-seo-title-hint]')
+    const sidebarSeoDescriptionHintEl = root.querySelector<HTMLElement>('[data-sidebar-seo-description-hint]')
+    const openGuideWrapEl = root.querySelector<HTMLElement>('[data-open-guide-wrap]')
+    const openGuideLinkEl = root.querySelector<HTMLAnchorElement>('[data-open-guide-link]')
+    const openGuidePlaceholderEl = root.querySelector<HTMLElement>('[data-open-guide-placeholder]')
+
+    const pathTargets = Array.from(root.querySelectorAll<HTMLElement>('[data-path-preview], [data-sidebar-path]'))
+    const statusTargets = {
+      content_status: root.querySelector<HTMLElement>('[data-status-summary="content_status"]'),
+      indexing_status: root.querySelector<HTMLElement>('[data-status-summary="indexing_status"]'),
+      verification_status: root.querySelector<HTMLElement>('[data-status-summary="verification_status"]'),
+    }
+
+    const checklistTargets = new Map<string, { state: HTMLElement | null; detail: HTMLElement | null }>()
+    root.querySelectorAll<HTMLElement>('[data-checklist-key]').forEach(item => {
+      const key = item.dataset.checklistKey ?? ''
+      checklistTargets.set(key, {
+        state: item.querySelector<HTMLElement>('[data-checklist-state]'),
+        detail: item.querySelector<HTMLElement>('[data-checklist-detail]'),
+      })
+    })
+
+    function updateUi(): void {
+      const values = {
+        title: titleEl?.value ?? '',
+        slug: slugEl?.value ?? '',
+        content_status: contentStatusEl?.value ?? 'draft',
+        article_category_id: '',
+        summary: summaryEl?.value ?? '',
+        content: contentEl?.value ?? '',
+        indexing_status: indexingStatusEl?.value ?? 'draft',
+        verification_status: verificationStatusEl?.value ?? 'unverified',
+        featured_image_id: featuredImageEl?.value ?? '',
+        og_image_id: '',
+        seo_title: seoTitleEl?.value ?? '',
+        seo_description: seoDescriptionEl?.value ?? '',
+        seo_h1: '',
+        canonical_url: canonicalEl?.value ?? '',
+        og_title: '',
+        og_description: '',
+      }
+
+      const titleLength = values.title.length
+      const summaryState = getSummaryLengthState(values.summary)
+      const seoTitleState = getSeoTitleLengthState(values.seo_title)
+      const seoDescriptionState = getSeoDescriptionLengthState(values.seo_description)
+      const publicPath = getPublicGuidePath(values.slug)
+      const wordCount = countWords(values.content)
+      const readingTime = estimateReadingTimeMinutes(wordCount)
+      const headingCount = countMarkdownHeadings(values.content)
+      const checklist = calculateArticleChecklist(values)
+      const readiness = getArticleReadiness(checklist)
+
+      if (titleCountEl) {
+        titleCountEl.textContent = `${titleLength} / ${TITLE_SOFT_MAX}`
+        titleCountEl.className = titleCountClass(titleLength)
+      }
+
+      if (summaryCountEl) {
+        summaryCountEl.textContent = `${summaryState.count} / ${SUMMARY_IDEAL_MAX} chars`
+        summaryCountEl.className = helperClass(summaryState.state).replace('text-xs ', 'text-xs font-medium ')
+      }
+      if (summaryHelperEl) {
+        summaryHelperEl.textContent = summaryState.label
+        summaryHelperEl.className = helperClass(summaryState.state)
+      }
+
+      setText(bodyWordCountEl, wordCount === 0 ? '0 words' : `${wordCount} words`)
+      setText(bodyReadingTimeEl, readingTime > 0 ? `${readingTime} min read` : 'No reading time yet')
+      setText(bodyHeadingCountEl, headingCount === 0 ? 'No headings yet' : `${headingCount} heading${headingCount === 1 ? '' : 's'}`)
+
+      if (bodyReadinessEl) {
+        if (wordCount >= MIN_BODY_WORDS) {
+          bodyReadinessEl.textContent = 'Body length looks solid for a publish-ready guide.'
+          bodyReadinessEl.className = 'mt-2 text-xs text-green-600'
+        } else if (wordCount > 0) {
+          bodyReadinessEl.textContent = `Keep drafting. Aim for at least ${MIN_BODY_WORDS} words before publishing.`
+          bodyReadinessEl.className = 'mt-2 text-xs text-amber-600'
+        } else {
+          bodyReadinessEl.textContent = `Start with the key student question, then build toward at least ${MIN_BODY_WORDS} words.`
+          bodyReadinessEl.className = 'mt-2 text-xs text-gray-400'
+        }
+      }
+
+      if (seoTitleCountEl) {
+        seoTitleCountEl.textContent = `${seoTitleState.count} / ${SEO_TITLE_IDEAL_MAX}`
+        seoTitleCountEl.className = helperClass(seoTitleState.state).replace('text-xs ', 'text-xs font-medium ')
+      }
+      if (seoTitleHelperEl) {
+        seoTitleHelperEl.textContent = seoTitleState.label
+        seoTitleHelperEl.className = helperClass(seoTitleState.state)
+      }
+
+      if (seoDescriptionCountEl) {
+        seoDescriptionCountEl.textContent = `${seoDescriptionState.count} / ${SEO_DESCRIPTION_IDEAL_MAX}`
+        seoDescriptionCountEl.className = helperClass(seoDescriptionState.state).replace('text-xs ', 'text-xs font-medium ')
+      }
+      if (seoDescriptionHelperEl) {
+        seoDescriptionHelperEl.textContent = seoDescriptionState.label
+        seoDescriptionHelperEl.className = helperClass(seoDescriptionState.state)
+      }
+
+      pathTargets.forEach(target => {
+        target.textContent = publicPath
+      })
+
+      setText(seoPreviewUrlEl, `degreewiki.com${publicPath === '/guides/...' ? '/guides/...' : publicPath}`)
+      setText(seoPreviewTitleEl, (values.seo_title.trim() || values.title.trim() || 'Article title').slice(0, 70))
+      setText(seoPreviewDescriptionEl, (values.seo_description.trim() || values.summary.trim() || 'Article description…').slice(0, 160))
+
+      if (canonicalHelperEl) {
+        canonicalHelperEl.textContent = getCanonicalHelperText(values.canonical_url, values.slug)
+      }
+
+      setText(statusTargets.content_status, CONTENT_STATUS_LABELS[values.content_status] ?? values.content_status)
+      setText(statusTargets.indexing_status, INDEXING_LABELS[values.indexing_status] ?? values.indexing_status)
+      setText(statusTargets.verification_status, VERIFICATION_LABELS[values.verification_status] ?? values.verification_status)
+
+      if (readinessBoxEl) readinessBoxEl.className = READINESS_CLASSES[readiness.level]
+      setText(readinessLabelEl, readiness.label)
+      setText(readinessScoreEl, `${readiness.score}%`)
+      setText(readinessBreakdownEl, `${readiness.readyCount} ready, ${readiness.needsAttentionCount} need attention, ${readiness.missingCount} missing`)
+      setText(sidebarWordCountEl, String(wordCount))
+      setText(sidebarReadingTimeEl, readingTime > 0 ? `${readingTime} min` : '—')
+      setText(sidebarHeadingCountEl, String(headingCount))
+
+      if (sidebarSeoTitleHintEl) {
+        sidebarSeoTitleHintEl.textContent = seoTitleState.label
+        sidebarSeoTitleHintEl.className = helperClass(seoTitleState.state)
+      }
+      if (sidebarSeoDescriptionHintEl) {
+        sidebarSeoDescriptionHintEl.textContent = seoDescriptionState.label
+        sidebarSeoDescriptionHintEl.className = helperClass(seoDescriptionState.state)
+      }
+
+      const showOpenGuideLink = values.content_status === 'published' && values.slug.trim() !== ''
+      if (openGuideWrapEl) openGuideWrapEl.hidden = !showOpenGuideLink
+      if (openGuideLinkEl) openGuideLinkEl.href = publicPath
+      if (openGuidePlaceholderEl) openGuidePlaceholderEl.hidden = showOpenGuideLink
+
+      checklist.forEach(item => {
+        const target = checklistTargets.get(item.key)
+        if (!target) return
+        if (target.detail) target.detail.textContent = item.detail
+        if (target.state) {
+          target.state.textContent = CHECKLIST_STATE_LABELS[item.state]
+          target.state.className = CHECKLIST_STATE_CLASSES[item.state]
+        }
+      })
+    }
+
+    ;[titleEl, slugEl, summaryEl, contentEl, seoTitleEl, seoDescriptionEl, canonicalEl, contentStatusEl, indexingStatusEl, verificationStatusEl].forEach(element => {
+      element?.addEventListener('input', updateUi)
+      element?.addEventListener('change', updateUi)
+    })
+
+    root.querySelectorAll<HTMLButtonElement>('[data-template]').forEach(button => {
+      button.addEventListener('click', () => {
+        const key = button.dataset.template ?? ''
+        const template = WRITING_TEMPLATES[key]
+        if (!template || !contentEl) return
+        if (contentEl.value.trim() && !confirm('Replace existing body content with this template?')) return
+        contentEl.value = template
+        updateUi()
+        contentEl.focus()
+      })
+    })
+
+    updateUi()
+  })
+</script>
