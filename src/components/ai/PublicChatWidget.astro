@@ -6,7 +6,11 @@ interface Props {
 const { currentPath } = Astro.props
 ---
 
-<div class="fixed bottom-4 right-4 z-50" data-site-chat-root>
+<div
+  class="fixed bottom-4 right-4 z-50"
+  style="position: fixed; right: 1rem; bottom: 1rem; z-index: 80;"
+  data-site-chat-root
+>
   <button
     id="site-chat-launcher"
     type="button"
@@ -21,6 +25,7 @@ const { currentPath } = Astro.props
   <section
     id="site-chat-panel"
     class="mt-3 hidden w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+    style="display: none; width: min(24rem, calc(100vw - 2rem));"
     aria-label="DegreeWiki chatbot"
   >
     <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
@@ -138,6 +143,19 @@ const { currentPath } = Astro.props
   let busy = false
   let sessionLoaded = false
   let authenticated = false
+  const FALLBACK_ASSISTANT_ERROR = 'I could not complete that chat reply right now. Please try again.'
+
+  function showTranscript() {
+    transcriptEl.classList.remove('hidden')
+    transcriptEl.style.display = ''
+    welcomeEl.style.display = 'none'
+  }
+
+  function hideTranscript() {
+    transcriptEl.classList.add('hidden')
+    transcriptEl.style.display = 'none'
+    welcomeEl.style.display = ''
+  }
 
   function setStatus(message, tone) {
     statusEl.textContent = message
@@ -170,10 +188,13 @@ const { currentPath } = Astro.props
     wrapper.appendChild(label)
     wrapper.appendChild(body)
     transcriptEl.appendChild(wrapper)
-    transcriptEl.style.display = ''
-    welcomeEl.style.display = 'none'
+    showTranscript()
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     updateClearVisibility()
+  }
+
+  function appendAssistantFallback(message = FALLBACK_ASSISTANT_ERROR) {
+    appendTurn('assistant', message)
   }
 
   function replaceTranscript(messages) {
@@ -182,8 +203,7 @@ const { currentPath } = Astro.props
       appendTurn(message.role, message.content)
     }
     if (messages.length === 0) {
-      transcriptEl.style.display = 'none'
-      welcomeEl.style.display = ''
+      hideTranscript()
     }
   }
 
@@ -238,6 +258,8 @@ const { currentPath } = Astro.props
         transcriptEl.replaceChildren()
         if (data.messages.length > 0) {
           replaceTranscript(data.messages)
+        } else {
+          hideTranscript()
         }
       }
 
@@ -308,19 +330,23 @@ const { currentPath } = Astro.props
       try {
         data = await res.json()
       } catch {
-        setStatus('Something went wrong. Please try again.', 'error')
+        appendAssistantFallback()
         return
       }
 
       if (data.ok) {
-        if (typeof data.answer === 'string') appendTurn('assistant', data.answer)
+        if (typeof data.answer === 'string' && data.answer.trim().length > 0) {
+          appendTurn('assistant', data.answer)
+        } else {
+          appendAssistantFallback()
+        }
         authenticated = data.authenticated === true
         updateAuthUI()
       } else {
-        setStatus(mapError(data), 'error')
+        appendAssistantFallback(mapError(data))
       }
     } catch {
-      setStatus('Something went wrong. Please try again.', 'error')
+      appendAssistantFallback()
     } finally {
       setBusy(false, 'Send', 'Clear chat')
       inputEl.focus()
@@ -374,8 +400,7 @@ const { currentPath } = Astro.props
       }
 
       transcriptEl.replaceChildren()
-      transcriptEl.style.display = 'none'
-      welcomeEl.style.display = ''
+      hideTranscript()
       setStatus('Chat cleared.', 'success')
     } catch {
       setStatus('Could not clear chat. Please try again.', 'error')
