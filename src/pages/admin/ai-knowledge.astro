@@ -259,12 +259,51 @@ function formatDate(value: string | null): string {
         No knowledge-base answers match these filters yet.
       </div>
     ) : (
-      <div class="mt-6 space-y-4">
+      <>
+        <div id="ai-knowledge-bulk-toolbar" class="mt-6 rounded-xl border border-gray-200 bg-gray-50 px-4 py-4">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="button" id="ai-knowledge-select-visible" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Select all visible
+              </button>
+              <button type="button" id="ai-knowledge-clear-selection" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Clear selection
+              </button>
+              <span id="ai-knowledge-selected-count" class="text-sm text-gray-600">0 selected</span>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button type="button" id="ai-knowledge-bulk-publish" disabled class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                Publish selected
+              </button>
+              <button type="button" id="ai-knowledge-bulk-draft" disabled class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                Move selected to draft
+              </button>
+              <button type="button" id="ai-knowledge-bulk-archive" disabled class="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
+                Archive selected
+              </button>
+              <button type="button" id="ai-knowledge-bulk-delete" disabled class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50">
+                Delete selected drafts only
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-6 space-y-4">
         {answers.map((row) => (
-          <details class="rounded-xl border border-gray-200">
+          <details class="rounded-xl border border-gray-200" data-answer-row={row.id} data-answer-status={row.status}>
             <summary class="cursor-pointer list-none px-4 py-4">
               <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
+                  <div class="mb-3 flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      value={row.id}
+                      data-answer-checkbox={row.id}
+                      data-answer-status={row.status}
+                      class="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      aria-label={`Select ${row.question}`}
+                    />
+                    <div class="min-w-0 flex-1">
                   <div class="flex flex-wrap gap-2">
                     <span class="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">{row.status}</span>
                     <span class="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">{row.category}</span>
@@ -274,6 +313,8 @@ function formatDate(value: string | null): string {
                   </div>
                   <h3 class="mt-3 text-base font-semibold text-gray-900">{row.question}</h3>
                   <p class="mt-2 whitespace-pre-wrap text-sm text-gray-600">{row.answer}</p>
+                    </div>
+                  </div>
                 </div>
                 <div class="shrink-0 text-xs text-gray-500">
                   <div>Priority {row.priority}</div>
@@ -387,7 +428,8 @@ function formatDate(value: string | null): string {
             </div>
           </details>
         ))}
-      </div>
+        </div>
+      </>
     )}
   </section>
 </AdminLayout>
@@ -397,6 +439,14 @@ function formatDate(value: string | null): string {
   const importForm = document.getElementById('ai-knowledge-import-form')
   const importSubmit = document.getElementById('ai-knowledge-import-submit')
   const importResult = document.getElementById('ai-knowledge-import-result')
+  const bulkSelectedCount = document.getElementById('ai-knowledge-selected-count')
+  const bulkPublishButton = document.getElementById('ai-knowledge-bulk-publish')
+  const bulkDraftButton = document.getElementById('ai-knowledge-bulk-draft')
+  const bulkArchiveButton = document.getElementById('ai-knowledge-bulk-archive')
+  const bulkDeleteButton = document.getElementById('ai-knowledge-bulk-delete')
+  const selectVisibleButton = document.getElementById('ai-knowledge-select-visible')
+  const clearSelectionButton = document.getElementById('ai-knowledge-clear-selection')
+  const answerCheckboxes = Array.from(document.querySelectorAll('[data-answer-checkbox]'))
 
   function showBanner(kind, message) {
     if (!banner) return
@@ -456,6 +506,76 @@ function formatDate(value: string | null): string {
     return data
   }
 
+  function selectedCheckboxes() {
+    return answerCheckboxes.filter((element) => element instanceof HTMLInputElement && element.checked)
+  }
+
+  function selectedIds() {
+    return selectedCheckboxes()
+      .map((element) => element instanceof HTMLInputElement ? element.value : '')
+      .filter(Boolean)
+  }
+
+  function setBulkButtonsDisabled(disabled) {
+    for (const button of [bulkPublishButton, bulkDraftButton, bulkArchiveButton, bulkDeleteButton]) {
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = disabled
+      }
+    }
+  }
+
+  function updateSelectionUI() {
+    const count = selectedIds().length
+    if (bulkSelectedCount) {
+      bulkSelectedCount.textContent = `${count} selected`
+    }
+    setBulkButtonsDisabled(count === 0)
+  }
+
+  async function runBulkAction(action, options = {}) {
+    const ids = selectedIds()
+    if (ids.length === 0) return
+
+    if (options.confirmMessage && !window.confirm(options.confirmMessage)) {
+      return
+    }
+
+    setBulkButtonsDisabled(true)
+    if (selectVisibleButton instanceof HTMLButtonElement) selectVisibleButton.disabled = true
+    if (clearSelectionButton instanceof HTMLButtonElement) clearSelectionButton.disabled = true
+
+    try {
+      const response = await fetch('/api/admin/ai-knowledge/answers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ids }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.ok) {
+        showBanner('error', data.message || 'Bulk action failed. Please try again.')
+        updateSelectionUI()
+        return
+      }
+
+      if (action === 'bulk_delete_drafts') {
+        const deletedCount = Number(data.result?.deletedCount ?? 0)
+        const skippedCount = Number(data.result?.skippedCount ?? 0)
+        showBanner('success', `Deleted ${deletedCount} draft answers. Skipped ${skippedCount}.`)
+      } else {
+        const affectedCount = Number(data.result?.affectedCount ?? 0)
+        showBanner('success', `Updated ${affectedCount} answers.`)
+      }
+
+      window.setTimeout(() => window.location.reload(), 500)
+    } catch {
+      showBanner('error', 'Bulk action failed. Please try again.')
+      updateSelectionUI()
+    } finally {
+      if (selectVisibleButton instanceof HTMLButtonElement) selectVisibleButton.disabled = false
+      if (clearSelectionButton instanceof HTMLButtonElement) clearSelectionButton.disabled = false
+    }
+  }
+
   async function handleApiFormSubmit(event) {
     event.preventDefault()
     const form = event.currentTarget
@@ -493,6 +613,55 @@ function formatDate(value: string | null): string {
   document.querySelectorAll('.js-api-form').forEach((form) => {
     form.addEventListener('submit', handleApiFormSubmit)
   })
+
+  for (const checkbox of answerCheckboxes) {
+    checkbox.addEventListener('click', (event) => {
+      event.stopPropagation()
+    })
+    checkbox.addEventListener('change', () => {
+      updateSelectionUI()
+    })
+  }
+
+  selectVisibleButton?.addEventListener('click', () => {
+    for (const checkbox of answerCheckboxes) {
+      if (checkbox instanceof HTMLInputElement) {
+        checkbox.checked = true
+      }
+    }
+    updateSelectionUI()
+  })
+
+  clearSelectionButton?.addEventListener('click', () => {
+    for (const checkbox of answerCheckboxes) {
+      if (checkbox instanceof HTMLInputElement) {
+        checkbox.checked = false
+      }
+    }
+    updateSelectionUI()
+  })
+
+  bulkPublishButton?.addEventListener('click', () => {
+    runBulkAction('bulk_publish')
+  })
+
+  bulkDraftButton?.addEventListener('click', () => {
+    runBulkAction('bulk_draft')
+  })
+
+  bulkArchiveButton?.addEventListener('click', () => {
+    runBulkAction('bulk_archive', {
+      confirmMessage: 'Archive the selected answers?',
+    })
+  })
+
+  bulkDeleteButton?.addEventListener('click', () => {
+    runBulkAction('bulk_delete_drafts', {
+      confirmMessage: 'Delete selected draft answers? Published or archived answers will be skipped.',
+    })
+  })
+
+  updateSelectionUI()
 
   importForm?.addEventListener('submit', async (event) => {
     event.preventDefault()
