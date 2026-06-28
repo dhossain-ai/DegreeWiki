@@ -1,5 +1,5 @@
 import { createServiceClient } from '../../supabase/service'
-import type { AIMessageContextSnapshot, AIRuntimeEnv } from '../types'
+import type { AIMessageContextSnapshot, AIRuntimeEnv, SiteChatAnswerSource } from '../types'
 
 export const SITE_CHAT_CONVERSATION_TITLE = 'DegreeWiki site chat'
 const STATIC_PROMPT_TEMPLATE_VERSION = 'site-static-v1'
@@ -123,6 +123,7 @@ export interface PersistSiteStaticTurnParams {
   assistantText: string
   safetyPolicyVersion: string
   promptTemplateVersion?: string
+  answerSource?: SiteChatAnswerSource
   responseSource?: 'static' | 'preset'
   staticCategory?: string | null
   presetAnswerId?: string | null
@@ -147,6 +148,7 @@ export async function persistSiteStaticTurn(
         safetyPolicyVersion: params.safetyPolicyVersion,
         currentPath: params.currentPath,
         pageType: params.pageType,
+        answerSource: params.answerSource,
         responseSource: params.responseSource ?? 'static',
         staticCategory: params.staticCategory ?? null,
         presetAnswerId: params.presetAnswerId ?? null,

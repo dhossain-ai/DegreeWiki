@@ -305,12 +305,19 @@ export interface ContextUsedSnapshot {
   missingTuitionCount: number
 }
 
+export type SiteChatAnswerSource =
+  | 'knowledge_base'
+  | 'assistant'
+  | 'safety_notice'
+  | 'system_notice'
+
 export interface SiteChatContextUsedSnapshot {
   chatMode: 'site'
   promptTemplateVersion: string
   safetyPolicyVersion: string
   currentPath: string
   pageType: string
+  answerSource?: SiteChatAnswerSource
   responseSource?: 'static' | 'preset'
   staticCategory?: string | null
   presetAnswerId?: string | null

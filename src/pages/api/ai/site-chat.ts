@@ -12,17 +12,30 @@ import {
   persistSiteStaticTurn,
 } from '../../../lib/ai/site-chat/persist'
 import {
+  getSiteStaticAnswerSource,
   routeSiteChatMessage,
   SITE_LOGIN_REQUIRED_RESPONSE,
   SITE_STATIC_RESPONSES,
 } from '../../../lib/ai/site-chat/router'
 import { findStaticSiteAnswer } from '../../../lib/ai/site-chat/static-answers'
-import type { SiteChatContextUsedSnapshot } from '../../../lib/ai/types'
+import type { SiteChatAnswerSource, SiteChatContextUsedSnapshot } from '../../../lib/ai/types'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function systemNotice(error: string, answer?: string): Response {
+  return jsonResponse(200, {
+    ok: true,
+    authenticated: false,
+    used_ai: false,
+    requires_login: true,
+    error,
+    answer,
+    answer_source: 'system_notice' satisfies SiteChatAnswerSource,
   })
 }
 
@@ -69,19 +82,31 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   try {
     body = await request.json()
   } catch {
-    return jsonResponse(400, { ok: false, error: 'invalid_body' })
+    return jsonResponse(400, {
+      ok: false,
+      error: 'invalid_body',
+      answer_source: 'system_notice' satisfies SiteChatAnswerSource,
+    })
   }
 
   const rawMessage = (body as Record<string, unknown>)['message']
   const currentPath = normalizeCurrentPath((body as Record<string, unknown>)['current_path'])
 
   if (typeof rawMessage !== 'string') {
-    return jsonResponse(400, { ok: false, error: 'invalid_message' })
+    return jsonResponse(400, {
+      ok: false,
+      error: 'invalid_message',
+      answer_source: 'system_notice' satisfies SiteChatAnswerSource,
+    })
   }
 
   const message = rawMessage.trim()
   if (message.length === 0 || message.length > 1000) {
-    return jsonResponse(400, { ok: false, error: 'invalid_message' })
+    return jsonResponse(400, {
+      ok: false,
+      error: 'invalid_message',
+      answer_source: 'system_notice' satisfies SiteChatAnswerSource,
+    })
   }
 
   const pageType = getSiteChatPageType(currentPath)
@@ -92,6 +117,7 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
 
   if (decision.route === 'static') {
     const answer = SITE_STATIC_RESPONSES[decision.category]
+    const answerSource = getSiteStaticAnswerSource(decision.category)
 
     if (user) {
       const conversationId = await getOrCreateSiteConversation(user.id, aiEnv)
@@ -104,6 +130,7 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
             userMessage: message,
             assistantText: answer,
             safetyPolicyVersion: GUARDRAILS_VERSION,
+            answerSource,
             responseSource: 'static',
             staticCategory: decision.category,
           },
@@ -120,6 +147,7 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
       authenticated: !!user,
       used_ai: false,
       answer,
+      answer_source: answerSource,
     })
   }
 
@@ -129,6 +157,8 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   })
 
   if (presetAnswer) {
+    const answerSource: SiteChatAnswerSource = 'knowledge_base'
+
     if (user) {
       const conversationId = await getOrCreateSiteConversation(user.id, aiEnv)
       if (conversationId) {
@@ -141,6 +171,7 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
             assistantText: presetAnswer.answer,
             safetyPolicyVersion: GUARDRAILS_VERSION,
             promptTemplateVersion: 'site-preset-v1',
+            answerSource,
             responseSource: 'preset',
             presetAnswerId: presetAnswer.id,
             presetCategory: presetAnswer.category,
@@ -158,17 +189,12 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
       authenticated: !!user,
       used_ai: false,
       answer: presetAnswer.answer,
+      answer_source: answerSource,
     })
   }
 
   if (!user) {
-    return jsonResponse(200, {
-      ok: true,
-      authenticated: false,
-      used_ai: false,
-      requires_login: true,
-      answer: SITE_LOGIN_REQUIRED_RESPONSE,
-    })
+    return systemNotice('login_required', SITE_LOGIN_REQUIRED_RESPONSE)
   }
 
   const rateCheck = await checkAIRateLimit(user.id, 'chat', aiEnv)
@@ -178,13 +204,18 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
       {
         ok: false,
         error: rateCheck.reason === 'limit_exceeded' ? 'rate_limit_exceeded' : 'ai_unavailable',
+        answer_source: 'system_notice' satisfies SiteChatAnswerSource,
       },
     )
   }
 
   const conversationId = await getOrCreateSiteConversation(user.id, aiEnv)
   if (!conversationId) {
-    return jsonResponse(500, { ok: false, error: 'internal_error' })
+    return jsonResponse(500, {
+      ok: false,
+      error: 'internal_error',
+      answer_source: 'system_notice' satisfies SiteChatAnswerSource,
+    })
   }
 
   const aiResponse = await callAI(
@@ -201,13 +232,22 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   )
 
   if (aiResponse.guardrailTripped) {
-    return jsonResponse(400, { ok: false, error: 'message_rejected', answer: aiResponse.text })
+    return jsonResponse(400, {
+      ok: false,
+      error: 'message_rejected',
+      answer: aiResponse.text,
+      answer_source: 'safety_notice' satisfies SiteChatAnswerSource,
+    })
   }
 
   if (aiResponse.fallbackUsed) {
     const mapped = mapSiteChatFallbackError(aiResponse)
     logSiteChatFallback(user.id, currentPath, pageType, mapped.failure)
-    return jsonResponse(mapped.status, { ok: false, error: mapped.error })
+    return jsonResponse(mapped.status, {
+      ok: false,
+      error: mapped.error,
+      answer_source: 'system_notice' satisfies SiteChatAnswerSource,
+    })
   }
 
   const contextUsed: SiteChatContextUsedSnapshot = {
@@ -216,6 +256,7 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
     safetyPolicyVersion: GUARDRAILS_VERSION,
     currentPath,
     pageType,
+    answerSource: 'assistant',
   }
 
   const persisted = await persistSiteChatTurn(
@@ -240,5 +281,6 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
     authenticated: true,
     used_ai: true,
     answer: aiResponse.text,
+    answer_source: 'assistant' satisfies SiteChatAnswerSource,
   })
 }

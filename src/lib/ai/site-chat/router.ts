@@ -1,6 +1,8 @@
 // SERVER-ONLY. Deterministic router for the public site chatbot shell.
 // Static routes always win before any authenticated AI path is considered.
 
+import type { SiteChatAnswerSource } from '../types'
+
 export type SiteStaticCategory =
   | 'greeting'
   | 'help'
@@ -39,6 +41,14 @@ export const SITE_STATIC_RESPONSES: Record<SiteStaticCategory, string> = {
 
 export const SITE_LOGIN_REQUIRED_RESPONSE =
   'Sign in to use personalized DegreeWiki AI chat. You can also use program search, Fit Finder, scholarships, and guides without signing in.'
+
+export function getSiteStaticAnswerSource(category: SiteStaticCategory): SiteChatAnswerSource {
+  if (category === 'guarantee' || category === 'out_of_scope') {
+    return 'safety_notice'
+  }
+
+  return 'knowledge_base'
+}
 
 const GREETING_RE = /^(hi|hello|hey)[!.,?]?\s*$/i
 const HELP_RE =

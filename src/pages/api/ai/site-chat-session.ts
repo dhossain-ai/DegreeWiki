@@ -1,6 +1,9 @@
 import type { APIRoute } from 'astro'
+import { CHAT_SITE_PROMPT_VERSION } from '../../../lib/ai/prompts/chat-answer'
+import { getSiteStaticAnswerSource, type SiteStaticCategory } from '../../../lib/ai/site-chat/router'
 import { createClient } from '../../../lib/supabase/server'
 import { SITE_CHAT_CONVERSATION_TITLE } from '../../../lib/ai/site-chat/persist'
+import type { SiteChatAnswerSource, SiteChatContextUsedSnapshot } from '../../../lib/ai/types'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -10,12 +13,56 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 const WELCOME_OPTIONS = [
+  'How can you help?',
   'Find programs',
   'Try Fit Finder',
   'Scholarships',
   'Study guides',
-  'Sign in for AI chat',
 ]
+
+function isAnswerSource(value: unknown): value is SiteChatAnswerSource {
+  return value === 'knowledge_base'
+    || value === 'assistant'
+    || value === 'safety_notice'
+    || value === 'system_notice'
+}
+
+function readContextUsed(value: unknown): Partial<SiteChatContextUsedSnapshot> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Partial<SiteChatContextUsedSnapshot>
+}
+
+function inferAssistantSource(
+  contextUsedValue: unknown,
+  aiModelUsed: unknown,
+): SiteChatAnswerSource {
+  const contextUsed = readContextUsed(contextUsedValue)
+  if (contextUsed?.answerSource && isAnswerSource(contextUsed.answerSource)) {
+    return contextUsed.answerSource
+  }
+
+  if (contextUsed?.responseSource === 'preset') {
+    return 'knowledge_base'
+  }
+
+  if (contextUsed?.responseSource === 'static') {
+    if (typeof contextUsed.staticCategory === 'string') {
+      return getSiteStaticAnswerSource(contextUsed.staticCategory as SiteStaticCategory)
+    }
+
+    return 'knowledge_base'
+  }
+
+  if (contextUsed?.promptTemplateVersion === CHAT_SITE_PROMPT_VERSION) {
+    return 'assistant'
+  }
+
+  if (typeof aiModelUsed === 'string' && aiModelUsed.length > 0 && aiModelUsed !== 'static') {
+    return 'assistant'
+  }
+
+  return 'knowledge_base'
+}
 
 export const GET: APIRoute = async ({ cookies, request }) => {
   const supabase = createClient(cookies, request)
@@ -46,12 +93,12 @@ export const GET: APIRoute = async ({ cookies, request }) => {
   }
 
   const conversationId = conversations?.[0]?.id ?? null
-  let messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
+  let messages: Array<{ role: 'user' | 'assistant'; content: string; answer_source?: SiteChatAnswerSource }> = []
 
   if (typeof conversationId === 'string' && conversationId.length > 0) {
     const { data: messageRows, error: messageError } = await supabase
       .from('ai_messages')
-      .select('role, content')
+      .select('role, content, context_used, ai_model_used')
       .eq('ai_conversation_id', conversationId)
       .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: true })
@@ -62,10 +109,32 @@ export const GET: APIRoute = async ({ cookies, request }) => {
       return jsonResponse(500, { ok: false, error: 'internal_error' })
     }
 
-    messages = (messageRows ?? []).filter(
-      (row): row is { role: 'user' | 'assistant'; content: string } =>
-        (row.role === 'user' || row.role === 'assistant') && typeof row.content === 'string'
-    )
+    messages = (messageRows ?? [])
+      .filter(
+        (
+          row,
+        ): row is {
+          role: 'user' | 'assistant'
+          content: string
+          context_used?: unknown
+          ai_model_used?: unknown
+        } =>
+          (row.role === 'user' || row.role === 'assistant') && typeof row.content === 'string'
+      )
+      .map((row) => {
+        if (row.role === 'user') {
+          return {
+            role: row.role,
+            content: row.content,
+          }
+        }
+
+        return {
+          role: row.role,
+          content: row.content,
+          answer_source: inferAssistantSource(row.context_used, row.ai_model_used),
+        }
+      })
   }
 
   return jsonResponse(200, {
