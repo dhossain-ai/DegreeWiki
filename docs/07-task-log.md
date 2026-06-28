@@ -5,6 +5,25 @@
 
 ## Recent Task Log
 
+### Phase 70B - Article Publish + SEO Polish
+
+- Polished `/admin/articles` to surface article readiness more quickly with readiness badges,
+  clearer missing-summary/body/image/SEO indicators, indexing badges, and direct links to edit or
+  open the public guide when an article is published.
+- Tightened the shared `src/components/admin/ArticleEditorForm.astro` workflow so the public guide
+  path messaging is clearer, the open-guide action only appears for published articles with a slug,
+  and the placeholder guidance explains whether the next step is adding a slug or publishing.
+- Clarified editor fallback copy for OG title and description while preserving the exact field
+  names, POST payloads, save redirects, and existing publish behavior.
+- Hardened `src/pages/guides/[slug].astro` and `src/lib/public/media.ts` so whitespace-only SEO
+  fields fall back sensibly, canonical URLs prefer the stored article slug when available, and OG
+  image URLs are skipped instead of rendered malformed when the public Cloudinary cloud name is
+  absent.
+- Kept the public article body renderer and Markdown contract unchanged: no `innerHTML`, no
+  `set:html`, no live Markdown preview, no migration, no new dependency, and no schema change.
+- Ran `npm run build` plus the required safety greps for unsafe HTML, service-role usage, and
+  secret-key references in `src`.
+
 ### Phase 70A - Article Authoring UX Improvement
 
 - Extracted the duplicated admin article create/edit UI into a shared

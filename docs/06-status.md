@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 70A is complete. DegreeWiki now has a shared admin article editor with a clearer authoring
-layout, sticky editorial sidebar, readiness checklist, safe counters, and SEO/media guidance for
-article create/edit workflows.
+Phase 70B is complete. DegreeWiki now has small article publish/SEO polish on top of the Phase 70A
+shared editor: clearer admin list readiness signals, a tighter publish/open-public workflow in the
+editor, and hardened public guide SEO/media fallbacks.
 
 Current branch: `main`
 
@@ -32,12 +32,19 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
+- Phase 70B checks run:
+  `npm run build`,
+  `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
+  and
+  `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
 
 ## Known Open Notes
 
-- Phase 70A was UI-only for admin article authoring:
-  no migration, no dependency changes, no public guide rendering changes, and no save/publish rule
+- Phase 70B kept the article workflow small and safe:
+  no migration, no dependency changes, no schema changes, and no create/edit/save/publish contract
   changes.
+- Public guide rendering contracts stayed the same in Phase 70B aside from tiny fallback bug fixes
+  for trimmed SEO/meta values and safer OG image URL generation.
 - Article verification remains status-only in Phase 70A.
   The admin article editor does not stamp or update `last_verified_at`.
 - DB-backed provider routing is ready, but it still depends on provider/account/model/policy rows
