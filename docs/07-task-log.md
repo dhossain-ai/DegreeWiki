@@ -5,6 +5,22 @@
 
 ## Recent Task Log
 
+### Phase 69E - Static Knowledge Base / Preset Q&A Admin
+
+- Added `025_ai_static_answers.sql` with reviewed preset-answer storage, indexes, updated-at
+  trigger, published-only anon/authenticated read policies, and admin CRUD policies under
+  `manage_ai_settings`.
+- Added a site-chat preset matcher that normalizes questions, checks exact question match,
+  alias match, and keyword phrase match in that order, with simple priority tie-breaks.
+- Kept hardcoded safety/refusal routes first, then added DB-backed preset answers before the
+  anonymous sign-in prompt or logged-in AI fallback in `/api/ai/site-chat`.
+- Added `/admin/ai-knowledge` with filters, search, create/edit, publish/archive actions, and
+  a bulk JSON import panel for reviewed preset answers.
+- Added admin API endpoints for knowledge-base list/create/update/publish/archive/delete plus
+  JSON import validation with a 100-row max and draft-only imports.
+- Kept answers plain text only with no Markdown rendering, no HTML rendering, no embeddings,
+  no RAG, and no live AI generation at request time for preset answers.
+
 ### Phase 69D - Public Chatbot Shell + Logged-In AI Chat Foundation
 
 - Added a floating public chatbot widget rendered through `PublicLayout` on a tight allowlist of
@@ -117,8 +133,8 @@
 
 ### Open Note
 
-- Next major AI Gateway work can build on the polished admin UX without changing the existing
-  public AI endpoints or provider-key privacy boundaries.
+- Next major AI work can build on the reviewed preset-answer layer without changing the existing
+  provider-key privacy boundaries or adding RAG/internet dependencies.
 
 ## Archive Index
 

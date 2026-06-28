@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 69D is complete. DegreeWiki now has a public chatbot shell on allowlisted public routes,
-with static-only anonymous guidance and a separate logged-in global site chat that reuses
-`chat_answer` through the existing AI Gateway foundation without touching saved-result chat.
+Phase 69E is complete. DegreeWiki now has a reviewed Static Knowledge Base / Preset Q&A admin
+surface for site chat, layered after hardcoded safety routes and before anonymous fallback or
+logged-in AI.
 
 Current branch: `main`
 
@@ -45,6 +45,8 @@ Very short import pipeline summary:
 - The public chatbot shell is limited to `/`, `/programs*`, `/universities*`, `/scholarships*`,
   and `/guides*`. Anonymous visitors get static guidance only; logged-in site chat stays separate
   from saved-result chat and does not attach Finder-result or student-profile context.
+- Published `ai_static_answers` rows can now answer common site-chat questions without calling AI.
+  Answers are plain text only and are managed at `/admin/ai-knowledge` under `manage_ai_settings`.
 - Cloudinary still needs the SHA-256 signature setup, or `CLOUDINARY_SIGNATURE_ALGORITHM=sha1` as a fallback.
 - Default site OG image is still not configured.
 - CSV import and persistent uploaded-file import storage remain deferred.

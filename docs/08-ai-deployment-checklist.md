@@ -448,3 +448,13 @@ After a logged-in site chat turn, verify:
 - `ai_usage_logs` gains a `session_type = 'chat'` row only for AI-backed logged-in turns
 
 Static anonymous turns should not create chat rows or usage-log rows.
+
+### 14B. Preset Knowledge Base Verification
+
+- [ ] `ai_static_answers` table exists with RLS enabled
+- [ ] Anonymous and authenticated published-row reads work
+- [ ] Draft and archived rows are not returned to anonymous/public site-chat lookup
+- [ ] `/admin/ai-knowledge` loads for a user with `manage_ai_settings`
+- [ ] A published preset answer is returned before anonymous fallback or logged-in AI
+- [ ] Imported JSON rows always land as `draft`
+- [ ] Preset answers render as plain text only with no Markdown or HTML rendering
