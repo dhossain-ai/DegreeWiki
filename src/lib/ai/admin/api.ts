@@ -2,14 +2,14 @@ import { createClient } from '../../supabase/server'
 import { getAIEnv } from '../env'
 import type { AIRuntimeEnv } from '../types'
 
-interface AdminAIGatewayContext {
+interface AdminAIContext {
   supabase: ReturnType<typeof createClient>
   userId: string
   env: AIRuntimeEnv
 }
 
-type AdminAIGatewayAuthResult =
-  | { ok: true; context: AdminAIGatewayContext }
+type AdminAIAuthResult =
+  | { ok: true; context: AdminAIContext }
   | { ok: false; response: Response }
 
 export function jsonResponse(status: number, body: unknown): Response {
@@ -19,11 +19,11 @@ export function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
-export async function requireAIGatewayAdmin(
+export async function requireAIAdminAccess(
   cookies: Parameters<typeof createClient>[0],
   request: Request,
   locals: Record<string, unknown>,
-): Promise<AdminAIGatewayAuthResult> {
+): Promise<AdminAIAuthResult> {
   const supabase = createClient(cookies, request)
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   if (!user || userError) {
@@ -67,3 +67,5 @@ export async function parseJsonBody(request: Request): Promise<Record<string, un
 
   return body as Record<string, unknown>
 }
+
+export const requireAIGatewayAdmin = requireAIAdminAccess
