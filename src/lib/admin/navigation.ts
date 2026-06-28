@@ -18,6 +18,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: '/admin/articles', label: 'Articles', requiredPermissions: ['edit_content', 'publish_content', 'manage_articles'] },
   { href: '/admin/media', label: 'Media', requiredPermissions: ['manage_media'] },
   { href: '/admin/ai-gateway', label: 'AI Gateway', requiredPermissions: ['manage_ai_settings'] },
+  { href: '/admin/ai-knowledge', label: 'AI Knowledge', requiredPermissions: ['manage_ai_settings'] },
   { href: '/admin/data-quality', label: 'Data Quality', requiredPermissions: ['view_data_quality', 'manage_data_sources'] },
   { href: '/admin/imports', label: 'Imports', requiredPermissions: ['manage_imports', 'approve_import', 'reject_import'] },
   { href: '/admin/users', label: 'Users', requiredPermissions: ['manage_users', 'manage_roles'] },
