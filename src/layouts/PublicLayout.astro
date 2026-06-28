@@ -2,6 +2,7 @@
 import BaseLayout from './BaseLayout.astro'
 import PublicNav from '../components/public/PublicNav.astro'
 import PublicFooter from '../components/public/PublicFooter.astro'
+import PublicChatWidget from '../components/ai/PublicChatWidget.astro'
 
 interface Props {
   title?: string
@@ -21,6 +22,14 @@ const {
   ogTitle, ogDescription, ogType, ogUrl, ogImage,
   articlePublishedTime, articleModifiedTime,
 } = Astro.props
+
+const pathname = Astro.url.pathname
+const showPublicChat =
+  pathname === '/' ||
+  pathname.startsWith('/programs') ||
+  pathname.startsWith('/universities') ||
+  pathname.startsWith('/scholarships') ||
+  pathname.startsWith('/guides')
 ---
 <BaseLayout title={title} description={description} noindex={noindex} canonical={canonical} ogTitle={ogTitle} ogDescription={ogDescription} ogType={ogType} ogUrl={ogUrl} ogImage={ogImage} articlePublishedTime={articlePublishedTime} articleModifiedTime={articleModifiedTime}>
   <div class="min-h-screen flex flex-col bg-canvas text-ink">
@@ -29,5 +38,6 @@ const {
       <slot />
     </main>
     <PublicFooter />
+    {showPublicChat && <PublicChatWidget currentPath={pathname} />}
   </div>
 </BaseLayout>

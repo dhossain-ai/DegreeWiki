@@ -1,0 +1,398 @@
+---
+interface Props {
+  currentPath: string
+}
+
+const { currentPath } = Astro.props
+---
+
+<div class="fixed bottom-4 right-4 z-50" data-site-chat-root>
+  <button
+    id="site-chat-launcher"
+    type="button"
+    aria-expanded="false"
+    aria-controls="site-chat-panel"
+    class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-4 py-3 text-sm font-medium text-blue-700 shadow-lg transition hover:border-blue-300 hover:bg-blue-50"
+  >
+    <span class="inline-flex h-2.5 w-2.5 rounded-full bg-blue-600"></span>
+    DegreeWiki Chat
+  </button>
+
+  <section
+    id="site-chat-panel"
+    class="mt-3 hidden w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+    aria-label="DegreeWiki chatbot"
+  >
+    <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-900">DegreeWiki Chat</h2>
+        <p class="text-xs text-gray-500">Study-planning help inside DegreeWiki</p>
+      </div>
+      <button
+        id="site-chat-close"
+        type="button"
+        class="rounded-md px-2 py-1 text-sm text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+      >
+        Close
+      </button>
+    </div>
+
+    <div class="border-b border-gray-100 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
+      AI can help with study planning, but it cannot guarantee admission, scholarships, visa outcomes, or official accuracy.
+    </div>
+
+    <div class="max-h-[26rem] overflow-y-auto px-4 py-4">
+      <div id="site-chat-welcome" class="space-y-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">How can I help?</p>
+          <p class="mt-1 text-sm text-gray-600">
+            Ask about using DegreeWiki, finding programs, Fit Finder, scholarships, or study guides.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Find programs</button>
+          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Try Fit Finder</button>
+          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Scholarships</button>
+          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Study guides</button>
+          <button type="button" data-anon-only="true" class="site-chat-chip rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 transition hover:bg-blue-100">Sign in for AI chat</button>
+        </div>
+      </div>
+
+      <div id="site-chat-login-cta" class="mt-4 hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p class="font-medium">Sign in for logged-in AI chat</p>
+        <p class="mt-1 text-xs leading-relaxed text-amber-800">
+          Anonymous visitors get static guidance only. Sign in to ask controlled DegreeWiki-scoped AI questions.
+        </p>
+        <a
+          id="site-chat-login-link"
+          href={`/login?redirect=${encodeURIComponent(currentPath)}`}
+          class="mt-3 inline-flex rounded-md bg-amber-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-950"
+        >
+          Sign in
+        </a>
+      </div>
+
+      <div
+        id="site-chat-transcript"
+        class="mt-4 hidden space-y-3"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+      ></div>
+
+      <div id="site-chat-status" class="mt-4 hidden text-sm"></div>
+    </div>
+
+    <div class="border-t border-gray-100 px-4 py-4">
+      <label for="site-chat-input" class="block text-sm font-medium text-gray-700">
+        Your question
+      </label>
+      <textarea
+        id="site-chat-input"
+        rows="3"
+        maxlength="1000"
+        class="mt-2 w-full resize-none rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder="Ask a DegreeWiki study-planning question..."
+      ></textarea>
+
+      <div class="mt-3 flex items-center justify-between gap-3">
+        <button
+          id="site-chat-clear"
+          type="button"
+          class="hidden rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Clear chat
+        </button>
+
+        <div class="ml-auto flex items-center gap-2">
+          <button
+            id="site-chat-send"
+            type="button"
+            class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script define:vars={{ currentPath }}>
+  const launcherEl = document.getElementById('site-chat-launcher')
+  const panelEl = document.getElementById('site-chat-panel')
+  const closeEl = document.getElementById('site-chat-close')
+  const welcomeEl = document.getElementById('site-chat-welcome')
+  const loginCtaEl = document.getElementById('site-chat-login-cta')
+  const loginLinkEl = document.getElementById('site-chat-login-link')
+  const transcriptEl = document.getElementById('site-chat-transcript')
+  const statusEl = document.getElementById('site-chat-status')
+  const inputEl = document.getElementById('site-chat-input')
+  const sendEl = document.getElementById('site-chat-send')
+  const clearEl = document.getElementById('site-chat-clear')
+  const chipEls = Array.from(document.querySelectorAll('.site-chat-chip'))
+  const anonChipEls = Array.from(document.querySelectorAll('[data-anon-only="true"]'))
+
+  let isOpen = false
+  let busy = false
+  let sessionLoaded = false
+  let authenticated = false
+
+  function setStatus(message, tone) {
+    statusEl.textContent = message
+    statusEl.className = 'mt-4 text-sm'
+    if (tone === 'error') statusEl.classList.add('text-red-600')
+    if (tone === 'info') statusEl.classList.add('text-gray-600')
+    if (tone === 'success') statusEl.classList.add('text-green-700')
+    statusEl.style.display = ''
+  }
+
+  function clearStatus() {
+    statusEl.textContent = ''
+    statusEl.style.display = 'none'
+  }
+
+  function appendTurn(role, text) {
+    const wrapper = document.createElement('div')
+    wrapper.className = role === 'user'
+      ? 'rounded-xl bg-gray-100 px-3 py-2 text-sm'
+      : 'rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm'
+
+    const label = document.createElement('span')
+    label.className = 'mb-1 block text-xs font-medium ' + (role === 'user' ? 'text-gray-500' : 'text-blue-700')
+    label.textContent = role === 'user' ? 'You' : 'Assistant'
+
+    const body = document.createElement('p')
+    body.className = 'text-gray-700'
+    body.textContent = text
+
+    wrapper.appendChild(label)
+    wrapper.appendChild(body)
+    transcriptEl.appendChild(wrapper)
+    transcriptEl.style.display = ''
+    welcomeEl.style.display = 'none'
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    updateClearVisibility()
+  }
+
+  function replaceTranscript(messages) {
+    transcriptEl.replaceChildren()
+    for (const message of messages) {
+      appendTurn(message.role, message.content)
+    }
+    if (messages.length === 0) {
+      transcriptEl.style.display = 'none'
+      welcomeEl.style.display = ''
+    }
+  }
+
+  function updateAuthUI() {
+    loginLinkEl.href = '/login?redirect=' + encodeURIComponent(currentPath)
+    loginCtaEl.style.display = authenticated ? 'none' : ''
+    clearEl.style.display = authenticated ? '' : 'none'
+    for (const chip of anonChipEls) {
+      chip.style.display = authenticated ? 'none' : ''
+    }
+    updateClearVisibility()
+  }
+
+  function updateClearVisibility() {
+    if (!authenticated) return
+    clearEl.disabled = busy || transcriptEl.childElementCount === 0
+  }
+
+  function setBusy(nextBusy, sendLabel, clearLabel) {
+    busy = nextBusy
+    sendEl.disabled = nextBusy
+    clearEl.disabled = nextBusy || transcriptEl.childElementCount === 0
+    inputEl.disabled = nextBusy
+    for (const chip of chipEls) chip.disabled = nextBusy
+    sendEl.textContent = sendLabel
+    if (authenticated) clearEl.textContent = clearLabel
+  }
+
+  async function ensureSession() {
+    if (sessionLoaded) return true
+
+    try {
+      const res = await fetch('/api/ai/site-chat-session', { method: 'GET' })
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        setStatus('Could not start chat right now. Please try again.', 'error')
+        return false
+      }
+
+      if (!data.ok) {
+        setStatus('Could not start chat right now. Please try again.', 'error')
+        return false
+      }
+
+      authenticated = data.authenticated === true
+      sessionLoaded = true
+      updateAuthUI()
+
+      if (authenticated && Array.isArray(data.messages)) {
+        transcriptEl.replaceChildren()
+        if (data.messages.length > 0) {
+          replaceTranscript(data.messages)
+        }
+      }
+
+      return true
+    } catch {
+      setStatus('Could not start chat right now. Please try again.', 'error')
+      return false
+    }
+  }
+
+  function openPanel() {
+    if (isOpen) return
+    panelEl.style.display = ''
+    panelEl.classList.remove('hidden')
+    launcherEl.setAttribute('aria-expanded', 'true')
+    isOpen = true
+    clearStatus()
+    inputEl.focus()
+    ensureSession()
+  }
+
+  function closePanel() {
+    if (!isOpen) return
+    panelEl.style.display = 'none'
+    panelEl.classList.add('hidden')
+    launcherEl.setAttribute('aria-expanded', 'false')
+    isOpen = false
+    launcherEl.focus()
+  }
+
+  function mapError(data) {
+    const err = data && data.error ? data.error : ''
+    if (err === 'invalid_message') return 'Please enter a question between 1 and 1000 characters.'
+    if (err === 'message_rejected') return data && data.answer ? data.answer : 'That message cannot be processed here.'
+    if (err === 'rate_limit_exceeded') return "You've reached today's AI usage limit. Please try again tomorrow."
+    if (err === 'ai_unavailable') return 'AI is temporarily unavailable. Please try again in a few minutes.'
+    if (err === 'unauthenticated') return 'Please sign in again to continue.'
+    return 'Something went wrong. Please try again.'
+  }
+
+  async function submitMessage(messageOverride) {
+    const ready = await ensureSession()
+    if (!ready || busy) return
+
+    const message = (messageOverride ?? inputEl.value).trim()
+    if (!message) return
+    if (message.length > 1000) {
+      setStatus('Please enter a question between 1 and 1000 characters.', 'error')
+      return
+    }
+
+    clearStatus()
+    setBusy(true, 'Sending...', 'Clearing...')
+    appendTurn('user', message)
+    inputEl.value = ''
+
+    try {
+      const res = await fetch('/api/ai/site-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          current_path: currentPath,
+        }),
+      })
+
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        setStatus('Something went wrong. Please try again.', 'error')
+        return
+      }
+
+      if (data.ok) {
+        if (typeof data.answer === 'string') appendTurn('assistant', data.answer)
+        authenticated = data.authenticated === true
+        updateAuthUI()
+      } else {
+        setStatus(mapError(data), 'error')
+      }
+    } catch {
+      setStatus('Something went wrong. Please try again.', 'error')
+    } finally {
+      setBusy(false, 'Send', 'Clear chat')
+      inputEl.focus()
+    }
+  }
+
+  launcherEl.addEventListener('click', () => {
+    if (isOpen) {
+      closePanel()
+    } else {
+      openPanel()
+    }
+  })
+
+  closeEl.addEventListener('click', closePanel)
+
+  sendEl.addEventListener('click', () => {
+    submitMessage()
+  })
+
+  inputEl.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submitMessage()
+    }
+  })
+
+  clearEl.addEventListener('click', async () => {
+    if (busy || !authenticated) return
+
+    clearStatus()
+    setBusy(true, 'Send', 'Clearing...')
+
+    try {
+      const res = await fetch('/api/ai/site-chat-clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        setStatus('Could not clear chat. Please try again.', 'error')
+        return
+      }
+
+      if (!data.ok) {
+        setStatus('Could not clear chat. Please try again.', 'error')
+        return
+      }
+
+      transcriptEl.replaceChildren()
+      transcriptEl.style.display = 'none'
+      welcomeEl.style.display = ''
+      setStatus('Chat cleared.', 'success')
+    } catch {
+      setStatus('Could not clear chat. Please try again.', 'error')
+    } finally {
+      setBusy(false, 'Send', 'Clear chat')
+    }
+  })
+
+  for (const chip of chipEls) {
+    chip.addEventListener('click', () => {
+      submitMessage(chip.textContent ?? '')
+    })
+  }
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && isOpen) {
+      closePanel()
+    }
+  })
+</script>
