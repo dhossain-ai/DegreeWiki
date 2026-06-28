@@ -37,8 +37,9 @@ export interface AIRequest {
   sessionType: AISessionType
   useCase?: AIUseCase
   // When sessionType === 'chat', set to 'saved_result' for context-bound saved-result chat.
-  // Omit for generic/future chat surfaces. Only used when sessionType === 'chat'.
-  chatMode?: 'saved_result'
+  // Use 'site' for the logged-in public chatbot shell. Omit for generic/future chat surfaces.
+  // Only used when sessionType === 'chat'.
+  chatMode?: 'saved_result' | 'site'
   aiFinderResultId?: string
   conversationId?: string
   userMessage: string
@@ -297,6 +298,18 @@ export interface ContextUsedSnapshot {
   warningsIncluded: boolean
   missingTuitionCount: number
 }
+
+export interface SiteChatContextUsedSnapshot {
+  chatMode: 'site'
+  promptTemplateVersion: string
+  safetyPolicyVersion: string
+  currentPath: string
+  pageType: string
+}
+
+export type AIMessageContextSnapshot =
+  | ContextUsedSnapshot
+  | SiteChatContextUsedSnapshot
 
 // Server/worker runtime env vars consumed by the AI module.
 // These are server-only — never use PUBLIC_ prefix for AI secrets.
