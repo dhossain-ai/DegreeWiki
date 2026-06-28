@@ -5,6 +5,23 @@
 
 ## Recent Task Log
 
+### Phase 70A - Article Authoring UX Improvement
+
+- Extracted the duplicated admin article create/edit UI into a shared
+  `src/components/admin/ArticleEditorForm.astro` component so both routes now stay thin and keep
+  the same POST field names, validation, redirects, and save/publish behavior.
+- Added pure `src/lib/admin/articleAuthoring.ts` helpers for article word count, reading time,
+  heading count, summary and SEO length states, public guide path display, readiness checklist, and
+  editorial readiness scoring.
+- Reworked the admin article editor into clearer Basics, Article Content, Media, SEO, and
+  Publishing / Verification sections with a sticky editorial sidebar for actions, status summary,
+  guide path, open-guide link, checklist, metrics, and SEO hints.
+- Kept the article body editor plain text / Markdown only, reused safe DOM text updates for live
+  counters and SERP preview, and added no `innerHTML`, no `set:html`, no migration, no new
+  dependencies, and no public rendering changes.
+- Preserved existing article create/edit/save/publish behavior, including first-publish
+  `published_at` handling and the Phase 70A decision not to stamp `last_verified_at`.
+
 ### Phase 69E - Static Knowledge Base / Preset Q&A Admin
 
 - Added `025_ai_static_answers.sql` with reviewed preset-answer storage, indexes, updated-at

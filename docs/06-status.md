@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 69E is complete. DegreeWiki now has a reviewed Static Knowledge Base / Preset Q&A admin
-surface for site chat, layered after hardcoded safety routes and before anonymous fallback or
-logged-in AI.
+Phase 70A is complete. DegreeWiki now has a shared admin article editor with a clearer authoring
+layout, sticky editorial sidebar, readiness checklist, safe counters, and SEO/media guidance for
+article create/edit workflows.
 
 Current branch: `main`
 
@@ -35,6 +35,11 @@ Very short import pipeline summary:
 
 ## Known Open Notes
 
+- Phase 70A was UI-only for admin article authoring:
+  no migration, no dependency changes, no public guide rendering changes, and no save/publish rule
+  changes.
+- Article verification remains status-only in Phase 70A.
+  The admin article editor does not stamp or update `last_verified_at`.
 - DB-backed provider routing is ready, but it still depends on provider/account/model/policy rows
   before it replaces env fallback in practice.
 - DB-managed provider accounts currently support `openai_compatible` only.
