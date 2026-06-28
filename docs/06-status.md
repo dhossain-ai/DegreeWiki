@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 69C-UX2 is complete. DegreeWiki now has a tabbed admin-only AI Gateway control center for
-managing DB-backed `openai_compatible` provider accounts, models, routing policies, provider
-health, and preset provider/model tests on top of the Phase 69B gateway foundation.
+Phase 69D is complete. DegreeWiki now has a public chatbot shell on allowlisted public routes,
+with static-only anonymous guidance and a separate logged-in global site chat that reuses
+`chat_answer` through the existing AI Gateway foundation without touching saved-result chat.
 
 Current branch: `main`
 
@@ -42,6 +42,9 @@ Very short import pipeline summary:
 - The AI Gateway admin page is now a tabbed control center with Overview, Providers, Models,
   Routing, Testing, and Health tabs. This was a UI-only redesign; backend routing, provider-key
   encryption, permission boundaries, and public AI endpoints were not changed.
+- The public chatbot shell is limited to `/`, `/programs*`, `/universities*`, `/scholarships*`,
+  and `/guides*`. Anonymous visitors get static guidance only; logged-in site chat stays separate
+  from saved-result chat and does not attach Finder-result or student-profile context.
 - Cloudinary still needs the SHA-256 signature setup, or `CLOUDINARY_SIGNATURE_ALGORITHM=sha1` as a fallback.
 - Default site OG image is still not configured.
 - CSV import and persistent uploaded-file import storage remain deferred.

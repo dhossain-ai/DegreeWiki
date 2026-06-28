@@ -674,3 +674,30 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key_here
 Never prefix secrets with `PUBLIC_`. Never commit `.env.local`, `.dev.vars`, or any
 file containing real secret values. See `docs/08-ai-deployment-checklist.md` for the
 full checklist.
+
+## Phase 69D Behaviour — Public Chatbot Shell + Logged-In Site Chat
+
+Phase 69D adds a public chatbot shell through `PublicLayout` on a narrow allowlist of
+public routes only:
+
+- `/`
+- `/programs*`
+- `/universities*`
+- `/scholarships*`
+- `/guides*`
+
+It does not render on admin, auth, Fit Finder, saved-result, or policy/legal pages.
+
+Behaviour rules:
+
+- Anonymous visitors get static routing only. No AI call, no DB persistence, no personalized chat.
+- Logged-in users use a separate global site-chat API path:
+  `site-chat-session`, `site-chat`, and `site-chat-clear`.
+- Logged-in AI turns still use `use_case = 'chat_answer'` and the existing AI Gateway,
+  guardrails, and `ai_usage_logs` quota checks.
+- Global site chat is stored in `ai_conversations` / `ai_messages` with
+  `session_type = 'chat'` and `ai_finder_result_id = null`.
+- Saved-result chat remains a separate surface bound to `ai_finder_result_id`; Phase 69D
+  does not attach the latest Finder result or matched programs to global site chat.
+- Phase 69D does not add RAG, vector search, internet browsing, admin data access, or
+  student-profile context beyond authentication state.

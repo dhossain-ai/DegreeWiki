@@ -1410,3 +1410,74 @@ The existing partial unique index for `ai_finder_result_id` is unchanged.
 - All actual implementation of Scholarship Page AI Advisor.
   Blocked on: `ai_conversations.scholarship_id` migration, new context loader, new API endpoint,
   new prompt template, new UI component, and junction table population.
+
+---
+
+## 19. Phase 69D — Public Chatbot Shell + Logged-In Site Chat
+
+Phase 69D adds a second chat surface alongside the existing saved-result chat.
+
+### 19.1 Surface Split
+
+- Saved-result chat remains bound to `ai_finder_result_id` and appears only on
+  `/fit-finder/results/[id]`.
+- Public site chat is a separate floating widget rendered from `PublicLayout` on a strict
+  allowlist of public routes.
+- The two surfaces do not share result context, route handlers, or conversation anchors.
+
+### 19.2 Anonymous Behaviour
+
+- Anonymous visitors can open the widget and receive static guidance only.
+- Static routing handles greetings, help, program discovery, Fit Finder, scholarships,
+  study guides, login/signup prompts, guarantee requests, and obvious out-of-scope prompts.
+- Anonymous requests never call the AI Gateway.
+- Anonymous requests never persist `ai_conversations`, `ai_messages`, or `ai_usage_logs`.
+
+### 19.3 Logged-In Global Site Chat
+
+- Logged-in users use dedicated endpoints:
+  - `GET /api/ai/site-chat-session`
+  - `POST /api/ai/site-chat`
+  - `POST /api/ai/site-chat-clear`
+- The AI path still uses `use_case = 'chat_answer'`, the shared gateway, existing guardrails,
+  and existing per-user quota checks in `ai_usage_logs`.
+- Static matches still short-circuit before any AI call.
+- If the request is non-static but the user is anonymous, the endpoint returns a static
+  sign-in prompt instead of calling AI.
+
+### 19.4 Context Rules
+
+Allowed context in Phase 69D:
+
+- DegreeWiki scope summary
+- current public route path
+- simple page type
+- logged-in/authenticated state
+
+Not allowed in Phase 69D:
+
+- latest saved Finder result
+- matched programs
+- private saved-result context
+- full student profile summary
+- admin data
+- RAG/vector retrieval
+- internet browsing or external live lookups
+
+### 19.5 Persistence Rules
+
+- Global site chat reuses `ai_conversations` / `ai_messages` without a migration.
+- Rows use `session_type = 'chat'` and `ai_finder_result_id = null`.
+- The implementation reuses the latest null-result site-chat conversation for the user,
+  keyed in practice by the dedicated site-chat title.
+- `site-chat-clear` deletes only that user's null-result site-chat conversation(s), leaving
+  saved-result conversations untouched.
+
+### 19.6 Safety Boundaries
+
+- Saved-result prompt rules remain unchanged and still apply only to matched-program chat.
+- Site-chat prompt rules are broader in topic but stricter in facts: the assistant may help
+  with DegreeWiki study planning and navigation, but must not invent specific programs,
+  tuition, deadlines, scholarships, admission outcomes, or visa outcomes.
+- Site chat must redirect users to DegreeWiki search, Fit Finder, guides, or official sources
+  when exact facts are needed.

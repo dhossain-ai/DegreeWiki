@@ -420,3 +420,31 @@ To disable both AI and persistence:
   persistence is skipped. The result page still shows rule-based matches normally.
 
 No migrations are required to enable or disable AI. No code changes are needed.
+
+---
+
+## 14. Phase 69D Public Chatbot Verification
+
+- [ ] Public chatbot launcher appears on `/`, `/programs*`, `/universities*`,
+      `/scholarships*`, and `/guides*`
+- [ ] Launcher does not appear on `/admin*`, `/login`, `/signup`, `/fit-finder*`,
+      `/privacy`, `/terms`, or `/disclaimer`
+- [ ] Opening the widget does not require an AI call on page load
+- [ ] Anonymous greeting/help/program/scholarship/guide/login questions return static responses only
+- [ ] Anonymous free-form questions return a static sign-in / Fit Finder prompt only
+- [ ] Logged-in in-scope questions route through `use_case = 'chat_answer'`
+- [ ] Logged-in rate-limit exhaustion returns a safe fallback with no raw provider error
+- [ ] Logged-in clear chat removes only the global site-chat conversation
+- [ ] Saved-result chat on `/fit-finder/results/[id]` still behaves as before
+- [ ] Global site chat does not attach the latest Finder result, matched programs, RAG, or internet content
+
+### 14A. Site Chat Persistence Check
+
+After a logged-in site chat turn, verify:
+
+- `ai_conversations.session_type = 'chat'`
+- `ai_conversations.ai_finder_result_id IS NULL`
+- `ai_messages` rows exist for the returned conversation
+- `ai_usage_logs` gains a `session_type = 'chat'` row only for AI-backed logged-in turns
+
+Static anonymous turns should not create chat rows or usage-log rows.

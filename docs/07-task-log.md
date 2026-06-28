@@ -5,6 +5,24 @@
 
 ## Recent Task Log
 
+### Phase 69D - Public Chatbot Shell + Logged-In AI Chat Foundation
+
+- Added a floating public chatbot widget rendered through `PublicLayout` on a tight allowlist of
+  public routes only: home, programs, universities, scholarships, and guides.
+- Kept anonymous chatbot behaviour static-only with no AI call, no persistence, and no access to
+  saved results, student profile context, RAG, or internet browsing.
+- Added dedicated site-chat endpoints for session loading, logged-in chat, and chat clearing under
+  `src/pages/api/ai/site-chat*.ts`.
+- Reused the existing `chat_answer` AI Gateway use case, shared guardrails, and existing
+  `ai_usage_logs` quota checks for logged-in site chat only.
+- Added a separate site-chat router/context/persistence layer that stores global site chat in
+  `ai_conversations` / `ai_messages` with `session_type = 'chat'` and
+  `ai_finder_result_id = null`.
+- Preserved saved-result chat behaviour and UI on `/fit-finder/results/[id]` with no route,
+  prompt, or context regression.
+- Updated privacy and AI docs to document the new public shell, the anonymous static-only rule,
+  and the fact that global site chat does not attach the latest Finder result in Phase 69D.
+
 ### Phase 69C-UX2 - AI Gateway Control Center Redesign
 
 - Redesigned `/admin/ai-gateway` from one long stacked admin page into a server-rendered tabbed
