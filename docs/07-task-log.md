@@ -5,6 +5,19 @@
 
 ## Recent Task Log
 
+### Phase 69C-UX2 - AI Gateway Control Center Redesign
+
+- Redesigned `/admin/ai-gateway` from one long stacked admin page into a server-rendered tabbed
+  control center with Overview, Providers, Models, Routing, Testing, and Health tabs.
+- Expanded the Overview tab with live route order summaries, env fallback status, active entity
+  counts, setup guidance, and provider/model/routing definitions for admins.
+- Converted provider records into summary cards with masked key metadata visible and metadata/key
+  replacement actions kept in separate collapsed panels.
+- Kept model editing, routing policy editing, preset tests, and health reset flows on their own
+  focused tabs while reusing the existing admin API endpoints.
+- Made no backend/router/security changes: no migrations, no provider encryption behavior changes,
+  no public `/api/ai/finder-summary` or `/api/ai/chat` changes, and no public chatbot expansion.
+
 ### Phase 69C-UX - AI Gateway Admin UX Polish
 
 - Reworked `/admin/ai-gateway` into a clearer operating dashboard with top summary cards for env

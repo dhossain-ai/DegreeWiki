@@ -224,6 +224,22 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
   isLive: AI_GATEWAY_LIVE_USE_CASES.includes(useCase),
   rows: policies.filter((policy) => policy.use_case === useCase),
 }))
+
+const tabs = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'providers', label: 'Providers' },
+  { id: 'models', label: 'Models' },
+  { id: 'routing', label: 'Routing' },
+  { id: 'testing', label: 'Testing' },
+  { id: 'health', label: 'Health' },
+] as const
+
+const requestedTab = Astro.url.searchParams.get('tab') ?? 'overview'
+const activeTab = tabs.some((tab) => tab.id === requestedTab) ? requestedTab : 'overview'
+const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
+  useCase,
+  rows: policies.filter((policy) => policy.use_case === useCase),
+}))
 ---
 <AdminLayout title="AI Gateway — DegreeWiki Admin" activePath="/admin/ai-gateway" userEmail={user.email ?? ''}>
   <div class="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -251,6 +267,24 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
     </div>
   )}
 
+  <nav class="mb-6 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1" aria-label="AI Gateway sections">
+    <div class="flex min-w-max gap-1">
+      {tabs.map((tab) => (
+        <a
+          href={`/admin/ai-gateway?tab=${tab.id}`}
+          class={activeTab === tab.id
+            ? 'rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white'
+            : 'rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
+          aria-current={activeTab === tab.id ? 'page' : undefined}
+        >
+          {tab.label}
+        </a>
+      ))}
+    </div>
+  </nav>
+
+  {activeTab === 'overview' && (
+    <>
   <div class="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
     <div class="rounded-xl border border-gray-200 bg-white p-4">
       <div class="text-xs uppercase tracking-wide text-gray-500">Env Fallback Status</div>
@@ -311,6 +345,20 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
         <li class="rounded-lg bg-white/70 px-4 py-3">4. Add routing policy for <code>chat_answer</code></li>
         <li class="rounded-lg bg-white/70 px-4 py-3">5. Run preset admin tests</li>
       </ol>
+      <div class="mt-4 grid gap-3 text-sm text-blue-950 md:grid-cols-3">
+        <div class="rounded-lg bg-white/70 px-4 py-3">
+          <div class="font-medium">Provider account</div>
+          <div class="mt-1 text-blue-900">API account/key for a provider.</div>
+        </div>
+        <div class="rounded-lg bg-white/70 px-4 py-3">
+          <div class="font-medium">Model</div>
+          <div class="mt-1 text-blue-900">Exact AI model name sent to that provider.</div>
+        </div>
+        <div class="rounded-lg bg-white/70 px-4 py-3">
+          <div class="font-medium">Routing policy</div>
+          <div class="mt-1 text-blue-900">Where DegreeWiki uses the model.</div>
+        </div>
+      </div>
     </section>
 
     <section class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
@@ -322,10 +370,55 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
           Recommended live routing: OpenRouter free first, Xiaomi MiMo V2.5 second, Gemini env
           fallback.
         </p>
+        <p>Z.ai should stay inactive if tests fail with <code>rate_limit</code> or <code>invalid_provider_response</code>.</p>
       </div>
     </section>
   </div>
 
+  <div class="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+    <section class="rounded-xl border border-gray-200 bg-white p-5">
+      <h2 class="text-base font-semibold text-gray-900">Live Routing Summary</h2>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        {liveRouteSummaries.map((summary) => (
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold text-gray-900">{summary.useCase}</h3>
+              <span class="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">live product route</span>
+            </div>
+            {summary.rows.length === 0 ? (
+              <p class="mt-3 text-sm text-gray-500">No DB routing rows configured yet; env fallback remains the practical route if enabled.</p>
+            ) : (
+              <ol class="mt-3 space-y-2 text-sm text-gray-700">
+                {summary.rows.map((policy) => (
+                  <li class="rounded-lg bg-gray-50 px-3 py-2">
+                    {policy.priority}. {policy.ai_models?.display_name ?? 'Unknown model'}
+                    <span class="text-gray-500"> via {policy.ai_models?.ai_provider_accounts?.display_name ?? 'Unknown provider'}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        ))}
+      </div>
+      <p class="mt-4 text-sm text-gray-500">
+        Env fallback stays controlled by server environment settings and is not a DB-managed provider account.
+      </p>
+    </section>
+
+    <section class="rounded-xl border border-gray-200 bg-white p-5">
+      <h2 class="text-base font-semibold text-gray-900">Recommendations</h2>
+      <div class="mt-4 space-y-3 text-sm text-gray-700">
+        <p>OpenRouter free can be primary for live routes after successful admin tests.</p>
+        <p>Xiaomi MiMo V2.5 can be fallback if preset tests pass.</p>
+        <p>Z.ai should stay inactive when tests return <code>rate_limit</code> or <code>invalid_provider_response</code>.</p>
+        <p>DB-managed providers currently support <code>openai_compatible</code> only.</p>
+      </div>
+    </section>
+  </div>
+    </>
+  )}
+
+  {activeTab === 'providers' && (
   <section class="mb-10">
     <div class="mb-4 flex items-center justify-between gap-4">
       <div>
@@ -424,8 +517,8 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
           No provider accounts configured yet.
         </div>
       ) : providers.map((provider) => (
-        <details class="rounded-xl border border-gray-200 bg-white" open>
-          <summary class="flex cursor-pointer list-none flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <article class="rounded-xl border border-gray-200 bg-white">
+          <div class="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div class="flex flex-wrap items-center gap-2">
                 <h3 class="text-base font-semibold text-gray-900">{provider.display_name}</h3>
@@ -452,7 +545,7 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
                 <div>{policyCountByProviderCode.get(provider.provider_code) ?? 0} routing policies</div>
               </div>
             </div>
-          </summary>
+          </div>
 
           <div class="border-t border-gray-200 p-4">
             <div class="mb-4 grid gap-3 rounded-xl bg-gray-50 p-4 text-sm text-gray-700 md:grid-cols-2 xl:grid-cols-4">
@@ -479,11 +572,12 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
               </div>
             </div>
 
-            <section class="rounded-xl border border-gray-200 p-4">
-              <div class="mb-3">
-                <h4 class="text-sm font-semibold text-gray-900">Edit Metadata</h4>
-                <p class="mt-1 text-xs text-gray-500">Safe for labels, routing eligibility flags, protocol settings, and timeouts.</p>
-              </div>
+            <details class="rounded-xl border border-gray-200">
+              <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-gray-900">
+                Edit Metadata
+              </summary>
+              <div class="border-t border-gray-200 p-4">
+                <p class="mb-3 text-xs text-gray-500">Safe for labels, routing eligibility flags, protocol settings, and timeouts.</p>
               <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider account updated." data-reload="true">
                 <input type="hidden" name="action" value="update" />
                 <input type="hidden" name="id" value={provider.id} />
@@ -550,16 +644,18 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
                   </button>
                 </div>
               </form>
-            </section>
+              </div>
+            </details>
 
-            <section class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <div class="mb-3">
-                <h4 class="text-sm font-semibold text-amber-950">Replace Stored API Key</h4>
-                <p class="mt-1 text-xs text-amber-900">
+            <details class="mt-4 rounded-xl border border-amber-200 bg-amber-50">
+              <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-amber-950">
+                Replace Stored API Key
+              </summary>
+              <div class="border-t border-amber-200 p-4">
+                <p class="text-xs text-amber-900">
                   Warning: this overwrites the currently stored encrypted key. Only masked metadata remains visible after save.
                 </p>
-              </div>
-              <form class="js-api-form grid gap-3 md:grid-cols-[1fr_auto]" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider API key replaced." data-reload="true">
+              <form class="js-api-form mt-3 grid gap-3 md:grid-cols-[1fr_auto]" data-endpoint="/api/admin/ai-gateway/providers" data-success="Provider API key replaced." data-reload="true">
                 <input type="hidden" name="action" value="replace_key" />
                 <input type="hidden" name="id" value={provider.id} />
                 <div>
@@ -572,13 +668,16 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
                   </button>
                 </div>
               </form>
-            </section>
+              </div>
+            </details>
           </div>
-        </details>
+        </article>
       ))}
     </div>
   </section>
+  )}
 
+  {activeTab === 'models' && (
   <section class="mb-10">
     <div class="mb-4 flex items-center justify-between gap-4">
       <div>
@@ -752,7 +851,9 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
       ))}
     </div>
   </section>
+  )}
 
+  {activeTab === 'routing' && (
   <section class="mb-10">
     <div class="mb-4 flex items-center justify-between gap-4">
       <div>
@@ -836,7 +937,7 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
               <p class="mt-1 text-sm text-gray-500">
                 {group.isLive
                   ? 'Priority order below can affect active product traffic once rows are enabled.'
-                  : 'This use case is available for planning, but it is not wired into live product behavior today.'}
+                  : 'Configured for future use; not wired into product behavior yet.'}
               </p>
             </div>
             <div class="text-sm text-gray-500">{group.rows.length} policy row{group.rows.length === 1 ? '' : 's'}</div>
@@ -958,7 +1059,9 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
       ))}
     </div>
   </section>
+  )}
 
+  {activeTab === 'health' && (
   <section class="mb-10">
     <div class="mb-4 flex items-center justify-between">
       <div>
@@ -983,7 +1086,7 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
         <tbody>
           {healthRows.length === 0 ? (
             <tr>
-              <td colspan="7" class="px-4 py-6 text-sm text-gray-500">No provider health rows yet.</td>
+              <td colspan="7" class="px-4 py-6 text-sm text-gray-500">No provider health issues yet. Health rows appear after production gateway attempts.</td>
             </tr>
           ) : healthRows.map((row) => (
             <tr class="border-b border-gray-100 align-top">
@@ -1018,7 +1121,9 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
       </table>
     </div>
   </section>
+  )}
 
+  {activeTab === 'testing' && (
   <section>
     <div class="mb-4 flex items-center justify-between">
       <div>
@@ -1089,6 +1194,7 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
       </div>
     </div>
   </section>
+  )}
 </AdminLayout>
 
 <script>
