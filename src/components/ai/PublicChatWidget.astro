@@ -7,8 +7,7 @@ const { currentPath } = Astro.props
 ---
 
 <div
-  class="fixed bottom-4 right-4 z-50"
-  style="position: fixed; right: 1rem; bottom: 1rem; z-index: 80;"
+  class="fixed inset-x-2 bottom-2 z-50 flex flex-col items-end sm:inset-x-auto sm:bottom-4 sm:right-4"
   data-site-chat-root
 >
   <button
@@ -19,60 +18,54 @@ const { currentPath } = Astro.props
     class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-4 py-3 text-sm font-medium text-blue-700 shadow-lg transition hover:border-blue-300 hover:bg-blue-50"
   >
     <span class="inline-flex h-2.5 w-2.5 rounded-full bg-blue-600"></span>
-    DegreeWiki Chat
+    <span id="site-chat-launcher-label">Ask DegreeWiki</span>
   </button>
 
   <section
     id="site-chat-panel"
-    class="mt-3 hidden w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
-    style="display: none; width: min(24rem, calc(100vw - 2rem));"
+    class="mt-3 hidden h-[min(42rem,calc(100dvh-1rem))] w-full max-w-[22rem] flex-col overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-2xl sm:h-[min(38rem,calc(100dvh-6rem))] sm:w-[22rem]"
+    style="display: none;"
     aria-label="DegreeWiki chatbot"
   >
-    <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-      <div>
-        <h2 class="text-sm font-semibold text-gray-900">DegreeWiki Chat</h2>
-        <p class="text-xs text-gray-500">Study-planning help inside DegreeWiki</p>
+    <div class="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-slate-900">DegreeWiki Chat</h2>
+        <p class="mt-1 text-xs text-slate-500">Quick study-planning guidance inside DegreeWiki</p>
       </div>
       <button
         id="site-chat-close"
         type="button"
-        class="rounded-md px-2 py-1 text-sm text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+        class="rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
       >
         Close
       </button>
     </div>
 
-    <div class="border-b border-gray-100 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
-      AI can help with study planning, but it cannot guarantee admission, scholarships, visa outcomes, or official accuracy.
+    <div class="border-b border-slate-100 bg-slate-50 px-4 py-2 text-[11px] leading-relaxed text-slate-600">
+      No guarantees. Check official university or scholarship sources before making important decisions.
     </div>
 
-    <div class="max-h-[26rem] overflow-y-auto px-4 py-4">
+    <div id="site-chat-body" class="flex-1 overflow-y-auto px-3 py-3 sm:px-4">
       <div id="site-chat-welcome" class="space-y-4">
-        <div>
-          <p class="text-sm font-medium text-gray-900">How can I help?</p>
-          <p class="mt-1 text-sm text-gray-600">
-            Ask about using DegreeWiki, finding programs, Fit Finder, scholarships, or study guides.
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p class="text-sm font-medium text-slate-900">Start with a quick question</p>
+          <p class="mt-1 text-sm leading-6 text-slate-600">
+            This chat checks DegreeWiki guidance first, then uses logged-in AI only when needed.
           </p>
         </div>
 
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Find programs</button>
-          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Try Fit Finder</button>
-          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Scholarships</button>
-          <button type="button" class="site-chat-chip rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100">Study guides</button>
-          <button type="button" data-anon-only="true" class="site-chat-chip rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 transition hover:bg-blue-100">Sign in for AI chat</button>
-        </div>
+        <div id="site-chat-chip-list" class="flex flex-wrap gap-2"></div>
       </div>
 
-      <div id="site-chat-login-cta" class="mt-4 hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      <div id="site-chat-login-cta" class="mt-4 hidden rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         <p class="font-medium">Sign in for logged-in AI chat</p>
         <p class="mt-1 text-xs leading-relaxed text-amber-800">
-          Anonymous visitors get static guidance only. Sign in to ask controlled DegreeWiki-scoped AI questions.
+          Anonymous visitors still get DegreeWiki guidance. Sign in only when you want controlled AI follow-up.
         </p>
         <a
           id="site-chat-login-link"
           href={`/login?redirect=${encodeURIComponent(currentPath)}`}
-          class="mt-3 inline-flex rounded-md bg-amber-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-950"
+          class="mt-3 inline-flex rounded-full bg-amber-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-950"
         >
           Sign in
         </a>
@@ -80,24 +73,25 @@ const { currentPath } = Astro.props
 
       <div
         id="site-chat-transcript"
-        class="mt-4 hidden space-y-3"
+        class="mt-4 hidden space-y-4"
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
+        aria-busy="false"
       ></div>
 
-      <div id="site-chat-status" class="mt-4 hidden text-sm"></div>
+      <div id="site-chat-status" class="mt-4 hidden" role="status" aria-live="polite"></div>
     </div>
 
-    <div class="border-t border-gray-100 px-4 py-4">
-      <label for="site-chat-input" class="block text-sm font-medium text-gray-700">
+    <div id="site-chat-composer" class="border-t border-slate-100 px-3 py-3 sm:px-4" aria-busy="false">
+      <label for="site-chat-input" class="block text-sm font-medium text-slate-700">
         Your question
       </label>
       <textarea
         id="site-chat-input"
-        rows="3"
+        rows="1"
         maxlength="1000"
-        class="mt-2 w-full resize-none rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="mt-2 min-h-[2.75rem] w-full resize-none rounded-2xl border border-slate-300 px-3 py-2 text-sm leading-6 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="Ask a DegreeWiki study-planning question..."
       ></textarea>
 
@@ -105,45 +99,88 @@ const { currentPath } = Astro.props
         <button
           id="site-chat-clear"
           type="button"
-          class="hidden rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          class="hidden rounded-full border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Clear chat
         </button>
 
-        <div class="ml-auto flex items-center gap-2">
-          <button
-            id="site-chat-send"
-            type="button"
-            class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Send
-          </button>
-        </div>
+        <button
+          id="site-chat-send"
+          type="button"
+          class="ml-auto rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+        >
+          Send
+        </button>
       </div>
     </div>
   </section>
 </div>
 
 <script define:vars={{ currentPath }}>
+  const DEFAULT_WELCOME_OPTIONS = [
+    'How can you help?',
+    'Find programs',
+    'Try Fit Finder',
+    'Scholarships',
+    'Study guides',
+  ]
+
+  const SOURCE_LABELS = {
+    knowledge_base: 'DegreeWiki Knowledge Base',
+    assistant: 'DegreeWiki Assistant',
+    safety_notice: 'Safety Notice',
+    system_notice: 'Notice',
+  }
+
   const launcherEl = document.getElementById('site-chat-launcher')
+  const launcherLabelEl = document.getElementById('site-chat-launcher-label')
   const panelEl = document.getElementById('site-chat-panel')
+  const panelBodyEl = document.getElementById('site-chat-body')
   const closeEl = document.getElementById('site-chat-close')
   const welcomeEl = document.getElementById('site-chat-welcome')
+  const chipListEl = document.getElementById('site-chat-chip-list')
   const loginCtaEl = document.getElementById('site-chat-login-cta')
   const loginLinkEl = document.getElementById('site-chat-login-link')
   const transcriptEl = document.getElementById('site-chat-transcript')
   const statusEl = document.getElementById('site-chat-status')
+  const composerEl = document.getElementById('site-chat-composer')
   const inputEl = document.getElementById('site-chat-input')
   const sendEl = document.getElementById('site-chat-send')
   const clearEl = document.getElementById('site-chat-clear')
-  const chipEls = Array.from(document.querySelectorAll('.site-chat-chip'))
-  const anonChipEls = Array.from(document.querySelectorAll('[data-anon-only="true"]'))
 
   let isOpen = false
   let busy = false
   let sessionLoaded = false
   let authenticated = false
-  const FALLBACK_ASSISTANT_ERROR = 'I could not complete that chat reply right now. Please try again.'
+  let showLoginPrompt = false
+  let welcomeOptions = [...DEFAULT_WELCOME_OPTIONS]
+
+  function normalizeAnswerSource(value) {
+    if (
+      value === 'knowledge_base'
+      || value === 'assistant'
+      || value === 'safety_notice'
+      || value === 'system_notice'
+    ) {
+      return value
+    }
+
+    return 'knowledge_base'
+  }
+
+  function updateLauncherLabel() {
+    launcherEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
+    launcherLabelEl.textContent = isOpen ? 'Close chat' : 'Ask DegreeWiki'
+  }
+
+  function scrollPanelToLatest(behavior = 'auto') {
+    requestAnimationFrame(() => {
+      panelBodyEl.scrollTo({
+        top: panelBodyEl.scrollHeight,
+        behavior,
+      })
+    })
+  }
 
   function showTranscript() {
     transcriptEl.classList.remove('hidden')
@@ -157,13 +194,26 @@ const { currentPath } = Astro.props
     welcomeEl.style.display = ''
   }
 
+  function setLoginPromptVisible(nextVisible) {
+    showLoginPrompt = !authenticated && nextVisible
+    loginCtaEl.style.display = showLoginPrompt ? '' : 'none'
+    if (showLoginPrompt) {
+      scrollPanelToLatest('auto')
+    }
+  }
+
   function setStatus(message, tone) {
     statusEl.textContent = message
-    statusEl.className = 'mt-4 text-sm'
-    if (tone === 'error') statusEl.classList.add('text-red-600')
-    if (tone === 'info') statusEl.classList.add('text-gray-600')
-    if (tone === 'success') statusEl.classList.add('text-green-700')
+    statusEl.className = 'mt-4 rounded-2xl border px-3 py-2 text-xs leading-relaxed'
+    if (tone === 'error') {
+      statusEl.classList.add('border-red-200', 'bg-red-50', 'text-red-700')
+    } else if (tone === 'success') {
+      statusEl.classList.add('border-green-200', 'bg-green-50', 'text-green-700')
+    } else {
+      statusEl.classList.add('border-slate-200', 'bg-slate-50', 'text-slate-600')
+    }
     statusEl.style.display = ''
+    scrollPanelToLatest('auto')
   }
 
   function clearStatus() {
@@ -171,65 +221,149 @@ const { currentPath } = Astro.props
     statusEl.style.display = 'none'
   }
 
-  function appendTurn(role, text) {
-    const wrapper = document.createElement('div')
-    wrapper.className = role === 'user'
-      ? 'rounded-xl bg-gray-100 px-3 py-2 text-sm'
-      : 'rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm'
-
-    const label = document.createElement('span')
-    label.className = 'mb-1 block text-xs font-medium ' + (role === 'user' ? 'text-gray-500' : 'text-blue-700')
-    label.textContent = role === 'user' ? 'You' : 'Assistant'
-
-    const body = document.createElement('p')
-    body.className = 'text-gray-700'
-    body.textContent = text
-
-    wrapper.appendChild(label)
-    wrapper.appendChild(body)
-    transcriptEl.appendChild(wrapper)
-    showTranscript()
-    wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    updateClearVisibility()
+  function bubbleClassesForSource(answerSource) {
+    if (answerSource === 'assistant') {
+      return 'border-emerald-100 bg-emerald-50'
+    }
+    if (answerSource === 'safety_notice') {
+      return 'border-amber-200 bg-amber-50'
+    }
+    if (answerSource === 'system_notice') {
+      return 'border-slate-200 bg-slate-50'
+    }
+    return 'border-blue-100 bg-blue-50'
   }
 
-  function appendAssistantFallback(message = FALLBACK_ASSISTANT_ERROR) {
-    appendTurn('assistant', message)
+  function badgeClassesForSource(answerSource) {
+    if (answerSource === 'assistant') {
+      return 'border-emerald-200 bg-white text-emerald-700'
+    }
+    if (answerSource === 'safety_notice') {
+      return 'border-amber-200 bg-white text-amber-800'
+    }
+    if (answerSource === 'system_notice') {
+      return 'border-slate-200 bg-white text-slate-700'
+    }
+    return 'border-blue-200 bg-white text-blue-700'
+  }
+
+  function createMessageNode(message) {
+    const wrapper = document.createElement('div')
+
+    if (message.role === 'user') {
+      wrapper.className = 'flex justify-end'
+
+      const bubble = document.createElement('div')
+      bubble.className = 'max-w-[88%] rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-900 shadow-sm'
+
+      const body = document.createElement('p')
+      body.className = 'whitespace-pre-wrap break-words leading-6'
+      body.textContent = message.content
+
+      bubble.appendChild(body)
+      wrapper.appendChild(bubble)
+      return wrapper
+    }
+
+    const answerSource = normalizeAnswerSource(message.answer_source)
+
+    wrapper.className = 'flex justify-start'
+
+    const bubble = document.createElement('div')
+    bubble.className = `max-w-[92%] rounded-2xl border px-4 py-3 text-sm text-slate-900 shadow-sm ${bubbleClassesForSource(answerSource)}`
+
+    const badge = document.createElement('span')
+    badge.className = `inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${badgeClassesForSource(answerSource)}`
+    badge.textContent = SOURCE_LABELS[answerSource]
+
+    const body = document.createElement('p')
+    body.className = 'mt-2 whitespace-pre-wrap break-words leading-6 text-slate-800'
+    body.textContent = message.content
+
+    bubble.appendChild(badge)
+    bubble.appendChild(body)
+    wrapper.appendChild(bubble)
+    return wrapper
+  }
+
+  function appendMessage(message, behavior = 'smooth') {
+    transcriptEl.appendChild(createMessageNode(message))
+    showTranscript()
+    updateClearVisibility()
+    scrollPanelToLatest(behavior)
   }
 
   function replaceTranscript(messages) {
     transcriptEl.replaceChildren()
+
     for (const message of messages) {
-      appendTurn(message.role, message.content)
+      transcriptEl.appendChild(createMessageNode(message))
     }
+
     if (messages.length === 0) {
       hideTranscript()
+    } else {
+      showTranscript()
     }
+
+    updateClearVisibility()
+    scrollPanelToLatest('auto')
+  }
+
+  function renderWelcomeChips() {
+    chipListEl.replaceChildren()
+
+    for (const option of welcomeOptions) {
+      const chip = document.createElement('button')
+      chip.type = 'button'
+      chip.className = 'rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50'
+      chip.textContent = option
+      chip.disabled = busy
+      chip.addEventListener('click', () => {
+        submitMessage(option)
+      })
+      chipListEl.appendChild(chip)
+    }
+  }
+
+  function updateComposerState() {
+    sendEl.disabled = busy || inputEl.value.trim().length === 0
+  }
+
+  function updateClearVisibility() {
+    clearEl.style.display = authenticated ? '' : 'none'
+    clearEl.disabled = busy || transcriptEl.childElementCount === 0
   }
 
   function updateAuthUI() {
     loginLinkEl.href = '/login?redirect=' + encodeURIComponent(currentPath)
-    loginCtaEl.style.display = authenticated ? 'none' : ''
-    clearEl.style.display = authenticated ? '' : 'none'
-    for (const chip of anonChipEls) {
-      chip.style.display = authenticated ? 'none' : ''
+    if (authenticated) {
+      setLoginPromptVisible(false)
     }
     updateClearVisibility()
   }
 
-  function updateClearVisibility() {
-    if (!authenticated) return
-    clearEl.disabled = busy || transcriptEl.childElementCount === 0
-  }
-
   function setBusy(nextBusy, sendLabel, clearLabel) {
     busy = nextBusy
-    sendEl.disabled = nextBusy
-    clearEl.disabled = nextBusy || transcriptEl.childElementCount === 0
     inputEl.disabled = nextBusy
-    for (const chip of chipEls) chip.disabled = nextBusy
     sendEl.textContent = sendLabel
-    if (authenticated) clearEl.textContent = clearLabel
+    clearEl.textContent = clearLabel
+    transcriptEl.setAttribute('aria-busy', nextBusy ? 'true' : 'false')
+    composerEl.setAttribute('aria-busy', nextBusy ? 'true' : 'false')
+
+    for (const chip of chipListEl.querySelectorAll('button')) {
+      chip.disabled = nextBusy
+    }
+
+    updateComposerState()
+    updateClearVisibility()
+  }
+
+  function adjustTextareaHeight() {
+    inputEl.style.height = 'auto'
+    const nextHeight = Math.min(Math.max(inputEl.scrollHeight, 44), 144)
+    inputEl.style.height = `${nextHeight}px`
+    inputEl.style.overflowY = inputEl.scrollHeight > 144 ? 'auto' : 'hidden'
   }
 
   async function ensureSession() {
@@ -250,19 +384,30 @@ const { currentPath } = Astro.props
         return false
       }
 
+      if (Array.isArray(data.welcome_options) && data.welcome_options.length > 0) {
+        welcomeOptions = data.welcome_options
+          .filter((value) => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+
+        if (welcomeOptions.length === 0) {
+          welcomeOptions = [...DEFAULT_WELCOME_OPTIONS]
+        }
+      }
+
+      renderWelcomeChips()
+
       authenticated = data.authenticated === true
       sessionLoaded = true
       updateAuthUI()
 
       if (authenticated && Array.isArray(data.messages)) {
-        transcriptEl.replaceChildren()
-        if (data.messages.length > 0) {
-          replaceTranscript(data.messages)
-        } else {
-          hideTranscript()
-        }
+        replaceTranscript(data.messages)
+      } else {
+        hideTranscript()
       }
 
+      scrollPanelToLatest('auto')
       return true
     } catch {
       setStatus('Could not start chat right now. Please try again.', 'error')
@@ -272,33 +417,59 @@ const { currentPath } = Astro.props
 
   function openPanel() {
     if (isOpen) return
-    panelEl.style.display = ''
+    panelEl.style.display = 'flex'
     panelEl.classList.remove('hidden')
-    launcherEl.setAttribute('aria-expanded', 'true')
     isOpen = true
+    updateLauncherLabel()
     clearStatus()
     inputEl.focus()
-    ensureSession()
+    scrollPanelToLatest('auto')
+    void ensureSession()
   }
 
   function closePanel() {
     if (!isOpen) return
     panelEl.style.display = 'none'
     panelEl.classList.add('hidden')
-    launcherEl.setAttribute('aria-expanded', 'false')
     isOpen = false
+    updateLauncherLabel()
     launcherEl.focus()
   }
 
   function mapError(data) {
     const err = data && data.error ? data.error : ''
-    if (err === 'invalid_message') return 'Please enter a question between 1 and 1000 characters.'
-    if (err === 'message_rejected') return data && data.answer ? data.answer : 'That message cannot be processed here.'
-    if (err === 'rate_limit_exceeded') return "You've reached today's AI usage limit. Please try again tomorrow."
-    if (err === 'ai_setup_unavailable') return 'AI chat is not fully available right now. Please try again later.'
-    if (err === 'ai_unavailable') return 'AI is temporarily unavailable. Please try again in a few minutes.'
-    if (err === 'unauthenticated') return 'Please sign in again to continue.'
-    return 'Something went wrong. Please try again.'
+
+    if (err === 'message_rejected') {
+      return {
+        mode: 'append',
+        message: data && typeof data.answer === 'string' && data.answer.trim().length > 0
+          ? data.answer
+          : 'That message cannot be processed here.',
+        answerSource: normalizeAnswerSource(data && data.answer_source),
+      }
+    }
+
+    if (err === 'invalid_message') {
+      return { mode: 'status', tone: 'error', message: 'Please enter a question between 1 and 1000 characters.' }
+    }
+
+    if (err === 'rate_limit_exceeded') {
+      return { mode: 'status', tone: 'error', message: "You've reached today's AI usage limit. Please try again tomorrow." }
+    }
+
+    if (err === 'ai_setup_unavailable') {
+      return { mode: 'status', tone: 'error', message: 'AI chat is not fully available right now. Please try again later.' }
+    }
+
+    if (err === 'ai_unavailable') {
+      return { mode: 'status', tone: 'error', message: 'AI is temporarily unavailable. Please try again in a few minutes.' }
+    }
+
+    if (err === 'unauthenticated') {
+      return { mode: 'status', tone: 'error', message: 'Please sign in again to continue.' }
+    }
+
+    return { mode: 'status', tone: 'error', message: 'Something went wrong. Please try again.' }
   }
 
   async function submitMessage(messageOverride) {
@@ -313,9 +484,12 @@ const { currentPath } = Astro.props
     }
 
     clearStatus()
-    setBusy(true, 'Sending...', 'Clearing...')
-    appendTurn('user', message)
+    setBusy(true, 'Working...', 'Clearing...')
+    setStatus('Checking DegreeWiki guidance first...', 'info')
+    appendMessage({ role: 'user', content: message })
     inputEl.value = ''
+    adjustTextareaHeight()
+    updateComposerState()
 
     try {
       const res = await fetch('/api/ai/site-chat', {
@@ -331,25 +505,49 @@ const { currentPath } = Astro.props
       try {
         data = await res.json()
       } catch {
-        appendAssistantFallback()
+        clearStatus()
+        setStatus('Could not complete that chat reply right now. Please try again.', 'error')
         return
       }
 
       if (data.ok) {
+        clearStatus()
+
         if (typeof data.answer === 'string' && data.answer.trim().length > 0) {
-          appendTurn('assistant', data.answer)
-        } else {
-          appendAssistantFallback()
+          appendMessage({
+            role: 'assistant',
+            content: data.answer,
+            answer_source: normalizeAnswerSource(data.answer_source),
+          })
         }
+
         authenticated = data.authenticated === true
         updateAuthUI()
+        setLoginPromptVisible(data.requires_login === true)
       } else {
-        appendAssistantFallback(mapError(data))
+        clearStatus()
+        const mapped = mapError(data)
+
+        if (mapped.mode === 'append') {
+          appendMessage({
+            role: 'assistant',
+            content: mapped.message,
+            answer_source: mapped.answerSource,
+          })
+        } else {
+          if (data && data.error === 'unauthenticated') {
+            setLoginPromptVisible(true)
+          }
+          setStatus(mapped.message, mapped.tone)
+        }
       }
     } catch {
-      appendAssistantFallback()
+      clearStatus()
+      setStatus('Could not complete that chat reply right now. Please try again.', 'error')
     } finally {
       setBusy(false, 'Send', 'Clear chat')
+      updateComposerState()
+      adjustTextareaHeight()
       inputEl.focus()
     }
   }
@@ -368,7 +566,12 @@ const { currentPath } = Astro.props
     submitMessage()
   })
 
-  inputEl.addEventListener('keydown', event => {
+  inputEl.addEventListener('input', () => {
+    adjustTextareaHeight()
+    updateComposerState()
+  })
+
+  inputEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       submitMessage()
@@ -402,7 +605,10 @@ const { currentPath } = Astro.props
 
       transcriptEl.replaceChildren()
       hideTranscript()
+      setLoginPromptVisible(false)
       setStatus('Chat cleared.', 'success')
+      updateClearVisibility()
+      scrollPanelToLatest('auto')
     } catch {
       setStatus('Could not clear chat. Please try again.', 'error')
     } finally {
@@ -410,15 +616,24 @@ const { currentPath } = Astro.props
     }
   })
 
-  for (const chip of chipEls) {
-    chip.addEventListener('click', () => {
-      submitMessage(chip.textContent ?? '')
-    })
-  }
-
-  document.addEventListener('keydown', event => {
+  document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && isOpen) {
       closePanel()
     }
   })
+
+  const handleViewportChange = () => {
+    if (isOpen) {
+      scrollPanelToLatest('auto')
+    }
+  }
+
+  window.addEventListener('resize', handleViewportChange)
+  window.visualViewport?.addEventListener('resize', handleViewportChange)
+
+  renderWelcomeChips()
+  updateAuthUI()
+  updateLauncherLabel()
+  updateComposerState()
+  adjustTextareaHeight()
 </script>
