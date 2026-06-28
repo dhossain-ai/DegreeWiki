@@ -16,6 +16,7 @@ import {
   SITE_LOGIN_REQUIRED_RESPONSE,
   SITE_STATIC_RESPONSES,
 } from '../../../lib/ai/site-chat/router'
+import { findStaticSiteAnswer } from '../../../lib/ai/site-chat/static-answers'
 import type { SiteChatContextUsedSnapshot } from '../../../lib/ai/types'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -103,6 +104,8 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
             userMessage: message,
             assistantText: answer,
             safetyPolicyVersion: GUARDRAILS_VERSION,
+            responseSource: 'static',
+            staticCategory: decision.category,
           },
           aiEnv,
         )
@@ -117,6 +120,44 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
       authenticated: !!user,
       used_ai: false,
       answer,
+    })
+  }
+
+  const presetAnswer = await findStaticSiteAnswer(supabase, message, {
+    authenticated: !!user,
+    locale: 'en',
+  })
+
+  if (presetAnswer) {
+    if (user) {
+      const conversationId = await getOrCreateSiteConversation(user.id, aiEnv)
+      if (conversationId) {
+        const persisted = await persistSiteStaticTurn(
+          {
+            conversationId,
+            currentPath,
+            pageType,
+            userMessage: message,
+            assistantText: presetAnswer.answer,
+            safetyPolicyVersion: GUARDRAILS_VERSION,
+            promptTemplateVersion: 'site-preset-v1',
+            responseSource: 'preset',
+            presetAnswerId: presetAnswer.id,
+            presetCategory: presetAnswer.category,
+          },
+          aiEnv,
+        )
+        if (!persisted) {
+          console.error('site chat api: persistSiteStaticTurn failed for preset answer', presetAnswer.id)
+        }
+      }
+    }
+
+    return jsonResponse(200, {
+      ok: true,
+      authenticated: !!user,
+      used_ai: false,
+      answer: presetAnswer.answer,
     })
   }
 

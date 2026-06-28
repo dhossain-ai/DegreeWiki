@@ -55,6 +55,8 @@ const OUT_OF_SCOPE_RE =
   /\btell\s+(me\s+)?a\s+joke\b|\bwrite\s+(me\s+)?code\b|\bmedical\s+advice\b|\binvestment\s+advice\b|\bcrypto\b|\bstock\s+(tip|tips|advice)\b|\bpretend\s+you\s+are\b|\bignore\s+(all\s+)?(previous|your)\s+instructions\b/i
 
 export function routeSiteChatMessage(message: string): SiteChatRouteDecision {
+  if (GUARANTEE_RE.test(message)) return { route: 'static', category: 'guarantee' }
+  if (OUT_OF_SCOPE_RE.test(message)) return { route: 'static', category: 'out_of_scope' }
   if (GREETING_RE.test(message)) return { route: 'static', category: 'greeting' }
   if (HELP_RE.test(message)) return { route: 'static', category: 'help' }
   if (FIT_FINDER_RE.test(message)) return { route: 'static', category: 'fit_finder' }
@@ -62,7 +64,5 @@ export function routeSiteChatMessage(message: string): SiteChatRouteDecision {
   if (SCHOLARSHIPS_RE.test(message)) return { route: 'static', category: 'scholarships' }
   if (STUDY_GUIDES_RE.test(message)) return { route: 'static', category: 'study_guides' }
   if (LOGIN_RE.test(message)) return { route: 'static', category: 'login' }
-  if (GUARANTEE_RE.test(message)) return { route: 'static', category: 'guarantee' }
-  if (OUT_OF_SCOPE_RE.test(message)) return { route: 'static', category: 'out_of_scope' }
   return { route: 'llm' }
 }

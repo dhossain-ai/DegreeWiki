@@ -311,6 +311,10 @@ export interface SiteChatContextUsedSnapshot {
   safetyPolicyVersion: string
   currentPath: string
   pageType: string
+  responseSource?: 'static' | 'preset'
+  staticCategory?: string | null
+  presetAnswerId?: string | null
+  presetCategory?: string | null
 }
 
 export type AIMessageContextSnapshot =
