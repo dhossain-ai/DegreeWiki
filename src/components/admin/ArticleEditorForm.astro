@@ -117,6 +117,18 @@ const canonicalHint = (() => {
   if (!values.slug.trim()) return 'A canonical override is set, but the guide slug is still blank.'
   return 'Use this only when search engines should prefer another public URL for the same content.'
 })()
+
+const guidePathHint = (() => {
+  if (!values.slug.trim()) return 'Add a slug to preview the final `/guides/{slug}` route.'
+  if (values.content_status === 'published') return 'This published guide is available at the path above.'
+  return 'When published, this guide will appear at the path above.'
+})()
+
+const openGuideHint = (() => {
+  if (!values.slug.trim()) return 'Add a slug to enable the public guide route.'
+  if (values.content_status !== 'published') return 'Publish this article to open the live public guide.'
+  return 'Open the current public guide in a new tab.'
+})()
 ---
 <form method="post" data-article-editor>
   {returnTo !== '' && <input type="hidden" name="returnTo" value={returnTo} />}
@@ -185,7 +197,7 @@ const canonicalHint = (() => {
             <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
               <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Guide path preview</p>
               <p class="mt-1 font-mono text-sm text-blue-900" data-path-preview>{publicGuidePath}</p>
-              <p class="mt-1 text-xs text-blue-700">Published guides appear under `/guides/{values.slug.trim() ? values.slug.trim() : '...'}`.</p>
+              <p class="mt-1 text-xs text-blue-700" data-path-hint>{guidePathHint}</p>
             </div>
           </div>
 
@@ -403,7 +415,7 @@ const canonicalHint = (() => {
                 placeholder="Defaults to the SEO title"
                 class={inputClass}
               />
-              <p class={hintClass}>Optional override for social sharing titles.</p>
+              <p class={hintClass}>Optional override for social sharing titles. Blank falls back to the SEO title, then the article title.</p>
               {errors.og_title && <p class={errorClass}>{errors.og_title}</p>}
             </div>
 
@@ -416,7 +428,7 @@ const canonicalHint = (() => {
                 placeholder="Defaults to the SEO description"
                 class={inputClass}
               >{values.og_description}</textarea>
-              <p class={hintClass}>Optional override for social sharing descriptions.</p>
+              <p class={hintClass}>Optional override for social sharing descriptions. Blank falls back to the SEO description, then the summary.</p>
               {errors.og_description && <p class={errorClass}>{errors.og_description}</p>}
             </div>
           </div>
@@ -531,7 +543,7 @@ const canonicalHint = (() => {
             </a>
           </div>
           {!showPublicGuideLink && (
-            <p class="mt-2 text-xs text-gray-500" data-open-guide-placeholder>Open-link preview appears here once the article is published with a slug.</p>
+            <p class="mt-2 text-xs text-gray-500" data-open-guide-placeholder>{openGuideHint}</p>
           )}
         </div>
       </section>
@@ -699,6 +711,20 @@ const canonicalHint = (() => {
     return 'Use this only when search engines should prefer another public URL for the same content.'
   }
 
+  function getGuidePathHelperText(contentStatus: string, slug: string): string {
+    const cleanSlug = slug.trim()
+    if (!cleanSlug) return 'Add a slug to preview the final `/guides/{slug}` route.'
+    if (contentStatus === 'published') return 'This published guide is available at the path above.'
+    return 'When published, this guide will appear at the path above.'
+  }
+
+  function getOpenGuideHelperText(contentStatus: string, slug: string): string {
+    const cleanSlug = slug.trim()
+    if (!cleanSlug) return 'Add a slug to enable the public guide route.'
+    if (contentStatus !== 'published') return 'Publish this article to open the live public guide.'
+    return 'Open the current public guide in a new tab.'
+  }
+
   function setText(target: Element | null, text: string): void {
     if (target) target.textContent = text
   }
@@ -731,6 +757,7 @@ const canonicalHint = (() => {
     const seoPreviewTitleEl = root.querySelector<HTMLElement>('[data-seo-preview-title]')
     const seoPreviewDescriptionEl = root.querySelector<HTMLElement>('[data-seo-preview-description]')
     const canonicalHelperEl = root.querySelector<HTMLElement>('[data-canonical-helper]')
+    const pathHintEl = root.querySelector<HTMLElement>('[data-path-hint]')
     const readinessBoxEl = root.querySelector<HTMLElement>('[data-readiness-box]')
     const readinessLabelEl = root.querySelector<HTMLElement>('[data-readiness-label]')
     const readinessScoreEl = root.querySelector<HTMLElement>('[data-readiness-score]')
@@ -843,6 +870,7 @@ const canonicalHint = (() => {
       pathTargets.forEach(target => {
         target.textContent = publicPath
       })
+      setText(pathHintEl, getGuidePathHelperText(values.content_status, values.slug))
 
       setText(seoPreviewUrlEl, `degreewiki.com${publicPath === '/guides/...' ? '/guides/...' : publicPath}`)
       setText(seoPreviewTitleEl, (values.seo_title.trim() || values.title.trim() || 'Article title').slice(0, 70))
@@ -876,7 +904,10 @@ const canonicalHint = (() => {
       const showOpenGuideLink = values.content_status === 'published' && values.slug.trim() !== ''
       if (openGuideWrapEl) openGuideWrapEl.hidden = !showOpenGuideLink
       if (openGuideLinkEl) openGuideLinkEl.href = publicPath
-      if (openGuidePlaceholderEl) openGuidePlaceholderEl.hidden = showOpenGuideLink
+      if (openGuidePlaceholderEl) {
+        openGuidePlaceholderEl.hidden = showOpenGuideLink
+        openGuidePlaceholderEl.textContent = getOpenGuideHelperText(values.content_status, values.slug)
+      }
 
       checklist.forEach(item => {
         const target = checklistTargets.get(item.key)
