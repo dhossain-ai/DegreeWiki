@@ -25,6 +25,11 @@ export function getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv {
   // Safe process.env reference for the Node.js `astro dev` context.
   // In Cloudflare Workers, process is undefined or has no user env vars.
   const nodeEnv = typeof process !== 'undefined' ? process.env : {} as Record<string, string | undefined>
+  const shouldLogEnvPresence =
+    import.meta.env.DEV
+    && (raw['DEBUG_AI_ENV'] === 'true'
+      || import.meta.env.DEBUG_AI_ENV === 'true'
+      || nodeEnv['DEBUG_AI_ENV'] === 'true')
 
   const result: AIRuntimeEnv = {
     AI_PROVIDER:               raw['AI_PROVIDER']               ?? import.meta.env.AI_PROVIDER               ?? nodeEnv['AI_PROVIDER'],
@@ -45,7 +50,7 @@ export function getAIEnv(locals: Record<string, unknown>): AIRuntimeEnv {
     SUPABASE_SERVICE_ROLE_KEY: raw['SUPABASE_SERVICE_ROLE_KEY'] ?? import.meta.env.SUPABASE_SERVICE_ROLE_KEY ?? nodeEnv['SUPABASE_SERVICE_ROLE_KEY'],
   }
 
-  if (import.meta.env.DEV) {
+  if (shouldLogEnvPresence) {
     const keys = [
       'AI_PROVIDER', 'AI_MODEL',
       'AI_GATEWAY_MASTER_KEY', 'AI_GATEWAY_ACTIVE_KEY_VERSION', 'AI_GATEWAY_ENV_FALLBACK_ENABLED',
