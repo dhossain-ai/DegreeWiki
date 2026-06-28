@@ -241,6 +241,12 @@ export interface AIGatewaySuccess {
 export interface AIGatewayFailure {
   usedEnvFallback: boolean
   failure: AIGatewayAttemptFailure | null
+  diagnosticReason?:
+    | 'no_candidates'
+    | 'no_eligible_candidates'
+    | 'provider_setup_failed'
+    | 'provider_request_failed'
+  candidateCount?: number
 }
 
 // Usage audit entry written to ai_usage_logs (Phase 25+).

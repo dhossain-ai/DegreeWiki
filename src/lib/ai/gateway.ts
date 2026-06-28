@@ -12,6 +12,35 @@ function logAIDev(message: string, details: Record<string, unknown>): void {
   console.log(`[AI gateway] ${message}:`, details)
 }
 
+function logAIFailure(
+  request: AIRequest,
+  useCase: string,
+  routeResult: {
+    failure: {
+      providerCode: string
+      modelName: string
+      category: string
+      status?: number
+    } | null
+    diagnosticReason?: string
+    candidateCount?: number
+    usedEnvFallback: boolean
+  },
+): void {
+  console.warn('[AI gateway] route failed', {
+    useCase,
+    sessionType: request.sessionType,
+    chatMode: request.chatMode ?? null,
+    diagnosticReason: routeResult.diagnosticReason ?? 'unknown',
+    candidateCount: routeResult.candidateCount ?? 0,
+    usedEnvFallback: routeResult.usedEnvFallback,
+    provider: routeResult.failure?.providerCode ?? null,
+    model: routeResult.failure?.modelName ?? null,
+    category: routeResult.failure?.category ?? null,
+    status: routeResult.failure?.status ?? null,
+  })
+}
+
 // callAI is the single server-only entry point for all LLM calls.
 //
 // Caller contract:
@@ -104,6 +133,7 @@ export async function callAI(
 
   if (!('response' in routeResult)) {
     const failure = routeResult.failure
+    logAIFailure(request, useCase, routeResult)
     return {
       text: 'AI is temporarily unavailable. Please try again later.',
       modelUsed: failure?.modelName ?? 'none',
@@ -111,16 +141,26 @@ export async function callAI(
       completionTokens: 0,
       guardrailTripped: false,
       fallbackUsed: true,
-      failure: failure
-        ? {
-            source: 'provider',
-            provider: failure.providerCode,
-            model: failure.modelName,
-            category: failure.category,
-            status: failure.status,
-            requestAttempted: true,
-          }
-        : undefined,
+      failure:
+        routeResult.diagnosticReason === 'no_candidates'
+        || routeResult.diagnosticReason === 'no_eligible_candidates'
+        || routeResult.diagnosticReason === 'provider_setup_failed'
+          ? {
+              source: 'provider_config',
+              provider: failure?.providerCode ?? 'unconfigured',
+              model: failure?.modelName ?? useCase,
+              requestAttempted: false,
+            }
+          : failure
+            ? {
+                source: 'provider',
+                provider: failure.providerCode,
+                model: failure.modelName,
+                category: failure.category,
+                status: failure.status,
+                requestAttempted: true,
+              }
+            : undefined,
     }
   }
   const providerResponse = routeResult.response

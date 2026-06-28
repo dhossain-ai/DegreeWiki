@@ -30,6 +30,39 @@ function normalizeCurrentPath(value: unknown): string {
   return value.slice(0, 180)
 }
 
+function logSiteChatFallback(
+  userId: string,
+  currentPath: string,
+  pageType: string,
+  failure: ReturnType<typeof mapSiteChatFallbackError>['failure'],
+): void {
+  console.warn('site chat api: AI fallback', {
+    userId,
+    currentPath,
+    pageType,
+    failureSource: failure?.source ?? null,
+    failureReason: failure && 'reason' in failure ? failure.reason : null,
+    provider: failure && 'provider' in failure ? failure.provider : null,
+    model: failure && 'model' in failure ? failure.model : null,
+    category: failure && 'category' in failure ? failure.category : null,
+    status: failure && 'status' in failure ? failure.status ?? null : null,
+    requestAttempted: failure?.requestAttempted ?? null,
+  })
+}
+
+function mapSiteChatFallbackError(
+  aiResponse: Awaited<ReturnType<typeof callAI>>,
+): { status: number; error: 'rate_limit_exceeded' | 'ai_unavailable' | 'ai_setup_unavailable'; failure: typeof aiResponse.failure } {
+  const failure = aiResponse.failure
+  if (failure?.source === 'rate_limit' && failure.reason === 'limit_exceeded') {
+    return { status: 429, error: 'rate_limit_exceeded', failure }
+  }
+  if (failure?.source === 'provider_config') {
+    return { status: 503, error: 'ai_setup_unavailable', failure }
+  }
+  return { status: 503, error: 'ai_unavailable', failure }
+}
+
 export const POST: APIRoute = async ({ cookies, request, locals }) => {
   let body: unknown
   try {
@@ -131,7 +164,9 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   }
 
   if (aiResponse.fallbackUsed) {
-    return jsonResponse(503, { ok: false, error: 'ai_unavailable' })
+    const mapped = mapSiteChatFallbackError(aiResponse)
+    logSiteChatFallback(user.id, currentPath, pageType, mapped.failure)
+    return jsonResponse(mapped.status, { ok: false, error: mapped.error })
   }
 
   const contextUsed: SiteChatContextUsedSnapshot = {

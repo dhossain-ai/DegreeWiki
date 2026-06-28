@@ -225,9 +225,12 @@ export async function runAIGatewayRoute(
   request: AIRouterRequest,
 ): Promise<AIGatewaySuccess | AIGatewayFailure> {
   const candidates = await loadRoutingCandidates(request.useCase, request.env)
+  const candidateCount = candidates.length
   let lastFailure: AIGatewayAttemptFailure | null = null
   let lastFailureLogId: string | null = null
   let fallbackAttemptNumber = 0
+  let sawEligibleCandidate = false
+  let lastFailureReason: AIGatewayFailure['diagnosticReason'] | undefined
 
   for (const candidate of candidates) {
     if (!candidate.policy.isActive || !candidate.model.isActive || !candidate.providerAccount.isActive) {
@@ -296,10 +299,13 @@ export async function runAIGatewayRoute(
       continue
     }
 
+    sawEligibleCandidate = true
+
     let apiKey: string
     try {
       apiKey = await decryptProviderApiKey(candidate.providerAccount, request.env)
     } catch {
+      lastFailureReason = 'provider_setup_failed'
       lastFailure = buildAttemptFailure(
         candidate.providerAccount.providerCode,
         candidate.model.modelName,
@@ -329,6 +335,7 @@ export async function runAIGatewayRoute(
 
     const provider = createProviderForCandidate(candidate, apiKey)
     if (!provider) {
+      lastFailureReason = 'provider_setup_failed'
       lastFailure = buildAttemptFailure(
         candidate.providerAccount.providerCode,
         candidate.model.modelName,
@@ -402,6 +409,7 @@ export async function runAIGatewayRoute(
         logId,
       }
     } catch (error) {
+      lastFailureReason = 'provider_request_failed'
       const category = isAIProviderError(error) ? error.category : 'unknown_error'
       const status = isAIProviderError(error) ? error.status : undefined
       lastFailure = buildAttemptFailure(
@@ -448,5 +456,13 @@ export async function runAIGatewayRoute(
   return {
     usedEnvFallback: false,
     failure: lastFailure,
+    diagnosticReason: lastFailure
+      ? (lastFailureReason ?? 'provider_request_failed')
+      : candidateCount === 0
+        ? 'no_candidates'
+        : sawEligibleCandidate
+          ? 'provider_setup_failed'
+          : 'no_eligible_candidates',
+    candidateCount,
   }
 }
