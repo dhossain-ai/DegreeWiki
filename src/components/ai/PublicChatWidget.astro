@@ -295,6 +295,7 @@ const { currentPath } = Astro.props
     if (err === 'invalid_message') return 'Please enter a question between 1 and 1000 characters.'
     if (err === 'message_rejected') return data && data.answer ? data.answer : 'That message cannot be processed here.'
     if (err === 'rate_limit_exceeded') return "You've reached today's AI usage limit. Please try again tomorrow."
+    if (err === 'ai_setup_unavailable') return 'AI chat is not fully available right now. Please try again later.'
     if (err === 'ai_unavailable') return 'AI is temporarily unavailable. Please try again in a few minutes.'
     if (err === 'unauthenticated') return 'Please sign in again to continue.'
     return 'Something went wrong. Please try again.'
