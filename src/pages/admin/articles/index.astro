@@ -1,7 +1,14 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
-import { CONTENT_STATUS_BADGE, VERIFICATION_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import { CONTENT_STATUS_BADGE, VERIFICATION_STATUS_BADGE, INDEXING_STATUS_BADGE, FALLBACK_BADGE } from '../../../lib/admin/badges'
+import {
+  INDEXING_LABELS,
+  MIN_BODY_WORDS,
+  calculateArticleChecklist,
+  countWords,
+  getArticleReadiness,
+} from '../../../lib/admin/articleAuthoring'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
@@ -47,10 +54,13 @@ type ArticleRow = {
   title: string
   slug: string
   summary: string | null
+  content: string | null
   content_status: string
+  indexing_status: string
   verification_status: string
   article_category_id: string | null
   author_user_id: string | null
+  featured_image_id: string | null
   seo_title: string | null
   seo_description: string | null
   data_completeness_score: number
@@ -79,8 +89,8 @@ const selectedAuthorId = validAuthorIds.has(rawAuthorId) ? rawAuthorId : ''
 let articlesQuery = supabase
   .from('articles')
   .select(
-    `id, title, slug, summary, content_status, verification_status, article_category_id, author_user_id,
-     seo_title, seo_description, data_completeness_score, source_confidence_score,
+    `id, title, slug, summary, content, content_status, indexing_status, verification_status, article_category_id, author_user_id,
+     featured_image_id, seo_title, seo_description, data_completeness_score, source_confidence_score,
      created_at, updated_at, article_categories(name), author:user_profiles!articles_author_user_id_fkey(display_name)`,
     { count: 'exact' }
   )
@@ -125,6 +135,57 @@ const buildEditHref = (id: string) =>
   currentListPath
     ? `/admin/articles/${id}?returnTo=${encodeURIComponent(currentListPath)}`
     : `/admin/articles/${id}`
+
+const normalizeText = (value: string | null | undefined) => (typeof value === 'string' ? value.trim() : '')
+
+const READINESS_BADGE: Record<string, string> = {
+  ready_to_publish: 'bg-green-100 text-green-700',
+  strong_draft: 'bg-blue-100 text-blue-700',
+  needs_polish: 'bg-amber-100 text-amber-700',
+  early_draft: 'bg-gray-100 text-gray-600',
+}
+
+const enrichedRows = rows.map((row) => {
+  const bodyWordCount = countWords(row.content)
+  const readiness = getArticleReadiness(calculateArticleChecklist({
+    title: row.title,
+    slug: row.slug,
+    content_status: row.content_status,
+    article_category_id: row.article_category_id ?? '',
+    summary: row.summary ?? '',
+    content: row.content ?? '',
+    indexing_status: row.indexing_status,
+    verification_status: row.verification_status,
+    featured_image_id: row.featured_image_id ?? '',
+    og_image_id: '',
+    seo_title: row.seo_title ?? '',
+    seo_description: row.seo_description ?? '',
+    seo_h1: '',
+    canonical_url: '',
+    og_title: '',
+    og_description: '',
+  }))
+
+  const readinessNotes = [
+    !normalizeText(row.summary) ? 'Missing summary' : null,
+    bodyWordCount === 0 ? 'Missing body' : bodyWordCount < MIN_BODY_WORDS ? `Short body (${bodyWordCount} words)` : null,
+    !normalizeText(row.featured_image_id) ? 'Missing featured image' : null,
+    !normalizeText(row.seo_title) ? 'Missing SEO title' : null,
+    !normalizeText(row.seo_description) ? 'Missing SEO description' : null,
+  ].filter(Boolean) as string[]
+
+  const publicHref = row.content_status === 'published' && normalizeText(row.slug)
+    ? `/guides/${normalizeText(row.slug)}`
+    : null
+
+  return {
+    ...row,
+    bodyWordCount,
+    publicHref,
+    readiness,
+    readinessNotes,
+  }
+})
 
 const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 const selectClass = inputClass + ' bg-white'
@@ -253,21 +314,18 @@ const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
           </tr>
         </thead>
         <tbody>
-          {rows.map(row => (
+          {enrichedRows.map(row => (
             <tr class="border-b border-gray-100 align-top hover:bg-gray-50">
               <td class="px-4 py-3">
                 <div class="font-medium text-gray-900">{row.title}</div>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
                   <span class="font-mono">{row.slug}</span>
-                  {!row.summary?.trim() && (
-                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing summary</span>
-                  )}
-                  {!row.seo_title?.trim() && (
-                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing SEO title</span>
-                  )}
-                  {!row.seo_description?.trim() && (
-                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Missing SEO description</span>
-                  )}
+                  <span class={`rounded px-1.5 py-0.5 ${READINESS_BADGE[row.readiness.level] ?? FALLBACK_BADGE}`}>
+                    {row.readiness.label}
+                  </span>
+                  {row.readinessNotes.map(note => (
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">{note}</span>
+                  ))}
                   {row.data_completeness_score < 60 && (
                     <span class="rounded bg-yellow-50 px-1.5 py-0.5 text-yellow-700">Low completeness</span>
                   )}
@@ -281,9 +339,14 @@ const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
                 {row.author_user_id ? (row.author?.display_name?.trim() || `User ${row.author_user_id.slice(0, 8)}`) : 'Unassigned'}
               </td>
               <td class="px-4 py-3">
-                <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
-                  {formatEnumLabel(row.content_status)}
-                </span>
+                <div class="flex flex-wrap gap-2">
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${CONTENT_STATUS_BADGE[row.content_status] ?? FALLBACK_BADGE}`}>
+                    {formatEnumLabel(row.content_status)}
+                  </span>
+                  <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${INDEXING_STATUS_BADGE[row.indexing_status] ?? FALLBACK_BADGE}`}>
+                    {INDEXING_LABELS[row.indexing_status] ?? formatEnumLabel(row.indexing_status)}
+                  </span>
+                </div>
               </td>
               <td class="px-4 py-3">
                 <span class={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${VERIFICATION_STATUS_BADGE[row.verification_status] ?? FALLBACK_BADGE}`}>
@@ -295,7 +358,12 @@ const filterCardClass = 'mb-6 rounded-lg border border-gray-200 bg-white p-4'
                 <div class="mt-1 text-gray-400">Created {new Date(row.created_at).toLocaleDateString()}</div>
               </td>
               <td class="px-4 py-3 text-right">
-                <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
+                <div class="flex flex-col items-end gap-1">
+                  <a href={buildEditHref(row.id)} class="text-xs text-blue-600 hover:underline">Edit</a>
+                  {row.publicHref && (
+                    <a href={row.publicHref} class="text-xs text-gray-600 hover:underline" target="_blank" rel="noreferrer">View guide</a>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

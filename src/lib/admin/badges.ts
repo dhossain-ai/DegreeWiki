@@ -18,6 +18,12 @@ export const VERIFICATION_STATUS_BADGE: Record<string, string> = {
   needs_review: 'bg-yellow-100 text-yellow-700',
 }
 
+export const INDEXING_STATUS_BADGE: Record<string, string> = {
+  draft: 'bg-gray-100 text-gray-600',
+  index: 'bg-green-100 text-green-700',
+  noindex: 'bg-orange-100 text-orange-700',
+}
+
 export const IMPORT_STATUS_BADGE: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
   processing: 'bg-blue-100 text-blue-700',
