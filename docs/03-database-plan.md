@@ -76,6 +76,26 @@ Important program data:
 - official URLs
 - verification status
 
+## Country Profile Enrichment
+
+Phase 73B adds additive enrichment columns on `countries` for richer destination profiles.
+
+Implemented field groups:
+
+- destination facts
+- tuition and living-cost overviews plus structured ranges
+- admissions, visa, documents, intakes, scholarship, and university-system summaries
+- student work and post-study work facts
+- official education and visa source URLs
+- FAQ JSON content
+
+Deferred:
+
+- Phase 73C: admin country form wiring
+- Phase 73D: public destination page wiring
+- Phase 74: university schema/admin expansion
+- import/staging support for country enrichment
+
 ## Auth/Admin Tables
 
 Planned tables:

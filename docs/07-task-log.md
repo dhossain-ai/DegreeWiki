@@ -5,6 +5,21 @@
 
 ## Recent Task Log
 
+### Phase 73B - Country Profile Enrichment Schema
+
+- Added `027_country_profile_enrichment.sql` with additive nullable columns on `public.countries`
+  for destination facts, editorial overviews, structured tuition/living-cost ranges, work and
+  post-study metadata, official education/visa URLs, and FAQ JSON content.
+- Added nullable-safe CHECK constraints for non-negative tuition/living-cost values and for
+  `max >= min` range safety when both sides are present.
+- Kept the phase schema-only and low-risk: no `universities` changes, no admin form wiring, no
+  public destination page changes, no import/staging changes, no new indexes, and no RLS changes.
+- Documented the phase in the active database plan and status docs, with admin country wiring
+  deferred to Phase 73C, public destination wiring deferred to Phase 73D, and university
+  admin/schema work deferred to Phase 74.
+- Ran `npm run build` plus the required safety greps for unsafe HTML/service-role usage and
+  secret-key references in `src`.
+
 ### Phase 72A - Public Country Profile UX Polish
 
 - Added a dedicated public destination country route at `src/pages/destinations/[slug].astro`

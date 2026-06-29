@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 72A is complete. DegreeWiki now has dedicated public destination country profiles at
-`/destinations/[slug]`, slug-based destination card links, preview sections for country-linked
-programs and universities, and public route coverage updates for sitemap and chat visibility.
+Phase 73B is complete. DegreeWiki now has additive country profile enrichment columns on
+`public.countries` for destination facts, structured cost ranges, work-rights metadata, official
+source URLs, editorial country-profile sections, and FAQ content.
 
 Current branch: `main`
 
@@ -34,11 +34,14 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 72A checks run:
+- Phase 73B checks run:
   `npm run build`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
   `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
+- Phase 73B remains schema-only and safe:
+  no admin wiring yet, no public destination rendering changes yet, no university schema/admin
+  changes, no import/staging changes, no new dependencies, and no RLS changes.
 
 ## Known Open Notes
 
@@ -80,6 +83,9 @@ Very short import pipeline summary:
 - CSV import and persistent uploaded-file import storage remain deferred.
 - Destination country profiles now exist at `/destinations/[slug]`, but guide/article previews for
   countries remain deferred because articles still do not carry a proper country relation.
+- Country profile enrichment columns now exist in the schema, but admin country form wiring is
+  deferred to Phase 73C and public destination page wiring is deferred to Phase 73D.
+- University admin/schema work remains deferred to Phase 74.
 - `program_intakes` import remains intentionally deferred.
 
 ## Archive Index
