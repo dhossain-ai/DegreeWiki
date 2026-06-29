@@ -324,6 +324,7 @@ After a successful routed AI call, verify `ai_gateway_call_logs` contains an att
 
 - `use_case = 'fit_finder_summary'` for Fit Finder summaries
 - `use_case = 'chat_answer'` for saved-result chat LLM turns
+- `use_case = 'admin_article_draft'` for admin article drafting and SEO suggestions
 
 Expected:
 - `status = 'success'` or `env_fallback_success`
@@ -342,6 +343,7 @@ Use `/admin/ai-gateway` for routine AI Gateway configuration after deployment.
 - [ ] API key saved successfully and only masked metadata is visible in the UI
 - [ ] Model row created and linked to the intended provider account
 - [ ] Routing policy row created for the intended use case and priority
+- [ ] If using the article assistant, an active `admin_article_draft` routing policy exists
 - [ ] Health table loads and reset action clears failures/error/cooldown without wiping timestamps
 - [ ] Preset admin test succeeds or returns a safe coarse failure without exposing secrets
 
@@ -353,6 +355,11 @@ Admin test safety note:
 - Admin tests are preset-only
 - No real student data is used
 - Admin tests do not poison production provider health/cooldown
+
+Article assistant note:
+- `/api/admin/articles/ai-assist` stays admin-only
+- If no active `admin_article_draft` route exists, the editor should show a safe setup message
+- AI suggestions are review-only and are not persisted until the admin uses the normal article save flow
 
 ---
 

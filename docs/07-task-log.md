@@ -5,6 +5,30 @@
 
 ## Recent Task Log
 
+### Phase 70C - Article AI Assistant Foundation
+
+- Added an admin-only article AI assistant endpoint at `/api/admin/articles/ai-assist` plus
+  server-side article-assist normalization that caps title, summary, content, category, and SEO
+  fields before calling the shared AI Gateway.
+- Added a dedicated `src/lib/ai/prompts/admin-article-draft.ts` prompt for the
+  `admin_article_draft` route with plain-text output rules, anti-hallucination constraints,
+  no-citation/no-live-verification rules, and supported actions limited to outline, SEO title,
+  SEO description, summary, FAQ ideas, and risk checks.
+- Kept the assistant narrow and editorial-only: no auto-save, no auto-publish, no full article
+  generation, no automatic body replacement, no new persistence table, and no raw provider errors
+  exposed to the browser.
+- Extended the shared `callAI()` path with a prompt override so admin-only article assist can reuse
+  the existing gateway routing, rate limiting, output guardrails, usage logging, and metadata-only
+  gateway call logs without changing Fit Finder or chat behavior.
+- Added an AI Assistant card to `src/components/admin/ArticleEditorForm.astro` with safe fetch
+  calls, loading/error states, plain-text suggestion output, warning display, copy support, local
+  apply buttons for summary/SEO fields, and local append-only body actions for outline/FAQ
+  suggestions.
+- Updated `/admin/ai-gateway` so `admin_article_draft` is clearly visible as the admin article
+  drafting and SEO suggestion use case alongside the existing live student-facing routes.
+- Kept article suggestions session-only and documented that the assistant currently shares the
+  existing `chat` quota bucket to avoid a migration.
+
 ### Phase 70B - Article Publish + SEO Polish
 
 - Polished `/admin/articles` to surface article readiness more quickly with readiness badges,

@@ -196,10 +196,12 @@ callAI(request: AIRequest, env: AIRuntimeEnv): Promise<AIResponse>
 - Daily limit read from env.AI_RATE_LIMIT_USER_DAILY (default 20).
 - Rate limit checked second (checkRateLimit) — fail closed:
     no userId → denied; no service client → denied; query error → denied.
-- Prompt built: buildFinderPrompt for finder sessions, buildChatPrompt for chat.
+- Prompt built: buildFinderPrompt for finder sessions, buildChatPrompt for chat,
+  or a caller-provided prompt override for admin-only article assist.
 - Use-case routed through router.ts:
     fit_finder_summary for saved Fit Finder summaries
     chat_answer for saved-result AI chat
+    admin_article_draft for admin article drafting and SEO suggestions
 - router.ts tries DB-backed routing policies first, logs every attempt to
   ai_gateway_call_logs, applies provider health cooldowns, and only then
   uses env fallback when AI_GATEWAY_ENV_FALLBACK_ENABLED=true.
@@ -224,6 +226,9 @@ Current live product routing:
 - Fit Finder async summary → use_case = fit_finder_summary
 - Saved-result chat LLM path → use_case = chat_answer
 - Static saved-result chat responses still bypass AI entirely
+
+Current live admin routing:
+- Admin article assistant → use_case = admin_article_draft
 
 Provider keys:
 - Stored encrypted in ai_provider_accounts only
@@ -279,8 +284,44 @@ Current live product routing remains limited to:
 - `fit_finder_summary`
 - `chat_answer`
 
+Current live admin routing also includes:
+- `admin_article_draft`
+
 The admin dashboard does not expand public chatbot scope or change the existing
 `/api/ai/finder-summary` or `/api/ai/chat` contracts.
+
+### Phase 70C Behaviour — Admin Article AI Assistant
+
+Phase 70C adds an admin-only article assistant at `/api/admin/articles/ai-assist`
+and inside the shared article editor form.
+
+Route and prompt rules:
+- Uses `use_case = 'admin_article_draft'`
+- Uses an article-specific prompt, not the Fit Finder or site-chat prompts
+- Returns plain-text suggestions only
+- No HTML rendering, Markdown rendering, `innerHTML`, or `set:html`
+
+Allowed actions:
+- outline
+- seo_title
+- seo_description
+- summary
+- faq
+- risk_check
+
+Safety boundaries:
+- No auto-save
+- No auto-publish
+- No full article generation
+- No automatic body replace action
+- No new suggestion persistence table
+- No invented tuition, deadlines, admission requirements, scholarship details, or visa rules
+- No fake citations, live verification claims, or guarantees
+
+Quota/logging note:
+- The admin article assistant currently reuses the existing `chat` usage-log bucket
+  to avoid a migration.
+- Gateway call logs remain metadata-only and do not store article bodies or AI suggestions.
 
 ### Phase 25 Behaviour — Usage Logging and Rate Limits
 

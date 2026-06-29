@@ -5,9 +5,9 @@
 
 ## Current Project Status
 
-Phase 70B is complete. DegreeWiki now has small article publish/SEO polish on top of the Phase 70A
-shared editor: clearer admin list readiness signals, a tighter publish/open-public workflow in the
-editor, and hardened public guide SEO/media fallbacks.
+Phase 70C is complete. DegreeWiki now has an admin-only AI article assistant on top of the Phase
+70A/70B shared editor: reviewable outline/SEO/summary/FAQ/risk-check suggestions, safe AI Gateway
+routing through `admin_article_draft`, and no change to the existing save or publish workflow.
 
 Current branch: `main`
 
@@ -32,7 +32,7 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 70B checks run:
+- Phase 70C checks run:
   `npm run build`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
@@ -43,10 +43,17 @@ Very short import pipeline summary:
 - Phase 70B kept the article workflow small and safe:
   no migration, no dependency changes, no schema changes, and no create/edit/save/publish contract
   changes.
+- Phase 70C keeps AI article assistance equally narrow:
+  no migration, no dependency changes, no suggestion persistence, no auto-save, no auto-publish,
+  and no automatic body replacement.
 - Public guide rendering contracts stayed the same in Phase 70B aside from tiny fallback bug fixes
   for trimmed SEO/meta values and safer OG image URL generation.
 - Article verification remains status-only in Phase 70A.
   The admin article editor does not stamp or update `last_verified_at`.
+- The admin article assistant uses `use_case = 'admin_article_draft'` and requires active AI
+  Gateway routing before it can return suggestions.
+- The admin article assistant currently shares the existing `chat` quota bucket in `ai_usage_logs`
+  to avoid a migration.
 - DB-backed provider routing is ready, but it still depends on provider/account/model/policy rows
   before it replaces env fallback in practice.
 - DB-managed provider accounts currently support `openai_compatible` only.
