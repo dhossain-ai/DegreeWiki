@@ -7,9 +7,17 @@ import {
   AI_GATEWAY_LIVE_USE_CASES,
   AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS,
   AI_GATEWAY_TEST_PRESETS,
-  AI_GATEWAY_USE_CASE_DESCRIPTIONS,
   AI_GATEWAY_USE_CASES,
+  AI_GATEWAY_USE_CASE_DESCRIPTIONS,
+  AI_USAGE_LIMIT_AUDIENCE_LABELS,
+  AI_USAGE_LIMIT_AUDIENCE_TIERS,
+  AI_USAGE_LIMIT_PERIOD_LABELS,
+  AI_USAGE_LIMIT_PERIODS,
 } from '../../lib/ai/admin/constants'
+import {
+  getAdminUsageFallbackDefaults,
+  getSuggestedUsageLimitPolicies,
+} from '../../lib/ai/admin/usage-limits'
 import { isAIGatewayEnvFallbackEnabled } from '../../lib/ai/admin/store'
 import { getAIEnv } from '../../lib/ai/env'
 
@@ -26,7 +34,7 @@ const { user, supabase } = guard
 const aiEnv = getAIEnv(Astro.locals as Record<string, unknown>)
 const envFallbackEnabled = isAIGatewayEnvFallbackEnabled(aiEnv)
 
-const [providersRes, modelsRes, policiesRes, healthRes] = await Promise.all([
+const [providersRes, modelsRes, policiesRes, healthRes, usageLimitsRes] = await Promise.all([
   supabase
     .from('ai_provider_accounts')
     .select(`
@@ -121,14 +129,39 @@ const [providersRes, modelsRes, policiesRes, healthRes] = await Promise.all([
       )
     `)
     .order('updated_at', { ascending: false }),
+  supabase
+    .from('ai_usage_limit_policies')
+    .select(`
+      id,
+      use_case,
+      audience_tier,
+      period,
+      max_calls,
+      max_tokens,
+      is_enabled,
+      notes,
+      created_by_user_id,
+      updated_by_user_id,
+      created_at,
+      updated_at
+    `)
+    .order('use_case', { ascending: true })
+    .order('audience_tier', { ascending: true })
+    .order('period', { ascending: true }),
 ])
 
 const providers = (providersRes.data ?? []) as any[]
 const models = (modelsRes.data ?? []) as any[]
 const policies = (policiesRes.data ?? []) as any[]
 const healthRows = (healthRes.data ?? []) as any[]
+const usageLimitPolicies = (usageLimitsRes.data ?? []) as any[]
 
-const loadError = providersRes.error || modelsRes.error || policiesRes.error || healthRes.error
+const loadError =
+  providersRes.error
+  || modelsRes.error
+  || policiesRes.error
+  || healthRes.error
+  || usageLimitsRes.error
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—'
@@ -190,6 +223,14 @@ function useCaseDescription(useCase: string): string {
   return AI_GATEWAY_USE_CASE_DESCRIPTIONS[useCase as keyof typeof AI_GATEWAY_USE_CASE_DESCRIPTIONS] ?? 'No description available.'
 }
 
+function audienceTierLabel(audienceTier: string): string {
+  return AI_USAGE_LIMIT_AUDIENCE_LABELS[audienceTier as keyof typeof AI_USAGE_LIMIT_AUDIENCE_LABELS] ?? audienceTier
+}
+
+function periodLabel(period: string): string {
+  return AI_USAGE_LIMIT_PERIOD_LABELS[period as keyof typeof AI_USAGE_LIMIT_PERIOD_LABELS] ?? period
+}
+
 function isAdminLiveUseCase(useCase: string): boolean {
   return AI_GATEWAY_ADMIN_USE_CASES.includes(useCase as any)
 }
@@ -236,30 +277,43 @@ const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
   rows: policies.filter((policy) => policy.use_case === useCase),
 }))
 
+const fallbackDefaults = getAdminUsageFallbackDefaults(aiEnv)
+const suggestedUsagePolicies = getSuggestedUsageLimitPolicies()
+
 const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'providers', label: 'Providers' },
   { id: 'models', label: 'Models' },
   { id: 'routing', label: 'Routing' },
+  { id: 'limits', label: 'Limits' },
   { id: 'testing', label: 'Testing' },
   { id: 'health', label: 'Health' },
 ] as const
 
 const requestedTab = Astro.url.searchParams.get('tab') ?? 'overview'
 const activeTab = tabs.some((tab) => tab.id === requestedTab) ? requestedTab : 'overview'
+const requestedLimitUseCase = Astro.url.searchParams.get('limit_use_case') ?? ''
+const requestedLimitAudienceTier = Astro.url.searchParams.get('limit_audience_tier') ?? ''
+const requestedLimitPeriod = Astro.url.searchParams.get('limit_period') ?? ''
 const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
   useCase,
   isAdmin: isAdminLiveUseCase(useCase),
   rows: policies.filter((policy) => policy.use_case === useCase),
 }))
+const filteredUsageLimitPolicies = usageLimitPolicies.filter((policy) => {
+  if (requestedLimitUseCase && policy.use_case !== requestedLimitUseCase) return false
+  if (requestedLimitAudienceTier && policy.audience_tier !== requestedLimitAudienceTier) return false
+  if (requestedLimitPeriod && policy.period !== requestedLimitPeriod) return false
+  return true
+})
 ---
 <AdminLayout title="AI Gateway — DegreeWiki Admin" activePath="/admin/ai-gateway" userEmail={user.email ?? ''}>
   <div class="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
     <div>
       <h1 class="text-xl font-bold text-gray-900">AI Gateway</h1>
       <p class="mt-2 max-w-4xl text-sm text-gray-600">
-        Manage DB-backed provider accounts, models, routing policies, health state, and admin-only
-        preset tests. Student-facing live routes include
+        Manage DB-backed provider accounts, models, routing policies, usage limits, health state,
+        and admin-only preset tests. Student-facing live routes include
         <span class="font-medium text-gray-800"> fit_finder_summary</span> and
         <span class="font-medium text-gray-800"> chat_answer</span>. The admin article assistant
         uses <span class="font-medium text-gray-800">admin_article_draft</span> for drafting and
@@ -1081,6 +1135,288 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
           )}
         </section>
       ))}
+    </div>
+  </section>
+  )}
+
+  {activeTab === 'limits' && (
+  <section class="mb-10 space-y-6">
+    <div class="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+      <div class="rounded-xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-950">
+        <h2 class="text-lg font-semibold">Usage Limit Policies</h2>
+        <div class="mt-3 space-y-2">
+          <p>Empty policy table means the legacy env fallback remains active.</p>
+          <p>Reviewed preset answers and hardcoded static answers do not count because they bypass provider calls.</p>
+          <p>AI Gateway admin tests do not count because they do not use the normal quota/logging path.</p>
+          <p>Provider call logs stay separate from quota logs: <code>ai_gateway_call_logs</code> records routing attempts while <code>ai_usage_logs</code> records successful quota consumption.</p>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
+        <h2 class="text-lg font-semibold">Legacy Env Fallback</h2>
+        <div class="mt-3 space-y-3">
+          <div class="rounded-lg bg-white/70 px-4 py-3">
+            <div class="font-medium">Logged-in combined daily limit</div>
+            <div class="mt-1 text-2xl font-semibold text-amber-950">{fallbackDefaults.legacyUserDaily}</div>
+            <div class="mt-1 text-xs text-amber-900">Current env/code fallback across successful AI calls when no DB policy exists.</div>
+          </div>
+          <div class="rounded-lg bg-white/70 px-4 py-3">
+            <div class="font-medium">Anonymous combined daily limit</div>
+            <div class="mt-1 text-2xl font-semibold text-amber-950">{fallbackDefaults.legacyAnonymousDaily}</div>
+            <div class="mt-1 text-xs text-amber-900">Reserved fallback for future anonymous provider-backed flows.</div>
+          </div>
+          <p class="text-xs text-amber-900">
+            Fallback mode is still <span class="font-medium">shared combined daily counting</span>, not per-use-case, until a matching DB policy is created.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div class="rounded-xl border border-gray-200 bg-white p-5">
+        <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h3 class="text-base font-semibold text-gray-900">Policy Filters</h3>
+            <p class="mt-1 text-sm text-gray-500">Filter the visible policy list without changing any quota data.</p>
+          </div>
+          <form method="GET" class="grid gap-3 md:grid-cols-4">
+            <input type="hidden" name="tab" value="limits" />
+            <div>
+              <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Use Case</label>
+              <select name="limit_use_case" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="">All use cases</option>
+                {AI_GATEWAY_USE_CASES.map((useCase) => (
+                  <option value={useCase} selected={requestedLimitUseCase === useCase}>{useCase}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Audience</label>
+              <select name="limit_audience_tier" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="">All audiences</option>
+                {AI_USAGE_LIMIT_AUDIENCE_TIERS.map((audienceTier) => (
+                  <option value={audienceTier} selected={requestedLimitAudienceTier === audienceTier}>
+                    {audienceTierLabel(audienceTier)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Period</label>
+              <select name="limit_period" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="">All periods</option>
+                {AI_USAGE_LIMIT_PERIODS.map((period) => (
+                  <option value={period} selected={requestedLimitPeriod === period}>{periodLabel(period)}</option>
+                ))}
+              </select>
+            </div>
+            <div class="flex gap-2">
+              <button type="submit" class="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                Apply
+              </button>
+              <a href="/admin/ai-gateway?tab=limits" class="inline-flex items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Reset
+              </a>
+            </div>
+          </form>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-gray-200">
+          <table class="w-full text-left text-sm">
+            <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+              <tr>
+                <th class="px-4 py-3">Use Case</th>
+                <th class="px-4 py-3">Audience</th>
+                <th class="px-4 py-3">Period</th>
+                <th class="px-4 py-3">Max Calls</th>
+                <th class="px-4 py-3">Status</th>
+                <th class="px-4 py-3">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredUsageLimitPolicies.length === 0 ? (
+                <tr>
+                  <td colspan="6" class="px-4 py-6 text-sm text-gray-500">
+                    {usageLimitPolicies.length === 0
+                      ? 'No DB-backed usage limit policies yet. Legacy env fallback remains active until an admin creates one.'
+                      : 'No policies match the current filters.'}
+                  </td>
+                </tr>
+              ) : filteredUsageLimitPolicies.map((policy) => (
+                <tr class="border-b border-gray-100 align-top">
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-gray-900">{policy.use_case}</div>
+                    <div class="text-xs text-gray-500">{useCaseDescription(policy.use_case)}</div>
+                  </td>
+                  <td class="px-4 py-3 text-gray-700">{audienceTierLabel(policy.audience_tier)}</td>
+                  <td class="px-4 py-3 text-gray-700">{periodLabel(policy.period)}</td>
+                  <td class="px-4 py-3 text-gray-700">
+                    <div>{policy.max_calls}</div>
+                    <div class="text-xs text-gray-500">token cap {policy.max_tokens == null ? 'not set' : policy.max_tokens}</div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class={badgeClass(policy.is_enabled === true)}>
+                      {policy.is_enabled ? 'enabled' : 'disabled'}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-gray-700">{policy.notes ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-gray-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-gray-900">Suggested Starters</h3>
+        <p class="mt-1 text-sm text-gray-500">Shown here only for setup guidance. These are not seeded automatically.</p>
+        <div class="mt-4 space-y-3">
+          {suggestedUsagePolicies.map((policy) => (
+            <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+              <div class="font-medium text-gray-900">{policy.useCase}</div>
+              <div class="mt-1">
+                {audienceTierLabel(policy.audienceTier)} · {periodLabel(policy.period)} · max calls {policy.maxCalls}
+              </div>
+              <div class="mt-1 text-xs text-gray-500">{policy.notes}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-2">
+      <section class="rounded-xl border border-gray-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-gray-900">Create Usage Limit Policy</h3>
+        <p class="mt-1 text-sm text-gray-500">Use DB policies only for the combinations you want to override. Everything else keeps the legacy env fallback.</p>
+        <form class="js-api-form mt-4 grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/usage-limits" data-success="Usage limit policy saved." data-reload="true">
+          <input type="hidden" name="action" value="create" />
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+            <select name="use_case" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+              {AI_GATEWAY_USE_CASES.map((useCase) => (
+                <option value={useCase}>{useCase}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Audience Tier</label>
+            <select name="audience_tier" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+              {AI_USAGE_LIMIT_AUDIENCE_TIERS.map((audienceTier) => (
+                <option value={audienceTier}>{audienceTierLabel(audienceTier)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Period</label>
+            <select name="period" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+              {AI_USAGE_LIMIT_PERIODS.map((period) => (
+                <option value={period}>{periodLabel(period)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Max Calls</label>
+            <input name="max_calls" type="number" min="0" max="100000" value="10" required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+            <input name="notes" data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div class="md:col-span-2 flex items-center gap-2 text-sm text-gray-700">
+            <input id="create-usage-limit-enabled" name="is_enabled" type="checkbox" checked />
+            <label for="create-usage-limit-enabled">Enable immediately</label>
+          </div>
+          <div class="md:col-span-2">
+            <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+              Create Policy
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="rounded-xl border border-gray-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-gray-900">Edit Existing Policies</h3>
+        <p class="mt-1 text-sm text-gray-500">Disable a row to fall back to the legacy env behavior for that combination, or delete it entirely.</p>
+        <div class="mt-4 space-y-3">
+          {usageLimitPolicies.length === 0 ? (
+            <div class="rounded-lg border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
+              No usage-limit policies yet. Create the first row to override the legacy combined daily fallback.
+            </div>
+          ) : usageLimitPolicies.map((policy) => (
+            <details class="rounded-lg border border-gray-200">
+              <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium text-gray-900">
+                {policy.use_case} · {audienceTierLabel(policy.audience_tier)} · {periodLabel(policy.period)}
+              </summary>
+              <div class="border-t border-gray-200 p-4">
+                <form class="js-api-form grid gap-4 md:grid-cols-2" data-endpoint="/api/admin/ai-gateway/usage-limits" data-success="Usage limit policy updated." data-reload="true">
+                  <input type="hidden" name="action" value="update" />
+                  <input type="hidden" name="id" value={policy.id} />
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-gray-700">Use Case</label>
+                    <select name="use_case" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                      {AI_GATEWAY_USE_CASES.map((useCase) => (
+                        <option value={useCase} selected={policy.use_case === useCase}>{useCase}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-gray-700">Audience Tier</label>
+                    <select name="audience_tier" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                      {AI_USAGE_LIMIT_AUDIENCE_TIERS.map((audienceTier) => (
+                        <option value={audienceTier} selected={policy.audience_tier === audienceTier}>
+                          {audienceTierLabel(audienceTier)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-gray-700">Period</label>
+                    <select name="period" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                      {AI_USAGE_LIMIT_PERIODS.map((period) => (
+                        <option value={period} selected={policy.period === period}>{periodLabel(period)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-gray-700">Max Calls</label>
+                    <input name="max_calls" type="number" min="0" max="100000" value={policy.max_calls} required class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                  </div>
+                  <div class="md:col-span-2">
+                    <label class="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+                    <input name="notes" value={policy.notes ?? ''} data-nullable="true" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                  </div>
+                  <div class="md:col-span-2 flex items-center gap-2 text-sm text-gray-700">
+                    <input id={`usage-limit-enabled-${policy.id}`} name="is_enabled" type="checkbox" checked={policy.is_enabled === true} />
+                    <label for={`usage-limit-enabled-${policy.id}`}>Enabled</label>
+                  </div>
+                  <div class="md:col-span-2 flex flex-wrap gap-3">
+                    <button type="submit" class="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black">
+                      Save Policy
+                    </button>
+                  </div>
+                </form>
+                <div class="mt-3 flex flex-wrap gap-3">
+                  <form class="js-api-form" data-endpoint="/api/admin/ai-gateway/usage-limits" data-success={policy.is_enabled ? 'Usage limit policy disabled.' : 'Usage limit policy enabled.'} data-reload="true">
+                    <input type="hidden" name="action" value="set_enabled" />
+                    <input type="hidden" name="id" value={policy.id} />
+                    <input type="hidden" name="is_enabled" value={policy.is_enabled ? 'false' : 'true'} />
+                    <button type="submit" class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                      {policy.is_enabled ? 'Disable Policy' : 'Enable Policy'}
+                    </button>
+                  </form>
+                  <form class="js-api-form" data-endpoint="/api/admin/ai-gateway/usage-limits" data-success="Usage limit policy deleted." data-reload="true">
+                    <input type="hidden" name="action" value="delete" />
+                    <input type="hidden" name="id" value={policy.id} />
+                    <button type="submit" class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">
+                      Delete Policy
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </details>
+          ))}
+        </div>
+      </section>
     </div>
   </section>
   )}

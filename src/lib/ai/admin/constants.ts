@@ -1,4 +1,9 @@
-import type { AIUseCase } from '../types'
+import {
+  AI_USE_CASES,
+  AI_USAGE_AUDIENCE_TIERS,
+  AI_USAGE_PERIODS,
+  type AIUseCase,
+} from '../types'
 
 export const AI_GATEWAY_DB_PROVIDER_PROTOCOLS = [
   'openai_compatible',
@@ -19,15 +24,11 @@ export const AI_GATEWAY_PRIVACY_LEVELS = [
   'restricted',
 ] as const
 
-export const AI_GATEWAY_USE_CASES = [
-  'fit_finder_summary',
-  'chat_answer',
-  'intent_detection',
-  'subject_mapping',
-  'program_comparison',
-  'scholarship_explanation',
-  'admin_article_draft',
-] as const
+export const AI_GATEWAY_USE_CASES = AI_USE_CASES
+
+export const AI_USAGE_LIMIT_AUDIENCE_TIERS = AI_USAGE_AUDIENCE_TIERS
+
+export const AI_USAGE_LIMIT_PERIODS = AI_USAGE_PERIODS
 
 export const AI_GATEWAY_ADMIN_USE_CASES = [
   'admin_article_draft',
@@ -67,6 +68,19 @@ export const AI_GATEWAY_TEST_PRESETS = [
     label: 'Missing data handling test',
   },
 ] as const
+
+export const AI_USAGE_LIMIT_AUDIENCE_LABELS = {
+  anonymous: 'Anonymous',
+  authenticated_free: 'Authenticated Free',
+  admin: 'Admin',
+  paid_basic: 'Paid Basic',
+  paid_pro: 'Paid Pro',
+} as const
+
+export const AI_USAGE_LIMIT_PERIOD_LABELS = {
+  daily: 'Daily',
+  monthly: 'Monthly',
+} as const
 
 export type AIGatewayDbProviderProtocol = typeof AI_GATEWAY_DB_PROVIDER_PROTOCOLS[number]
 export type AIGatewayPlannedProviderProtocol = typeof AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS[number]
