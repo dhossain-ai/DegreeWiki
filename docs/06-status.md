@@ -5,10 +5,9 @@
 
 ## Current Project Status
 
-Phase 71A is complete. DegreeWiki now has DB-backed AI usage limit policies, additive
-`ai_usage_logs` quota metadata, and an AI Gateway Limits tab so admins can manage AI quotas without
-changing env/code. The existing env fallback still remains active until admins create matching
-policy rows.
+Phase 72A is complete. DegreeWiki now has dedicated public destination country profiles at
+`/destinations/[slug]`, slug-based destination card links, preview sections for country-linked
+programs and universities, and public route coverage updates for sitemap and chat visibility.
 
 Current branch: `main`
 
@@ -35,7 +34,7 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 71A checks run:
+- Phase 72A checks run:
   `npm run build`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
@@ -79,7 +78,8 @@ Very short import pipeline summary:
 - Cloudinary still needs the SHA-256 signature setup, or `CLOUDINARY_SIGNATURE_ALGORITHM=sha1` as a fallback.
 - Default site OG image is still not configured.
 - CSV import and persistent uploaded-file import storage remain deferred.
-- Country/city/subject detail pages beyond the current destination listing remain deferred.
+- Destination country profiles now exist at `/destinations/[slug]`, but guide/article previews for
+  countries remain deferred because articles still do not carry a proper country relation.
 - `program_intakes` import remains intentionally deferred.
 
 ## Archive Index

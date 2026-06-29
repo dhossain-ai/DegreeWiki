@@ -26,6 +26,7 @@ const {
 const pathname = Astro.url.pathname
 const showPublicChat =
   pathname === '/' ||
+  pathname.startsWith('/destinations') ||
   pathname.startsWith('/programs') ||
   pathname.startsWith('/universities') ||
   pathname.startsWith('/scholarships') ||

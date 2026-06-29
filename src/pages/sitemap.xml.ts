@@ -27,11 +27,19 @@ export async function GET(context: APIContext): Promise<Response> {
   const supabase = createClient(context.cookies, context.request)
 
   const [
+    { data: countries,    error: countriesErr },
     { data: programs,     error: programsErr },
     { data: scholarships, error: scholarshipsErr },
     { data: universities, error: univErr },
     { data: articles,     error: articlesErr },
   ] = await Promise.all([
+    supabase
+      .from('countries')
+      .select('slug, updated_at')
+      .eq('content_status', 'published')
+      .eq('is_destination_enabled', true)
+      .not('slug', 'is', null)
+      .neq('slug', ''),
     supabase
       .from('programs')
       .select('slug, updated_at')
@@ -54,6 +62,7 @@ export async function GET(context: APIContext): Promise<Response> {
       .eq('indexing_status', 'index'),
   ])
 
+  if (countriesErr)     console.error('sitemap countries error:',    countriesErr.message)
   if (programsErr)     console.error('sitemap programs error:',     programsErr.message)
   if (scholarshipsErr) console.error('sitemap scholarships error:', scholarshipsErr.message)
   if (univErr)         console.error('sitemap universities error:', univErr.message)
@@ -61,6 +70,12 @@ export async function GET(context: APIContext): Promise<Response> {
 
   const entries: string[] = [
     ...STATIC_PATHS.map(path => urlEntry(SITE_URL + path)),
+    ...(countries ?? []).map((r: any) =>
+      urlEntry(
+        `${SITE_URL}/destinations/${r.slug}`,
+        r.updated_at ? toDateStr(r.updated_at) : undefined,
+      )
+    ),
     ...(programs ?? []).map((r: any) =>
       urlEntry(
         `${SITE_URL}/programs/${r.slug}`,

@@ -42,7 +42,8 @@ const [
     .order('display_order'),
   supabase
     .from('countries')
-    .select(`id, name, cover_image:media_assets!countries_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name)`)
+    .select(`id, name, slug, cover_image:media_assets!countries_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name)`)
+    .eq('content_status', 'published')
     .eq('is_destination_enabled', true)
     .order('name')
     .limit(30),
@@ -268,7 +269,7 @@ function formatAmount(
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {destinations.slice(0, 6).map((c: any) => (
           <DestinationCard
-            href={`/programs?country=${c.id}`}
+            href={c.slug ? `/destinations/${c.slug}` : '/destinations'}
             name={c.name}
             imagePublicId={c.cover_image?.cloudinary_public_id ?? null}
             imageAlt={c.cover_image?.alt_text || c.cover_image?.display_name || c.name}

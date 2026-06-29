@@ -5,6 +5,26 @@
 
 ## Recent Task Log
 
+### Phase 72A - Public Country Profile UX Polish
+
+- Added a dedicated public destination country route at `src/pages/destinations/[slug].astro`
+  using `countries.slug`, published-only filtering, destination-enabled filtering, and the same
+  `404` response pattern used by the existing public slug pages.
+- Built a country hub with a hero, quick stats, anchor navigation, overview handling, country-level
+  trust note, bottom Fit Finder CTA, and preview sections for published programs and universities.
+- Reused the public `ProgramCard` component for country-linked program previews, including saved
+  state support, and kept university previews inline to avoid introducing a new component just for
+  this phase.
+- Updated destination card links on `/destinations` and the homepage so public country cards now
+  open `/destinations/{slug}` instead of sending users directly to `/programs?country=<uuid>`.
+- Extended the sitemap to include published destination country profile URLs and expanded the
+  `PublicLayout` chat allowlist so the public chat shell also appears on destination profile pages.
+- Kept the phase UI-focused and safe: no migration, no schema change, no dependency install, no
+  guide/article country previews, and no country-level verification claims beyond the existing
+  `verification_status` field.
+- Ran `npm run build` plus the required safety greps for unsafe HTML, service-role usage, and
+  secret-key references in `src`.
+
 ### Phase 71A - AI Usage Limits Admin
 
 - Added `026_ai_usage_limit_policies.sql` with DB-backed per-use-case/per-audience quota policy
