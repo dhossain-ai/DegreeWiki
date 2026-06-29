@@ -5,6 +5,26 @@
 
 ## Recent Task Log
 
+### Phase 73C - Country Admin Form Wiring
+
+- Expanded `src/pages/admin/countries/new.astro` and `src/pages/admin/countries/[id].astro` so
+  admins can now create and edit the Phase 73B country enrichment fields directly from the admin
+  UI.
+- Added grouped admin sections for destination facts, cost and study planning, visa and work,
+  education and scholarships, official source URLs, and optional FAQ JSON while preserving the
+  existing base country fields, image pickers, redirects, and edit-only verification status field.
+- Added comma-separated parsing for country `text[]` inputs, nullable select handling for
+  work-rights booleans, uppercase normalization for currency codes, numeric range validation for
+  tuition and living costs, and URL validation for official education/visa links.
+- Added raw FAQ JSON textarea handling with server-side validation that accepts only an array of
+  objects containing non-empty string `question` and `answer` values, while saving empty input as
+  `null`.
+- Kept the phase admin-only and low-risk: no schema changes, no migration changes, no public
+  destination page changes, no import/staging changes, no university changes, and no new
+  dependencies.
+- Ran `npm run build` plus the required safety greps for unsafe HTML/service-role usage and
+  secret-key references in `src`.
+
 ### Phase 73B - Country Profile Enrichment Schema
 
 - Added `027_country_profile_enrichment.sql` with additive nullable columns on `public.countries`

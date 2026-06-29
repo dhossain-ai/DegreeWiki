@@ -9,7 +9,9 @@ import {
   validateRequired,
   validateExactLength,
   validateIn,
+  validateNumeric,
   validateSlug,
+  validateUrl,
 } from '../../../lib/admin/validate'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
@@ -22,7 +24,12 @@ const { id } = Astro.params
 const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
 
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
-const VERIFICATION_OPTIONS   = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const VERIFICATION_OPTIONS = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+
+type FaqEntry = {
+  question: string
+  answer: string
+}
 
 type Values = {
   name: string
@@ -37,19 +44,35 @@ type Values = {
   is_destination_enabled: boolean
   cover_image_id: string
   og_image_id: string
-}
-
-const [{ data: existing, error: loadError }, mediaAssets] = await Promise.all([
-  supabase
-    .from('countries')
-    .select('id, name, slug, iso2, iso3, continent, overview, content_status, verification_status, is_origin_enabled, is_destination_enabled, cover_image_id, og_image_id')
-    .eq('id', id)
-    .single(),
-  loadReusableReadyMediaAssets(supabase),
-])
-
-if (loadError || !existing) {
-  return new Response('Country not found.', { status: 404 })
+  capital_city_name: string
+  currency_code: string
+  currency_name: string
+  official_language_names: string
+  common_study_language_names: string
+  popular_student_city_names: string
+  tuition_min_annual: string
+  tuition_max_annual: string
+  tuition_currency: string
+  tuition_overview: string
+  living_cost_min_monthly: string
+  living_cost_max_monthly: string
+  living_cost_currency: string
+  living_cost_overview: string
+  intake_overview: string
+  required_documents_overview: string
+  visa_overview: string
+  student_work_rights_overview: string
+  student_work_allowed: string
+  student_work_hours_text: string
+  post_study_work_overview: string
+  post_study_work_available: string
+  post_study_work_duration_text: string
+  admission_overview: string
+  university_system_overview: string
+  scholarship_overview: string
+  official_education_url: string
+  official_visa_url: string
+  faq_json: string
 }
 
 type CountryRecord = {
@@ -66,6 +89,137 @@ type CountryRecord = {
   is_destination_enabled: boolean
   cover_image_id: string | null
   og_image_id: string | null
+  capital_city_name: string | null
+  currency_code: string | null
+  currency_name: string | null
+  official_language_names: string[] | null
+  common_study_language_names: string[] | null
+  popular_student_city_names: string[] | null
+  tuition_min_annual: number | null
+  tuition_max_annual: number | null
+  tuition_currency: string | null
+  tuition_overview: string | null
+  living_cost_min_monthly: number | null
+  living_cost_max_monthly: number | null
+  living_cost_currency: string | null
+  living_cost_overview: string | null
+  intake_overview: string | null
+  required_documents_overview: string | null
+  visa_overview: string | null
+  student_work_rights_overview: string | null
+  student_work_allowed: boolean | null
+  student_work_hours_text: string | null
+  post_study_work_overview: string | null
+  post_study_work_available: boolean | null
+  post_study_work_duration_text: string | null
+  admission_overview: string | null
+  university_system_overview: string | null
+  scholarship_overview: string | null
+  official_education_url: string | null
+  official_visa_url: string | null
+  faq_json: unknown
+}
+
+function optionalString(value: string): string | null {
+  return value ? value : null
+}
+
+function optionalUppercase(value: string): string | null {
+  return value ? value.toUpperCase() : null
+}
+
+function parseTextArray(value: string): string[] | null {
+  const items = value.split(',').map(item => item.trim()).filter(Boolean)
+  return items.length > 0 ? items : null
+}
+
+function formatTextArray(value: string[] | null | undefined): string {
+  return value?.join(', ') ?? ''
+}
+
+function formatNullableNumber(value: number | null | undefined): string {
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function formatNullableBoolean(value: boolean | null | undefined): string {
+  if (value === true) return 'true'
+  if (value === false) return 'false'
+  return ''
+}
+
+function formatFaqJson(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return ''
+  }
+}
+
+function parseNullableBoolean(value: string): boolean | null {
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return null
+}
+
+function validateFaqJson(raw: string): { parsed: FaqEntry[] | null; error: string | null } {
+  if (!raw) return { parsed: null, error: null }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { parsed: null, error: 'FAQ JSON must be valid JSON.' }
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { parsed: null, error: 'FAQ JSON must be a JSON array of {question, answer} objects.' }
+  }
+
+  const normalized: FaqEntry[] = []
+
+  for (const [index, item] of parsed.entries()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      return { parsed: null, error: `FAQ item ${index + 1} must be an object with question and answer strings.` }
+    }
+
+    const entry = item as Record<string, unknown>
+    const question = typeof entry.question === 'string' ? entry.question.trim() : ''
+    const answer = typeof entry.answer === 'string' ? entry.answer.trim() : ''
+
+    if (!question || !answer) {
+      return { parsed: null, error: `FAQ item ${index + 1} must include non-empty question and answer strings.` }
+    }
+
+    normalized.push({ question, answer })
+  }
+
+  return { parsed: normalized, error: null }
+}
+
+const [{ data: existing, error: loadError }, mediaAssets] = await Promise.all([
+  supabase
+    .from('countries')
+    .select(`
+      id, name, slug, iso2, iso3, continent, overview, content_status, verification_status,
+      is_origin_enabled, is_destination_enabled, cover_image_id, og_image_id,
+      capital_city_name, currency_code, currency_name,
+      official_language_names, common_study_language_names, popular_student_city_names,
+      tuition_min_annual, tuition_max_annual, tuition_currency, tuition_overview,
+      living_cost_min_monthly, living_cost_max_monthly, living_cost_currency, living_cost_overview,
+      intake_overview, required_documents_overview,
+      visa_overview, student_work_rights_overview, student_work_allowed, student_work_hours_text,
+      post_study_work_overview, post_study_work_available, post_study_work_duration_text,
+      admission_overview, university_system_overview, scholarship_overview,
+      official_education_url, official_visa_url, faq_json
+    `)
+    .eq('id', id)
+    .single(),
+  loadReusableReadyMediaAssets(supabase),
+])
+
+if (loadError || !existing) {
+  return new Response('Country not found.', { status: 404 })
 }
 
 const record = existing as CountryRecord
@@ -83,6 +237,35 @@ let values: Values = {
   is_destination_enabled: record.is_destination_enabled,
   cover_image_id: record.cover_image_id ?? '',
   og_image_id: record.og_image_id ?? '',
+  capital_city_name: record.capital_city_name ?? '',
+  currency_code: record.currency_code ?? '',
+  currency_name: record.currency_name ?? '',
+  official_language_names: formatTextArray(record.official_language_names),
+  common_study_language_names: formatTextArray(record.common_study_language_names),
+  popular_student_city_names: formatTextArray(record.popular_student_city_names),
+  tuition_min_annual: formatNullableNumber(record.tuition_min_annual),
+  tuition_max_annual: formatNullableNumber(record.tuition_max_annual),
+  tuition_currency: record.tuition_currency ?? '',
+  tuition_overview: record.tuition_overview ?? '',
+  living_cost_min_monthly: formatNullableNumber(record.living_cost_min_monthly),
+  living_cost_max_monthly: formatNullableNumber(record.living_cost_max_monthly),
+  living_cost_currency: record.living_cost_currency ?? '',
+  living_cost_overview: record.living_cost_overview ?? '',
+  intake_overview: record.intake_overview ?? '',
+  required_documents_overview: record.required_documents_overview ?? '',
+  visa_overview: record.visa_overview ?? '',
+  student_work_rights_overview: record.student_work_rights_overview ?? '',
+  student_work_allowed: formatNullableBoolean(record.student_work_allowed),
+  student_work_hours_text: record.student_work_hours_text ?? '',
+  post_study_work_overview: record.post_study_work_overview ?? '',
+  post_study_work_available: formatNullableBoolean(record.post_study_work_available),
+  post_study_work_duration_text: record.post_study_work_duration_text ?? '',
+  admission_overview: record.admission_overview ?? '',
+  university_system_overview: record.university_system_overview ?? '',
+  scholarship_overview: record.scholarship_overview ?? '',
+  official_education_url: record.official_education_url ?? '',
+  official_visa_url: record.official_visa_url ?? '',
+  faq_json: formatFaqJson(record.faq_json),
 }
 let errors: FormErrors = {}
 let serverError = ''
@@ -90,18 +273,47 @@ let serverError = ''
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData()
   values = {
-    name:                 String(form.get('name') ?? '').trim(),
-    slug:                 String(form.get('slug') ?? '').trim(),
-    iso2:                 String(form.get('iso2') ?? '').trim().toUpperCase(),
-    iso3:                 String(form.get('iso3') ?? '').trim().toUpperCase(),
-    continent:            String(form.get('continent') ?? '').trim(),
-    overview:             String(form.get('overview') ?? '').trim(),
-    content_status:       String(form.get('content_status') ?? 'draft').trim(),
-    verification_status:  String(form.get('verification_status') ?? 'unverified').trim(),
-    is_origin_enabled:    form.get('is_origin_enabled') === 'on',
+    name: String(form.get('name') ?? '').trim(),
+    slug: String(form.get('slug') ?? '').trim(),
+    iso2: String(form.get('iso2') ?? '').trim().toUpperCase(),
+    iso3: String(form.get('iso3') ?? '').trim().toUpperCase(),
+    continent: String(form.get('continent') ?? '').trim(),
+    overview: String(form.get('overview') ?? '').trim(),
+    content_status: String(form.get('content_status') ?? 'draft').trim(),
+    verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
+    is_origin_enabled: form.get('is_origin_enabled') === 'on',
     is_destination_enabled: form.get('is_destination_enabled') === 'on',
-    cover_image_id:       String(form.get('cover_image_id') ?? '').trim(),
-    og_image_id:          String(form.get('og_image_id') ?? '').trim(),
+    cover_image_id: String(form.get('cover_image_id') ?? '').trim(),
+    og_image_id: String(form.get('og_image_id') ?? '').trim(),
+    capital_city_name: String(form.get('capital_city_name') ?? '').trim(),
+    currency_code: String(form.get('currency_code') ?? '').trim().toUpperCase(),
+    currency_name: String(form.get('currency_name') ?? '').trim(),
+    official_language_names: String(form.get('official_language_names') ?? '').trim(),
+    common_study_language_names: String(form.get('common_study_language_names') ?? '').trim(),
+    popular_student_city_names: String(form.get('popular_student_city_names') ?? '').trim(),
+    tuition_min_annual: String(form.get('tuition_min_annual') ?? '').trim(),
+    tuition_max_annual: String(form.get('tuition_max_annual') ?? '').trim(),
+    tuition_currency: String(form.get('tuition_currency') ?? '').trim().toUpperCase(),
+    tuition_overview: String(form.get('tuition_overview') ?? '').trim(),
+    living_cost_min_monthly: String(form.get('living_cost_min_monthly') ?? '').trim(),
+    living_cost_max_monthly: String(form.get('living_cost_max_monthly') ?? '').trim(),
+    living_cost_currency: String(form.get('living_cost_currency') ?? '').trim().toUpperCase(),
+    living_cost_overview: String(form.get('living_cost_overview') ?? '').trim(),
+    intake_overview: String(form.get('intake_overview') ?? '').trim(),
+    required_documents_overview: String(form.get('required_documents_overview') ?? '').trim(),
+    visa_overview: String(form.get('visa_overview') ?? '').trim(),
+    student_work_rights_overview: String(form.get('student_work_rights_overview') ?? '').trim(),
+    student_work_allowed: String(form.get('student_work_allowed') ?? '').trim(),
+    student_work_hours_text: String(form.get('student_work_hours_text') ?? '').trim(),
+    post_study_work_overview: String(form.get('post_study_work_overview') ?? '').trim(),
+    post_study_work_available: String(form.get('post_study_work_available') ?? '').trim(),
+    post_study_work_duration_text: String(form.get('post_study_work_duration_text') ?? '').trim(),
+    admission_overview: String(form.get('admission_overview') ?? '').trim(),
+    university_system_overview: String(form.get('university_system_overview') ?? '').trim(),
+    scholarship_overview: String(form.get('scholarship_overview') ?? '').trim(),
+    official_education_url: String(form.get('official_education_url') ?? '').trim(),
+    official_visa_url: String(form.get('official_visa_url') ?? '').trim(),
+    faq_json: String(form.get('faq_json') ?? '').trim(),
   }
 
   if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -119,6 +331,42 @@ if (Astro.request.method === 'POST') {
   if (statusErr) e.content_status = statusErr
   const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
   if (verErr) e.verification_status = verErr
+
+  const tuitionMinErr = validateNumeric(values.tuition_min_annual, 'Minimum Annual Tuition', { min: 0 })
+  if (tuitionMinErr) e.tuition_min_annual = tuitionMinErr
+  const tuitionMaxErr = validateNumeric(values.tuition_max_annual, 'Maximum Annual Tuition', { min: 0 })
+  if (tuitionMaxErr) e.tuition_max_annual = tuitionMaxErr
+  if (!e.tuition_min_annual && !e.tuition_max_annual && values.tuition_min_annual && values.tuition_max_annual) {
+    if (Number(values.tuition_max_annual) < Number(values.tuition_min_annual)) {
+      e.tuition_max_annual = 'Maximum annual tuition must be greater than or equal to minimum annual tuition.'
+    }
+  }
+
+  const livingMinErr = validateNumeric(values.living_cost_min_monthly, 'Minimum Monthly Living Cost', { min: 0 })
+  if (livingMinErr) e.living_cost_min_monthly = livingMinErr
+  const livingMaxErr = validateNumeric(values.living_cost_max_monthly, 'Maximum Monthly Living Cost', { min: 0 })
+  if (livingMaxErr) e.living_cost_max_monthly = livingMaxErr
+  if (!e.living_cost_min_monthly && !e.living_cost_max_monthly && values.living_cost_min_monthly && values.living_cost_max_monthly) {
+    if (Number(values.living_cost_max_monthly) < Number(values.living_cost_min_monthly)) {
+      e.living_cost_max_monthly = 'Maximum monthly living cost must be greater than or equal to minimum monthly living cost.'
+    }
+  }
+
+  const educationUrlErr = validateUrl(values.official_education_url, 'Official Education URL')
+  if (educationUrlErr) e.official_education_url = educationUrlErr
+  const visaUrlErr = validateUrl(values.official_visa_url, 'Official Visa URL')
+  if (visaUrlErr) e.official_visa_url = visaUrlErr
+
+  if (values.student_work_allowed && !['true', 'false'].includes(values.student_work_allowed)) {
+    e.student_work_allowed = 'Student work allowed must be blank, Yes, or No.'
+  }
+  if (values.post_study_work_available && !['true', 'false'].includes(values.post_study_work_available)) {
+    e.post_study_work_available = 'Post-study work available must be blank, Yes, or No.'
+  }
+
+  const faqValidation = validateFaqJson(values.faq_json)
+  if (faqValidation.error) e.faq_json = faqValidation.error
+
   const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.cover_image_id, values.og_image_id])
   if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
     e.cover_image_id = 'Selected cover image is not valid.'
@@ -133,18 +381,47 @@ if (Astro.request.method === 'POST') {
     const { error } = await supabase
       .from('countries')
       .update({
-        name:                  values.name,
-        slug:                  values.slug,
-        iso2:                  values.iso2,
-        iso3:                  values.iso3,
-        continent:             values.continent || null,
-        overview:              values.overview || null,
-        content_status:        values.content_status,
-        verification_status:   values.verification_status,
-        is_origin_enabled:     values.is_origin_enabled,
+        name: values.name,
+        slug: values.slug,
+        iso2: values.iso2,
+        iso3: values.iso3,
+        continent: optionalString(values.continent),
+        overview: optionalString(values.overview),
+        content_status: values.content_status,
+        verification_status: values.verification_status,
+        is_origin_enabled: values.is_origin_enabled,
         is_destination_enabled: values.is_destination_enabled,
-        cover_image_id:        values.cover_image_id || null,
-        og_image_id:           values.og_image_id || null,
+        cover_image_id: optionalString(values.cover_image_id),
+        og_image_id: optionalString(values.og_image_id),
+        capital_city_name: optionalString(values.capital_city_name),
+        currency_code: optionalUppercase(values.currency_code),
+        currency_name: optionalString(values.currency_name),
+        official_language_names: parseTextArray(values.official_language_names),
+        common_study_language_names: parseTextArray(values.common_study_language_names),
+        popular_student_city_names: parseTextArray(values.popular_student_city_names),
+        tuition_min_annual: values.tuition_min_annual ? parseFloat(values.tuition_min_annual) : null,
+        tuition_max_annual: values.tuition_max_annual ? parseFloat(values.tuition_max_annual) : null,
+        tuition_currency: optionalUppercase(values.tuition_currency),
+        tuition_overview: optionalString(values.tuition_overview),
+        living_cost_min_monthly: values.living_cost_min_monthly ? parseFloat(values.living_cost_min_monthly) : null,
+        living_cost_max_monthly: values.living_cost_max_monthly ? parseFloat(values.living_cost_max_monthly) : null,
+        living_cost_currency: optionalUppercase(values.living_cost_currency),
+        living_cost_overview: optionalString(values.living_cost_overview),
+        intake_overview: optionalString(values.intake_overview),
+        required_documents_overview: optionalString(values.required_documents_overview),
+        visa_overview: optionalString(values.visa_overview),
+        student_work_rights_overview: optionalString(values.student_work_rights_overview),
+        student_work_allowed: parseNullableBoolean(values.student_work_allowed),
+        student_work_hours_text: optionalString(values.student_work_hours_text),
+        post_study_work_overview: optionalString(values.post_study_work_overview),
+        post_study_work_available: parseNullableBoolean(values.post_study_work_available),
+        post_study_work_duration_text: optionalString(values.post_study_work_duration_text),
+        admission_overview: optionalString(values.admission_overview),
+        university_system_overview: optionalString(values.university_system_overview),
+        scholarship_overview: optionalString(values.scholarship_overview),
+        official_education_url: optionalString(values.official_education_url),
+        official_visa_url: optionalString(values.official_visa_url),
+        faq_json: faqValidation.parsed,
       })
       .eq('id', id)
 
@@ -159,6 +436,13 @@ if (Astro.request.method === 'POST') {
     }
   }
 }
+
+const inputClass = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const labelClass = 'block text-sm font-medium text-gray-700 mb-1'
+const errorClass = 'mt-1 text-xs text-red-600'
+const helperClass = 'mt-1 text-xs text-gray-500'
+const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 pb-2 border-b border-gray-200'
 ---
 <AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/countries" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
@@ -170,89 +454,286 @@ if (Astro.request.method === 'POST') {
     <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
   )}
 
-  <form method="post" class="max-w-xl space-y-4">
-    <div>
-      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-      <input type="text" id="name" name="name" value={values.name} required
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
-      {errors.name && <p class="mt-1 text-xs text-red-600">{errors.name}</p>}
-    </div>
-
-    <div>
-      <label for="slug" class="block text-sm font-medium text-gray-700 mb-1">Slug *</label>
-      <input type="text" id="slug" name="slug" value={values.slug}
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
-      {errors.slug && <p class="mt-1 text-xs text-red-600">{errors.slug}</p>}
-    </div>
-
-    <div class="flex gap-4">
-      <div class="flex-1">
-        <label for="iso2" class="block text-sm font-medium text-gray-700 mb-1">ISO2 Code *</label>
-        <input type="text" id="iso2" name="iso2" value={values.iso2} maxlength={2}
-          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono uppercase" />
-        {errors.iso2 && <p class="mt-1 text-xs text-red-600">{errors.iso2}</p>}
+  <form method="post" class="max-w-4xl space-y-6">
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Basic Country Fields</h2>
+      <div>
+        <label for="name" class={labelClass}>Name *</label>
+        <input type="text" id="name" name="name" value={values.name} required class={inputClass} />
+        {errors.name && <p class={errorClass}>{errors.name}</p>}
       </div>
-      <div class="flex-1">
-        <label for="iso3" class="block text-sm font-medium text-gray-700 mb-1">ISO3 Code *</label>
-        <input type="text" id="iso3" name="iso3" value={values.iso3} maxlength={3}
-          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono uppercase" />
-        {errors.iso3 && <p class="mt-1 text-xs text-red-600">{errors.iso3}</p>}
+
+      <div>
+        <label for="slug" class={labelClass}>Slug *</label>
+        <input type="text" id="slug" name="slug" value={values.slug} class={inputClass + ' font-mono'} />
+        {errors.slug && <p class={errorClass}>{errors.slug}</p>}
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="iso2" class={labelClass}>ISO2 Code *</label>
+          <input type="text" id="iso2" name="iso2" value={values.iso2} maxlength={2} class={inputClass + ' font-mono uppercase'} />
+          {errors.iso2 && <p class={errorClass}>{errors.iso2}</p>}
+        </div>
+        <div>
+          <label for="iso3" class={labelClass}>ISO3 Code *</label>
+          <input type="text" id="iso3" name="iso3" value={values.iso3} maxlength={3} class={inputClass + ' font-mono uppercase'} />
+          {errors.iso3 && <p class={errorClass}>{errors.iso3}</p>}
+        </div>
+      </div>
+
+      <div>
+        <label for="continent" class={labelClass}>Continent</label>
+        <input type="text" id="continent" name="continent" value={values.continent} placeholder="e.g. Europe, Asia, North America" class={inputClass} />
+      </div>
+
+      <div>
+        <label for="overview" class={labelClass}>Overview</label>
+        <textarea id="overview" name="overview" rows={4} class={inputClass}>{values.overview}</textarea>
+      </div>
+
+      <fieldset class="border border-gray-200 rounded-md p-3">
+        <legend class="text-sm font-medium text-gray-700 px-1">Country roles</legend>
+        <div class="space-y-2 mt-1">
+          <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              name="is_origin_enabled"
+              checked={values.is_origin_enabled}
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Can be selected as student origin / current country
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              name="is_destination_enabled"
+              checked={values.is_destination_enabled}
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Can be selected as study destination
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="content_status" class={labelClass}>Status *</label>
+          <select id="content_status" name="content_status" class={selectClass}>
+            {CONTENT_STATUS_OPTIONS.map(s => (
+              <option value={s} selected={values.content_status === s}>{s}</option>
+            ))}
+          </select>
+          {errors.content_status && <p class={errorClass}>{errors.content_status}</p>}
+        </div>
+        <div>
+          <label for="verification_status" class={labelClass}>Verification Status</label>
+          <select id="verification_status" name="verification_status" class={selectClass}>
+            {VERIFICATION_OPTIONS.map(s => (
+              <option value={s} selected={values.verification_status === s}>{s}</option>
+            ))}
+          </select>
+          {errors.verification_status && <p class={errorClass}>{errors.verification_status}</p>}
+        </div>
       </div>
     </div>
 
-    <div>
-      <label for="continent" class="block text-sm font-medium text-gray-700 mb-1">Continent</label>
-      <input type="text" id="continent" name="continent" value={values.continent}
-        placeholder="e.g. Europe, Asia, North America"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
-    </div>
-
-    <div>
-      <label for="overview" class="block text-sm font-medium text-gray-700 mb-1">Overview</label>
-      <textarea id="overview" name="overview" rows={4}
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{values.overview}</textarea>
-    </div>
-
-    <div>
-      <label for="content_status" class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
-      <select id="content_status" name="content_status"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-        {CONTENT_STATUS_OPTIONS.map(s => (
-          <option value={s} selected={values.content_status === s}>{s}</option>
-        ))}
-      </select>
-      {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
-    </div>
-
-    <fieldset class="border border-gray-200 rounded-md p-3">
-      <legend class="text-sm font-medium text-gray-700 px-1">Country roles</legend>
-      <div class="space-y-2 mt-1">
-        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-          <input type="checkbox" name="is_origin_enabled" checked={values.is_origin_enabled}
-            class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-          Can be selected as student origin / current country
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-          <input type="checkbox" name="is_destination_enabled" checked={values.is_destination_enabled}
-            class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-          Can be selected as study destination
-        </label>
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Destination Facts</h2>
+      <div class="grid gap-4 md:grid-cols-3">
+        <div>
+          <label for="capital_city_name" class={labelClass}>Capital City</label>
+          <input type="text" id="capital_city_name" name="capital_city_name" value={values.capital_city_name} placeholder="e.g. Ottawa" class={inputClass} />
+        </div>
+        <div>
+          <label for="currency_code" class={labelClass}>Currency Code</label>
+          <input type="text" id="currency_code" name="currency_code" value={values.currency_code} placeholder="e.g. CAD" class={inputClass + ' font-mono uppercase'} />
+        </div>
+        <div>
+          <label for="currency_name" class={labelClass}>Currency Name</label>
+          <input type="text" id="currency_name" name="currency_name" value={values.currency_name} placeholder="e.g. Canadian Dollar" class={inputClass} />
+        </div>
       </div>
-    </fieldset>
 
-    <div>
-      <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Verification Status</label>
-      <select id="verification_status" name="verification_status"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-        {VERIFICATION_OPTIONS.map(s => (
-          <option value={s} selected={values.verification_status === s}>{s}</option>
-        ))}
-      </select>
-      {errors.verification_status && <p class="mt-1 text-xs text-red-600">{errors.verification_status}</p>}
+      <div>
+        <label for="official_language_names" class={labelClass}>Official Languages</label>
+        <input type="text" id="official_language_names" name="official_language_names" value={values.official_language_names} placeholder="e.g. English, French" class={inputClass} />
+        <p class={helperClass}>Comma-separated list. Empty values are ignored.</p>
+      </div>
+
+      <div>
+        <label for="common_study_language_names" class={labelClass}>Common Study Languages</label>
+        <input type="text" id="common_study_language_names" name="common_study_language_names" value={values.common_study_language_names} placeholder="e.g. English, German" class={inputClass} />
+        <p class={helperClass}>Comma-separated list. Use the languages most international students will encounter.</p>
+      </div>
+
+      <div>
+        <label for="popular_student_city_names" class={labelClass}>Popular Student Cities</label>
+        <input type="text" id="popular_student_city_names" name="popular_student_city_names" value={values.popular_student_city_names} placeholder="e.g. Toronto, Vancouver, Montreal" class={inputClass} />
+        <p class={helperClass}>Comma-separated list for destination highlights.</p>
+      </div>
     </div>
 
-    <fieldset class="border border-gray-200 rounded-md p-4 space-y-4">
-      <legend class="text-sm font-medium text-gray-700 px-1">Images</legend>
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Cost and Study Planning</h2>
+      <div class="grid gap-4 md:grid-cols-3">
+        <div>
+          <label for="tuition_min_annual" class={labelClass}>Annual Tuition Min</label>
+          <input type="number" id="tuition_min_annual" name="tuition_min_annual" value={values.tuition_min_annual} min="0" step="any" placeholder="0" class={inputClass} />
+          {errors.tuition_min_annual && <p class={errorClass}>{errors.tuition_min_annual}</p>}
+        </div>
+        <div>
+          <label for="tuition_max_annual" class={labelClass}>Annual Tuition Max</label>
+          <input type="number" id="tuition_max_annual" name="tuition_max_annual" value={values.tuition_max_annual} min="0" step="any" placeholder="0" class={inputClass} />
+          {errors.tuition_max_annual && <p class={errorClass}>{errors.tuition_max_annual}</p>}
+        </div>
+        <div>
+          <label for="tuition_currency" class={labelClass}>Tuition Currency</label>
+          <input type="text" id="tuition_currency" name="tuition_currency" value={values.tuition_currency} placeholder="e.g. EUR" class={inputClass + ' font-mono uppercase'} />
+        </div>
+      </div>
+
+      <div>
+        <label for="tuition_overview" class={labelClass}>Tuition Overview</label>
+        <textarea id="tuition_overview" name="tuition_overview" rows={4} placeholder="Summarize public vs private costs, common ranges, and important caveats." class={inputClass}>{values.tuition_overview}</textarea>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-3">
+        <div>
+          <label for="living_cost_min_monthly" class={labelClass}>Monthly Living Cost Min</label>
+          <input type="number" id="living_cost_min_monthly" name="living_cost_min_monthly" value={values.living_cost_min_monthly} min="0" step="any" placeholder="0" class={inputClass} />
+          {errors.living_cost_min_monthly && <p class={errorClass}>{errors.living_cost_min_monthly}</p>}
+        </div>
+        <div>
+          <label for="living_cost_max_monthly" class={labelClass}>Monthly Living Cost Max</label>
+          <input type="number" id="living_cost_max_monthly" name="living_cost_max_monthly" value={values.living_cost_max_monthly} min="0" step="any" placeholder="0" class={inputClass} />
+          {errors.living_cost_max_monthly && <p class={errorClass}>{errors.living_cost_max_monthly}</p>}
+        </div>
+        <div>
+          <label for="living_cost_currency" class={labelClass}>Living Cost Currency</label>
+          <input type="text" id="living_cost_currency" name="living_cost_currency" value={values.living_cost_currency} placeholder="e.g. EUR" class={inputClass + ' font-mono uppercase'} />
+        </div>
+      </div>
+
+      <div>
+        <label for="living_cost_overview" class={labelClass}>Living Cost Overview</label>
+        <textarea id="living_cost_overview" name="living_cost_overview" rows={4} placeholder="Cover rent, transport, food, and city-to-city variation." class={inputClass}>{values.living_cost_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="intake_overview" class={labelClass}>Intake Overview</label>
+        <textarea id="intake_overview" name="intake_overview" rows={3} placeholder="e.g. Main intakes are September and January, with limited spring starts." class={inputClass}>{values.intake_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="required_documents_overview" class={labelClass}>Required Documents Overview</label>
+        <textarea id="required_documents_overview" name="required_documents_overview" rows={4} placeholder="Typical application docs, translations, test scores, or visa paperwork." class={inputClass}>{values.required_documents_overview}</textarea>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Visa and Work</h2>
+      <div>
+        <label for="visa_overview" class={labelClass}>Visa Overview</label>
+        <textarea id="visa_overview" name="visa_overview" rows={4} placeholder="Entry route, permit basics, timing, and renewal context." class={inputClass}>{values.visa_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="student_work_rights_overview" class={labelClass}>Student Work Rights Overview</label>
+        <textarea id="student_work_rights_overview" name="student_work_rights_overview" rows={4} placeholder="Summarize on-campus/off-campus rules and common restrictions." class={inputClass}>{values.student_work_rights_overview}</textarea>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="student_work_allowed" class={labelClass}>Student Work Allowed</label>
+          <select id="student_work_allowed" name="student_work_allowed" class={selectClass}>
+            <option value="" selected={values.student_work_allowed === ''}>Unknown</option>
+            <option value="true" selected={values.student_work_allowed === 'true'}>Yes</option>
+            <option value="false" selected={values.student_work_allowed === 'false'}>No</option>
+          </select>
+          {errors.student_work_allowed && <p class={errorClass}>{errors.student_work_allowed}</p>}
+        </div>
+        <div>
+          <label for="student_work_hours_text" class={labelClass}>Student Work Hours</label>
+          <input type="text" id="student_work_hours_text" name="student_work_hours_text" value={values.student_work_hours_text} placeholder="e.g. Up to 20 hours/week during term" class={inputClass} />
+        </div>
+      </div>
+
+      <div>
+        <label for="post_study_work_overview" class={labelClass}>Post-Study Work Overview</label>
+        <textarea id="post_study_work_overview" name="post_study_work_overview" rows={4} placeholder="Describe graduate work routes and major eligibility rules." class={inputClass}>{values.post_study_work_overview}</textarea>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="post_study_work_available" class={labelClass}>Post-Study Work Available</label>
+          <select id="post_study_work_available" name="post_study_work_available" class={selectClass}>
+            <option value="" selected={values.post_study_work_available === ''}>Unknown</option>
+            <option value="true" selected={values.post_study_work_available === 'true'}>Yes</option>
+            <option value="false" selected={values.post_study_work_available === 'false'}>No</option>
+          </select>
+          {errors.post_study_work_available && <p class={errorClass}>{errors.post_study_work_available}</p>}
+        </div>
+        <div>
+          <label for="post_study_work_duration_text" class={labelClass}>Post-Study Work Duration</label>
+          <input type="text" id="post_study_work_duration_text" name="post_study_work_duration_text" value={values.post_study_work_duration_text} placeholder="e.g. Up to 3 years depending on program level" class={inputClass} />
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Education and Scholarships</h2>
+      <div>
+        <label for="admission_overview" class={labelClass}>Admission Overview</label>
+        <textarea id="admission_overview" name="admission_overview" rows={4} placeholder="General selectivity, timelines, and application expectations." class={inputClass}>{values.admission_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="university_system_overview" class={labelClass}>University System Overview</label>
+        <textarea id="university_system_overview" name="university_system_overview" rows={4} placeholder="Explain public/private mix, degree structure, or regional system notes." class={inputClass}>{values.university_system_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="scholarship_overview" class={labelClass}>Scholarship Overview</label>
+        <textarea id="scholarship_overview" name="scholarship_overview" rows={4} placeholder="Outline common funding options for international students." class={inputClass}>{values.scholarship_overview}</textarea>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Official Sources</h2>
+      <div>
+        <label for="official_education_url" class={labelClass}>Official Education URL</label>
+        <input type="url" id="official_education_url" name="official_education_url" value={values.official_education_url} placeholder="https://..." class={inputClass} />
+        <p class={helperClass}>Use an official ministry, agency, or national study portal when possible.</p>
+        {errors.official_education_url && <p class={errorClass}>{errors.official_education_url}</p>}
+      </div>
+
+      <div>
+        <label for="official_visa_url" class={labelClass}>Official Visa URL</label>
+        <input type="url" id="official_visa_url" name="official_visa_url" value={values.official_visa_url} placeholder="https://..." class={inputClass} />
+        <p class={helperClass}>Use an official immigration or visa source when possible.</p>
+        {errors.official_visa_url && <p class={errorClass}>{errors.official_visa_url}</p>}
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>FAQ JSON</h2>
+      <div>
+        <label for="faq_json" class={labelClass}>FAQ Entries</label>
+        <textarea
+          id="faq_json"
+          name="faq_json"
+          rows={8}
+          placeholder='[{"question":"Can I work while studying?","answer":"Many students can work part-time during term."}]'
+          class={inputClass + ' font-mono'}
+        >{values.faq_json}</textarea>
+        <p class={helperClass}>Optional raw JSON array. Expected shape: an array of objects with string `question` and `answer` fields.</p>
+        {errors.faq_json && <p class={errorClass}>{errors.faq_json}</p>}
+      </div>
+    </div>
+
+    <fieldset class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <legend class="px-1 text-sm font-medium text-gray-700">Images</legend>
       <div>
         <MediaPicker
           fieldName="cover_image_id"
@@ -262,7 +743,7 @@ if (Astro.request.method === 'POST') {
           cloudName={cloudName}
           defaultSubfolder="countries"
         />
-        {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
+        {errors.cover_image_id && <p class={errorClass}>{errors.cover_image_id}</p>}
       </div>
       <div>
         <MediaPicker
@@ -275,13 +756,12 @@ if (Astro.request.method === 'POST') {
           copyFromField="cover_image_id"
           copyFromLabel="Cover Image"
         />
-        {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
+        {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
       </div>
     </fieldset>
 
     <div class="flex gap-3 pt-2">
-      <button type="submit"
-        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      <button type="submit" class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
         Save Changes
       </button>
       <a href="/admin/countries" class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
