@@ -283,6 +283,55 @@ const openGuideHint = (() => {
 
       <section class={cardClass}>
         <div class="mb-4 border-b border-gray-200 pb-3">
+          <h2 class={sectionHeadClass}>AI Assistant</h2>
+          <p class="mt-1 text-sm text-gray-500">Generate reviewable draft suggestions without changing the existing save or publish flow.</p>
+        </div>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          AI suggestions are draft assistance only. Review and verify before saving or publishing.
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button type="button" data-ai-action="outline" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Generate outline</button>
+          <button type="button" data-ai-action="seo_title" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Suggest SEO title</button>
+          <button type="button" data-ai-action="seo_description" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Suggest SEO description</button>
+          <button type="button" data-ai-action="summary" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Improve summary</button>
+          <button type="button" data-ai-action="faq" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Suggest FAQ ideas</button>
+          <button type="button" data-ai-action="risk_check" class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Check risky claims</button>
+        </div>
+
+        <div class="mt-4 hidden rounded-lg border px-4 py-3 text-sm" data-ai-status></div>
+
+        <div class="mt-4 hidden rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-ai-warning-wrap>
+          <p class="font-medium">Warnings</p>
+          <ul class="mt-2 space-y-1 text-xs" data-ai-warning-list></ul>
+        </div>
+
+        <div class="mt-4">
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm font-medium text-gray-900" data-ai-result-label>No AI suggestion yet</p>
+            <p class="text-xs text-gray-500" data-ai-loading hidden>Generating suggestion…</p>
+          </div>
+          <textarea
+            rows={10}
+            readonly
+            data-ai-result
+            placeholder="Use one of the AI actions above to generate a reviewable suggestion."
+            class={`${inputClass} min-h-[14rem] bg-gray-50`}
+          ></textarea>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button type="button" data-ai-copy disabled class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-500 disabled:cursor-not-allowed disabled:opacity-60">Copy suggestion</button>
+          <button type="button" data-ai-apply-summary hidden disabled class="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 disabled:cursor-not-allowed disabled:opacity-60">Apply to summary</button>
+          <button type="button" data-ai-apply-seo-title hidden disabled class="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 disabled:cursor-not-allowed disabled:opacity-60">Apply to SEO title</button>
+          <button type="button" data-ai-apply-seo-description hidden disabled class="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 disabled:cursor-not-allowed disabled:opacity-60">Apply to SEO description</button>
+          <button type="button" data-ai-append-body hidden disabled class="rounded-md border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 disabled:cursor-not-allowed disabled:opacity-60">Append to body</button>
+        </div>
+      </section>
+
+      <section class={cardClass}>
+        <div class="mb-4 border-b border-gray-200 pb-3">
           <h2 class={sectionHeadClass}>Media</h2>
           <p class="mt-1 text-sm text-gray-500">Use reusable article media only. The featured image supports the guide itself, while the OG image supports sharing.</p>
         </div>
@@ -650,7 +699,7 @@ const openGuideHint = (() => {
   </div>
 </form>
 
-<script lang="ts">
+<script>
   import {
     CONTENT_STATUS_LABELS,
     INDEXING_LABELS,
@@ -691,6 +740,15 @@ const openGuideHint = (() => {
     early_draft: 'rounded-lg border px-4 py-4 border-gray-200 bg-gray-50 text-gray-700',
   } as const
 
+  const AI_ACTION_LABELS = {
+    outline: 'Outline',
+    seo_title: 'SEO title',
+    seo_description: 'SEO description',
+    summary: 'Summary',
+    faq: 'FAQ ideas',
+    risk_check: 'Risk check',
+  } as const
+
   function helperClass(state: 'empty' | 'short' | 'good' | 'long'): string {
     if (state === 'good') return 'text-xs text-green-600'
     if (state === 'long') return 'text-xs text-red-600'
@@ -729,9 +787,34 @@ const openGuideHint = (() => {
     if (target) target.textContent = text
   }
 
-  document.querySelectorAll<HTMLElement>('[data-article-editor]').forEach(root => {
+  type AiStatusKind = 'hidden' | 'loading' | 'success' | 'error'
+
+  function setDevelopmentWarning(message: string): void {
+    if (!import.meta.env.DEV) return
+    console.warn(message)
+  }
+
+  async function readAiResponse(response: Response): Promise<Record<string, unknown> | null> {
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.toLowerCase().includes('application/json')) {
+      setDevelopmentWarning('admin article ai assist: received a non-JSON response')
+      return null
+    }
+
+    try {
+      const data = await response.json()
+      return typeof data === 'object' && data !== null ? data as Record<string, unknown> : null
+    } catch {
+      setDevelopmentWarning('admin article ai assist: could not parse JSON response')
+      return null
+    }
+  }
+
+  function initArticleEditors(): void {
+    document.querySelectorAll<HTMLElement>('[data-article-editor]').forEach(root => {
     const titleEl = root.querySelector<HTMLInputElement>('#title')
     const slugEl = root.querySelector<HTMLInputElement>('#slug')
+    const categoryEl = root.querySelector<HTMLSelectElement>('#article_category_id')
     const summaryEl = root.querySelector<HTMLTextAreaElement>('#summary')
     const contentEl = root.querySelector<HTMLTextAreaElement>('#content')
     const seoTitleEl = root.querySelector<HTMLInputElement>('#seo_title')
@@ -770,6 +853,18 @@ const openGuideHint = (() => {
     const openGuideWrapEl = root.querySelector<HTMLElement>('[data-open-guide-wrap]')
     const openGuideLinkEl = root.querySelector<HTMLAnchorElement>('[data-open-guide-link]')
     const openGuidePlaceholderEl = root.querySelector<HTMLElement>('[data-open-guide-placeholder]')
+    const aiStatusEl = root.querySelector<HTMLElement>('[data-ai-status]')
+    const aiWarningWrapEl = root.querySelector<HTMLElement>('[data-ai-warning-wrap]')
+    const aiWarningListEl = root.querySelector<HTMLElement>('[data-ai-warning-list]')
+    const aiResultLabelEl = root.querySelector<HTMLElement>('[data-ai-result-label]')
+    const aiLoadingEl = root.querySelector<HTMLElement>('[data-ai-loading]')
+    const aiResultEl = root.querySelector<HTMLTextAreaElement>('[data-ai-result]')
+    const aiCopyButton = root.querySelector<HTMLButtonElement>('[data-ai-copy]')
+    const aiApplySummaryButton = root.querySelector<HTMLButtonElement>('[data-ai-apply-summary]')
+    const aiApplySeoTitleButton = root.querySelector<HTMLButtonElement>('[data-ai-apply-seo-title]')
+    const aiApplySeoDescriptionButton = root.querySelector<HTMLButtonElement>('[data-ai-apply-seo-description]')
+    const aiAppendBodyButton = root.querySelector<HTMLButtonElement>('[data-ai-append-body]')
+    const aiActionButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-ai-action]'))
 
     const pathTargets = Array.from(root.querySelectorAll<HTMLElement>('[data-path-preview], [data-sidebar-path]'))
     const statusTargets = {
@@ -786,6 +881,226 @@ const openGuideHint = (() => {
         detail: item.querySelector<HTMLElement>('[data-checklist-detail]'),
       })
     })
+
+    let aiCurrentAction: keyof typeof AI_ACTION_LABELS | null = null
+    let aiSuggestion = ''
+    let aiWarnings: string[] = []
+    let aiLoading = false
+
+    function selectedCategoryLabel(): string {
+      const selected = categoryEl?.selectedOptions?.[0]
+      if (!selected || selected.value === '') return ''
+      return selected.textContent?.trim() ?? ''
+    }
+
+    function triggerFieldRefresh(element: HTMLInputElement | HTMLTextAreaElement | null): void {
+      if (!element) return
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+      element.dispatchEvent(new Event('change', { bubbles: true }))
+      updateUi()
+    }
+
+    function setAiStatus(kind: AiStatusKind, message = ''): void {
+      if (!aiStatusEl) return
+
+      if (kind === 'hidden' || !message.trim()) {
+        aiStatusEl.hidden = true
+        aiStatusEl.textContent = ''
+        aiStatusEl.className = 'mt-4 hidden rounded-lg border px-4 py-3 text-sm'
+        return
+      }
+
+      aiStatusEl.hidden = false
+      aiStatusEl.textContent = message
+      if (kind === 'loading') {
+        aiStatusEl.className = 'mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900'
+        return
+      }
+
+      aiStatusEl.className = kind === 'success'
+        ? 'mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900'
+        : 'mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'
+    }
+
+    function renderAiWarnings(): void {
+      if (!aiWarningWrapEl || !aiWarningListEl) return
+
+      aiWarningListEl.replaceChildren()
+      if (aiWarnings.length === 0) {
+        aiWarningWrapEl.hidden = true
+        return
+      }
+
+      aiWarningWrapEl.hidden = false
+      for (const warning of aiWarnings) {
+        const item = document.createElement('li')
+        item.textContent = warning
+        aiWarningListEl.appendChild(item)
+      }
+    }
+
+    function toggleAiActionButton(
+      button: HTMLButtonElement | null,
+      shouldShow: boolean,
+      disabled: boolean,
+    ): void {
+      if (!button) return
+      button.hidden = !shouldShow
+      button.disabled = disabled
+    }
+
+    function syncAiButtons(): void {
+      const hasSuggestion = aiSuggestion.trim().length > 0
+
+      if (aiCopyButton) {
+        aiCopyButton.disabled = !hasSuggestion || aiLoading
+      }
+
+      toggleAiActionButton(
+        aiApplySummaryButton,
+        hasSuggestion && aiCurrentAction === 'summary',
+        !hasSuggestion || aiLoading,
+      )
+      toggleAiActionButton(
+        aiApplySeoTitleButton,
+        hasSuggestion && aiCurrentAction === 'seo_title',
+        !hasSuggestion || aiLoading,
+      )
+      toggleAiActionButton(
+        aiApplySeoDescriptionButton,
+        hasSuggestion && aiCurrentAction === 'seo_description',
+        !hasSuggestion || aiLoading,
+      )
+      toggleAiActionButton(
+        aiAppendBodyButton,
+        hasSuggestion && (aiCurrentAction === 'outline' || aiCurrentAction === 'faq'),
+        !hasSuggestion || aiLoading,
+      )
+
+      aiActionButtons.forEach((button) => {
+        button.disabled = aiLoading
+      })
+    }
+
+    function renderAiResult(): void {
+      if (aiLoadingEl) aiLoadingEl.hidden = !aiLoading
+      if (aiResultLabelEl) {
+        aiResultLabelEl.textContent = aiCurrentAction
+          ? `${AI_ACTION_LABELS[aiCurrentAction]} suggestion`
+          : 'No AI suggestion yet'
+      }
+      if (aiResultEl) {
+        aiResultEl.value = aiSuggestion
+      }
+      renderAiWarnings()
+      syncAiButtons()
+    }
+
+    async function copyAiSuggestion(): Promise<void> {
+      if (!aiSuggestion.trim()) return
+      if (!navigator.clipboard?.writeText) {
+        setAiStatus('error', 'Copy is unavailable in this browser.')
+        return
+      }
+
+      try {
+        await navigator.clipboard.writeText(aiSuggestion)
+        setAiStatus('success', 'AI suggestion copied.')
+      } catch {
+        setAiStatus('error', 'Could not copy the AI suggestion.')
+      }
+    }
+
+    async function requestAiSuggestion(action: keyof typeof AI_ACTION_LABELS): Promise<void> {
+      aiLoading = true
+      aiCurrentAction = action
+      aiSuggestion = ''
+      aiWarnings = []
+      setAiStatus('loading', 'Generating suggestion...')
+      renderAiResult()
+
+      try {
+        const response = await fetch('/api/admin/articles/ai-assist', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            title: titleEl?.value ?? '',
+            summary: summaryEl?.value ?? '',
+            content: contentEl?.value ?? '',
+            category: selectedCategoryLabel(),
+            seo_title: seoTitleEl?.value ?? '',
+            seo_description: seoDescriptionEl?.value ?? '',
+          }),
+        })
+
+        const data = await readAiResponse(response)
+        if (!data) {
+          aiSuggestion = ''
+          aiWarnings = []
+          renderAiResult()
+          setAiStatus('error', 'AI assistant request failed. Please refresh and try again.')
+          return
+        }
+
+        if (!response.ok || data.ok !== true) {
+          aiSuggestion = ''
+          aiWarnings = []
+          renderAiResult()
+          const message = typeof data.message === 'string' && data.message.trim() !== ''
+            ? data.message
+            : 'AI article assistant request failed.'
+          setAiStatus('error', message)
+          return
+        }
+
+        aiSuggestion = typeof data.suggestion === 'string' ? data.suggestion.trim() : ''
+        aiWarnings = Array.isArray(data.warnings)
+          ? data.warnings.filter((warning): warning is string => typeof warning === 'string' && warning.trim() !== '')
+          : []
+
+        if (!aiSuggestion) {
+          renderAiResult()
+          setAiStatus('error', 'AI article assistant did not return a suggestion. Please try again.')
+          return
+        }
+
+        renderAiResult()
+        setAiStatus('success', `${AI_ACTION_LABELS[action]} suggestion ready for review.`)
+      } catch {
+        aiSuggestion = ''
+        aiWarnings = []
+        renderAiResult()
+        setAiStatus('error', 'AI assistant request failed. Please refresh and try again.')
+      } finally {
+        aiLoading = false
+        renderAiResult()
+      }
+    }
+
+    function appendSuggestionToBody(): void {
+      const suggestion = aiSuggestion.trim()
+      if (!contentEl || !suggestion) return
+      contentEl.value = contentEl.value.trim()
+        ? `${contentEl.value.replace(/\s+$/g, '')}\n\n${suggestion}`
+        : suggestion
+      triggerFieldRefresh(contentEl)
+      contentEl.focus()
+      setAiStatus('success', 'Suggestion appended to the body locally. Save when you are ready.')
+    }
+
+    function applySuggestionToField(
+      element: HTMLInputElement | HTMLTextAreaElement | null,
+      label: string,
+    ): void {
+      const suggestion = aiSuggestion.trim()
+      if (!element || !suggestion) return
+      element.value = suggestion
+      triggerFieldRefresh(element)
+      element.focus()
+      setAiStatus('success', `${label} updated locally. Save when you are ready.`)
+    }
 
     function updateUi(): void {
       const values = {
@@ -920,7 +1235,7 @@ const openGuideHint = (() => {
       })
     }
 
-    ;[titleEl, slugEl, summaryEl, contentEl, seoTitleEl, seoDescriptionEl, canonicalEl, contentStatusEl, indexingStatusEl, verificationStatusEl].forEach(element => {
+    ;[titleEl, slugEl, summaryEl, contentEl, seoTitleEl, seoDescriptionEl, canonicalEl, contentStatusEl, indexingStatusEl, verificationStatusEl, categoryEl].forEach(element => {
       element?.addEventListener('input', updateUi)
       element?.addEventListener('change', updateUi)
     })
@@ -937,6 +1252,42 @@ const openGuideHint = (() => {
       })
     })
 
+    aiActionButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.aiAction as keyof typeof AI_ACTION_LABELS | undefined
+        if (!action || !(action in AI_ACTION_LABELS)) return
+        requestAiSuggestion(action)
+      })
+    })
+
+    aiCopyButton?.addEventListener('click', () => {
+      copyAiSuggestion()
+    })
+
+    aiApplySummaryButton?.addEventListener('click', () => {
+      applySuggestionToField(summaryEl, 'Summary')
+    })
+
+    aiApplySeoTitleButton?.addEventListener('click', () => {
+      applySuggestionToField(seoTitleEl, 'SEO title')
+    })
+
+    aiApplySeoDescriptionButton?.addEventListener('click', () => {
+      applySuggestionToField(seoDescriptionEl, 'SEO description')
+    })
+
+    aiAppendBodyButton?.addEventListener('click', () => {
+      appendSuggestionToBody()
+    })
+
     updateUi()
+    renderAiResult()
   })
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initArticleEditors, { once: true })
+  } else {
+    initArticleEditors()
+  }
 </script>
