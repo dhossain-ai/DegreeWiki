@@ -5,9 +5,10 @@
 
 ## Current Project Status
 
-Phase 70C is complete. DegreeWiki now has an admin-only AI article assistant on top of the Phase
-70A/70B shared editor: reviewable outline/SEO/summary/FAQ/risk-check suggestions, safe AI Gateway
-routing through `admin_article_draft`, and no change to the existing save or publish workflow.
+Phase 71A is complete. DegreeWiki now has DB-backed AI usage limit policies, additive
+`ai_usage_logs` quota metadata, and an AI Gateway Limits tab so admins can manage AI quotas without
+changing env/code. The existing env fallback still remains active until admins create matching
+policy rows.
 
 Current branch: `main`
 
@@ -26,13 +27,15 @@ Very short import pipeline summary:
 
 ## Critical Rules
 
-- No source code, migration, or package changes for this docs-only cleanup.
+- Keep AI usage-limit rollout incremental: no seeded active policy rows in the migration.
+- Preserve legacy env fallback when no matching DB policy exists.
+- No new dependencies.
 - No service role, `createServiceClient`, or RLS bypass in app pages.
 - No production deletion from import cleanup: programs, universities, scholarships, articles, media, and production `data_sources` stay untouched.
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 70C checks run:
+- Phase 71A checks run:
   `npm run build`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
@@ -50,17 +53,24 @@ Very short import pipeline summary:
   for trimmed SEO/meta values and safer OG image URL generation.
 - Article verification remains status-only in Phase 70A.
   The admin article editor does not stamp or update `last_verified_at`.
-- The admin article assistant uses `use_case = 'admin_article_draft'` and requires active AI
-  Gateway routing before it can return suggestions.
-- The admin article assistant currently shares the existing `chat` quota bucket in `ai_usage_logs`
-  to avoid a migration.
+- The admin article assistant uses `use_case = 'admin_article_draft'`, resolves to the `admin`
+  audience tier, and requires active AI Gateway routing before it can return suggestions.
+- AI usage quotas can now be controlled through `ai_usage_limit_policies` and the
+  `/admin/ai-gateway?tab=limits` tab.
+- The new quota system checks DB policy first, then falls back to the legacy env-based combined
+  daily counting, then fails closed if authoritative counting is unavailable.
+- Static site-chat answers and reviewed preset `ai_static_answers` answers remain uncounted because
+  they bypass provider-backed AI calls entirely.
+- AI Gateway admin tests remain uncounted because they do not use the normal runtime quota/logging
+  path.
+- Old `ai_usage_logs` rows cannot be perfectly split retroactively by use case because earlier
+  successful chat-like calls were logged only by `session_type`.
 - DB-backed provider routing is ready, but it still depends on provider/account/model/policy rows
   before it replaces env fallback in practice.
 - DB-managed provider accounts currently support `openai_compatible` only.
 - Gemini and OpenRouter remain env-fallback only for now, outside the DB-managed provider list.
 - The AI Gateway admin page is now a tabbed control center with Overview, Providers, Models,
-  Routing, Testing, and Health tabs. This was a UI-only redesign; backend routing, provider-key
-  encryption, permission boundaries, and public AI endpoints were not changed.
+  Routing, Limits, Testing, and Health tabs.
 - The public chatbot shell is limited to `/`, `/programs*`, `/universities*`, `/scholarships*`,
   and `/guides*`. Anonymous visitors get static guidance only; logged-in site chat stays separate
   from saved-result chat and does not attach Finder-result or student-profile context.

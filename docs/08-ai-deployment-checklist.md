@@ -43,8 +43,8 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 | `AI_PROVIDER` | No | `gemini` | Active provider name: `gemini` or `openrouter` |
 | `AI_MODEL` | No | `gemini-2.5-flash` | Model string passed to provider |
 | `AI_GATEWAY_ENV_FALLBACK_ENABLED` | No | `false` | Enables env-based provider fallback when DB routing fails |
-| `AI_RATE_LIMIT_USER_DAILY` | No | `20` | Max AI calls per logged-in user per day |
-| `AI_RATE_LIMIT_ANON_DAILY` | No | `5` | Reserved; anonymous AI not yet enforced |
+| `AI_RATE_LIMIT_USER_DAILY` | No | `20` | Legacy combined daily fallback for logged-in successful AI calls when no matching DB policy exists |
+| `AI_RATE_LIMIT_ANON_DAILY` | No | `5` | Legacy combined daily fallback for future anonymous provider-backed AI when no matching DB policy exists |
 
 ---
 
@@ -163,7 +163,11 @@ Confirm these exist before deploying AI features.
 - [ ] `ai_gateway_call_logs` table exists; RLS enabled
   - Readable only by `view_ai_logs`, `manage_ai_settings`, or `super_admin`
   - No authenticated browser INSERT/UPDATE/DELETE policies
+- [ ] `ai_usage_limit_policies` table exists; RLS enabled
+  - Readable and mutable only by `manage_ai_settings` or `super_admin`
+  - Table may start empty intentionally; this keeps env fallback active until admins add rows
 - [ ] `ai_usage_logs` table exists; RLS enabled; service role can INSERT
+  - Additive columns exist: `use_case`, `audience_tier`, `anonymous_session_id`
 - [ ] `ai_finder_results` table exists; RLS enabled
   - Service role can INSERT and UPDATE
   - Authenticated user SELECT policy: `EXISTS (SELECT 1 FROM student_profiles WHERE student_profiles.id = ai_finder_results.student_profile_id AND student_profiles.user_id = auth.uid())`
@@ -286,15 +290,25 @@ Run these manually after deployment. Requires at least one published program in 
 
 ## 9. Rate-Limit Test
 
-To verify rate-limit enforcement without waiting for the daily window:
+To verify the legacy env fallback without waiting for the daily window:
 
-1. Temporarily set `AI_RATE_LIMIT_USER_DAILY=1` in Cloudflare Pages env vars (not a secret).
-2. Run the Fit Finder once — AI summary should appear.
-3. Run it again — AI summary should be absent; gray unavailable note should appear.
-4. Reset `AI_RATE_LIMIT_USER_DAILY` to the desired limit (e.g., `20`).
+1. Make sure no matching DB usage-limit policy exists for the test route.
+2. Temporarily set `AI_RATE_LIMIT_USER_DAILY=1` in Cloudflare Pages env vars (not a secret).
+3. Run the Fit Finder once — AI summary should appear.
+4. Run it again — AI summary should be absent; gray unavailable note should appear.
+5. Reset `AI_RATE_LIMIT_USER_DAILY` to the desired limit (e.g., `20`).
 
 The daily count resets at UTC midnight. To reset immediately for testing, delete rows
 from `ai_usage_logs` for the test user in the Supabase dashboard.
+
+To verify a DB-backed policy:
+
+1. Create a row in `/admin/ai-gateway?tab=limits`, for example
+   `chat_answer + authenticated_free + daily = 1`.
+2. Make one successful provider-backed call on that surface.
+3. Repeat the same provider-backed call.
+4. Expected: the second call is blocked even if the env fallback is higher.
+5. Disable or delete the policy row to return that combination to legacy env fallback behavior.
 
 ---
 
@@ -303,7 +317,8 @@ from `ai_usage_logs` for the test user in the Supabase dashboard.
 After a successful AI summary run, check the Supabase dashboard:
 
 ```sql
-SELECT user_id, session_type, tokens_used, model_used, created_at
+SELECT user_id, anonymous_session_id, session_type, use_case, audience_tier,
+       tokens_used, model_used, created_at
 FROM ai_usage_logs
 ORDER BY created_at DESC
 LIMIT 10;
@@ -311,12 +326,18 @@ LIMIT 10;
 
 Expected for a successful Fit Finder run:
 - `session_type = 'finder'`
+- `use_case = 'fit_finder_summary'`
+- `audience_tier = 'authenticated_free'` for the normal signed-in product flow
 - `tokens_used > 0`
 - `model_used` matches the configured `AI_MODEL` value
 - `cost_estimate_usd = null` (cost map deferred)
 
 If no row appears after a successful AI summary, `SUPABASE_SERVICE_ROLE_KEY` may be
 misconfigured — the usage log is written fire-and-forget after a successful AI call.
+
+Static/preset note:
+- Hardcoded site-chat responses and reviewed preset `ai_static_answers` responses do not create
+  quota rows because they do not call providers.
 
 ## 10A. Gateway Call Log Verification
 
@@ -343,6 +364,10 @@ Use `/admin/ai-gateway` for routine AI Gateway configuration after deployment.
 - [ ] API key saved successfully and only masked metadata is visible in the UI
 - [ ] Model row created and linked to the intended provider account
 - [ ] Routing policy row created for the intended use case and priority
+- [ ] Limits tab loads at `/admin/ai-gateway?tab=limits`
+- [ ] Suggested starter rows are visible in the Limits tab but are not auto-seeded
+- [ ] Creating a usage-limit policy row succeeds with no raw DB error exposure
+- [ ] Disabling a usage-limit policy row returns that tuple to legacy env fallback behavior
 - [ ] If using the article assistant, an active `admin_article_draft` routing policy exists
 - [ ] Health table loads and reset action clears failures/error/cooldown without wiping timestamps
 - [ ] Preset admin test succeeds or returns a safe coarse failure without exposing secrets
@@ -355,6 +380,7 @@ Admin test safety note:
 - Admin tests are preset-only
 - No real student data is used
 - Admin tests do not poison production provider health/cooldown
+- Admin tests do not consume AI usage quota
 
 Article assistant note:
 - `/api/admin/articles/ai-assist` stays admin-only

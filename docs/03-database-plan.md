@@ -108,8 +108,15 @@ Planned tables:
 - ai_conversations
 - ai_messages
 - ai_usage_logs
-- ai_rate_limits
+- ai_usage_limit_policies
 - ai_static_answers
+
+Usage limit notes:
+
+- `ai_usage_logs` is the append-only quota ledger for successful provider-backed AI calls
+- `ai_usage_limit_policies` stores admin-managed per-use-case, per-audience, per-period call caps
+- legacy env-based quota fallback still applies when no matching policy row exists
+- old usage rows are not backfilled retroactively by use case
 
 ## Data Source / Verification Tables
 

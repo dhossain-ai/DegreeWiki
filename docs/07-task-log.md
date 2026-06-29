@@ -5,6 +5,32 @@
 
 ## Recent Task Log
 
+### Phase 71A - AI Usage Limits Admin
+
+- Added `026_ai_usage_limit_policies.sql` with DB-backed per-use-case/per-audience quota policy
+  rows, updated-at trigger, admin-only RLS, and additive `ai_usage_logs` columns for `use_case`,
+  `audience_tier`, and `anonymous_session_id`.
+- Added shared usage-policy resolution in `src/lib/ai/usage/policies.ts` so runtime quota checks
+  now prefer DB policy rows, fall back to the legacy env-based combined daily counting when no
+  matching DB policy exists, and fail closed when authoritative counting is unavailable.
+- Extended the shared AI logging and rate-limit path so successful usage rows now record
+  `use_case` and `audience_tier`, with the article assistant explicitly resolving to the `admin`
+  audience tier instead of blending into generic chat rows going forward.
+- Kept static site-chat answers and reviewed preset `ai_static_answers` answers uncounted because
+  they still bypass `callAI()` and provider calls entirely.
+- Kept AI Gateway admin tests uncounted because the testing path still bypasses the normal product
+  quota/logging flow.
+- Added admin usage-limit CRUD helpers plus `/api/admin/ai-gateway/usage-limits` with safe JSON
+  validation, duplicate protection, no raw Postgres errors, and suggested starter policies shown
+  in the response/UI only.
+- Added a new Limits tab to `/admin/ai-gateway` with fallback/env guidance, starter policy
+  examples, filters, create/edit/enable-disable/delete actions, and explicit explanations about
+  static answers and admin tests not consuming quota.
+- Documented the rollout rule that the new policy table starts empty so the legacy env fallback
+  remains active until admins deliberately create DB-backed policy rows.
+- Ran `npm run build` plus the required safety greps for unsafe HTML, service-role usage, and
+  secret-key references in `src`.
+
 ### Phase 70C - Article AI Assistant Foundation
 
 - Added an admin-only article AI assistant endpoint at `/api/admin/articles/ai-assist` plus

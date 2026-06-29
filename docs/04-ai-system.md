@@ -193,9 +193,11 @@ callAI(request: AIRequest, env: AIRuntimeEnv): Promise<AIResponse>
 
 - Input guardrails run first (checkInput).
 - Service client created from env.SUPABASE_SERVICE_ROLE_KEY (null if absent).
-- Daily limit read from env.AI_RATE_LIMIT_USER_DAILY (default 20).
-- Rate limit checked second (checkRateLimit) — fail closed:
-    no userId → denied; no service client → denied; query error → denied.
+- Rate limit checked second (checkRateLimit).
+- Runtime order is:
+    DB usage policy for `use_case + audience_tier`
+    → legacy env fallback
+    → conservative fail-closed fallback if authoritative counting is unavailable.
 - Prompt built: buildFinderPrompt for finder sessions, buildChatPrompt for chat,
   or a caller-provided prompt override for admin-only article assist.
 - Use-case routed through router.ts:
@@ -207,6 +209,8 @@ callAI(request: AIRequest, env: AIRuntimeEnv): Promise<AIResponse>
   uses env fallback when AI_GATEWAY_ENV_FALLBACK_ENABLED=true.
 - Output guardrails run on provider response (checkOutput) before returning.
 - writeUsageLog() called fire-and-forget after output guardrail passes.
+- Successful usage-log rows now include `session_type`, `use_case`, `audience_tier`,
+  and optional `anonymous_session_id` metadata.
 - Every failure path returns a valid AIResponse — callAI never throws.
 - callAI must only be called from server endpoints.
 
@@ -319,9 +323,45 @@ Safety boundaries:
 - No fake citations, live verification claims, or guarantees
 
 Quota/logging note:
-- The admin article assistant currently reuses the existing `chat` usage-log bucket
-  to avoid a migration.
+- The admin article assistant now keeps `session_type = 'chat'` for compatibility but writes
+  `use_case = 'admin_article_draft'` and `audience_tier = 'admin'` into new `ai_usage_logs` rows.
 - Gateway call logs remain metadata-only and do not store article bodies or AI suggestions.
+
+### Phase 71A Behaviour — AI Usage Limits Admin
+
+Phase 71A adds DB-backed AI usage limit policies plus an admin Limits tab inside
+`/admin/ai-gateway`.
+
+New table:
+- `ai_usage_limit_policies`
+
+Additive `ai_usage_logs` metadata:
+- `use_case`
+- `audience_tier`
+- `anonymous_session_id`
+
+Resolution order:
+1. enabled DB policy rows for the current `use_case + audience_tier`
+2. legacy env fallback using the existing combined daily counting behavior
+3. conservative fail-closed fallback if authoritative counting is unavailable
+
+Audience tier mapping in this phase:
+- anonymous provider-backed calls → `anonymous`
+- signed-in non-admin product users → `authenticated_free`
+- admin/super_admin editorial calls → `admin`
+- `paid_basic` and `paid_pro` remain reserved for future billing/subscription work
+
+Important rollout rule:
+- The migration does not seed active policy rows.
+- An empty `ai_usage_limit_policies` table means env fallback remains active.
+- Older `ai_usage_logs` rows are not backfilled, so historic `chat` rows cannot be perfectly
+  split retroactively by use case.
+
+Exclusions:
+- hardcoded/static site-chat answers do not count
+- reviewed preset `ai_static_answers` answers do not count
+- AI Gateway admin tests do not count
+- `ai_gateway_call_logs` remains separate from quota logs
 
 ### Phase 25 Behaviour — Usage Logging and Rate Limits
 
@@ -339,19 +379,26 @@ and never uses the PUBLIC_ prefix.
 The client is created once inside callAI() per request and passed into
 checkRateLimit and writeUsageLog. It is never stored at module scope.
 
-#### Rate Limit Algorithm (fail-closed)
+#### Rate Limit Algorithm
 
-checkRateLimit(userId, sessionType, { serviceClient, dailyLimit }):
+checkRateLimit({ userId, anonymousSessionId, useCase, audienceTier, sessionType }, { serviceClient, env }):
 
-1. userId null → denied (no anonymous AI calls exist yet).
-2. serviceClient null → denied (SUPABASE_SERVICE_ROLE_KEY not configured).
-3. Query ai_usage_logs: count rows where user_id = userId AND
-   created_at >= UTC day start (midnight). Count is across all session_type values.
-4. Query error → denied.
-5. count >= dailyLimit → denied, reason: 'limit_exceeded'.
-6. Otherwise → allowed, remaining: dailyLimit - count.
-
-Default daily limit: 20 (from AI_RATE_LIMIT_USER_DAILY env var).
+1. Resolve audience tier:
+   - explicit override from caller when needed (for example admin article assistant)
+   - otherwise `authenticated_free` for signed-in users
+   - otherwise `anonymous`
+2. If `serviceClient` is missing, fail closed with `service_unavailable`.
+3. Try enabled DB policy rows for the current `use_case + audience_tier`.
+4. For each DB policy row, count matching `ai_usage_logs` rows by:
+   - `use_case`
+   - `audience_tier`
+   - `user_id` or `anonymous_session_id`
+   - current UTC day or month depending on policy period
+5. If any enabled DB policy is exhausted, deny with `limit_exceeded`.
+6. If no matching DB policy exists, or DB policy lookup/counting fails, fall back to the
+   legacy env-based combined daily counting behavior.
+7. Legacy env fallback still counts broadly by successful `ai_usage_logs` rows on the current UTC
+   day, preserving pre-Phase-71A behavior until admins create DB rows.
 
 Fallback messages in callAI:
   limit_exceeded → "You have reached today's AI usage limit. Your rule-based
@@ -371,7 +418,10 @@ the AI response.
 
 Fields written:
   user_id           — auth user UUID (same as user_profiles.id FK)
+  anonymous_session_id — reserved for future anonymous provider-backed flows
   session_type      — 'finder' or 'chat'
+  use_case          — fit_finder_summary | chat_answer | admin_article_draft | future use-case
+  audience_tier     — anonymous | authenticated_free | admin | paid_basic | paid_pro
   tokens_used       — promptTokens + completionTokens from provider
   model_used        — model string from provider response
   cost_estimate_usd — null (Phase 25; cost map deferred to later phase)
@@ -590,23 +640,20 @@ Do not start with ChromaDB unless Supabase pgvector is not enough.
 
 ## AI Usage Limits
 
-Anonymous users:
+Current admin-managed quota model:
 
-- very limited daily AI usage
-- temporary profile/results
-- expiry cleanup
+- policies may be set per `use_case`
+- policies may be set per `audience_tier`
+- policies may be set per `period` (`daily` or `monthly`)
+- empty policy table means legacy env fallback remains active
 
-Logged-in users:
+Current audience tiers:
 
-- higher daily usage
-- saved profiles/results
-- saved conversations
-
-Paid users later:
-
-- higher usage
-- deeper recommendations
-- more conversations
+- `anonymous`
+- `authenticated_free`
+- `admin`
+- `paid_basic` reserved for later
+- `paid_pro` reserved for later
 
 ## Cloudflare Workers Compatibility
 
