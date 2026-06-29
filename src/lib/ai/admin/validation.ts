@@ -3,6 +3,8 @@ import {
   AI_GATEWAY_DB_PROVIDER_PROTOCOLS,
   AI_GATEWAY_PRIVACY_LEVELS,
   AI_GATEWAY_TEST_PRESETS,
+  AI_USAGE_LIMIT_AUDIENCE_TIERS,
+  AI_USAGE_LIMIT_PERIODS,
   AI_GATEWAY_USE_CASES,
 } from './constants'
 
@@ -80,6 +82,8 @@ export function getBoolean(
   const record = asRecord(value)
   const raw = record[key]
   if (typeof raw === 'boolean') return raw
+  if (raw === 'true') return true
+  if (raw === 'false') return false
   if (raw == null && options.defaultValue !== undefined) return options.defaultValue
   throw new AdminAPIValidationError('invalid_request')
 }
@@ -193,6 +197,14 @@ export function getPrivacyLevel(value: unknown, key = 'privacy_level') {
 
 export function getUseCase(value: unknown, key = 'use_case') {
   return getEnum(value, key, AI_GATEWAY_USE_CASES)
+}
+
+export function getUsageAudienceTier(value: unknown, key = 'audience_tier') {
+  return getEnum(value, key, AI_USAGE_LIMIT_AUDIENCE_TIERS)
+}
+
+export function getUsagePeriod(value: unknown, key = 'period') {
+  return getEnum(value, key, AI_USAGE_LIMIT_PERIODS)
 }
 
 export function getTestPresetId(value: unknown, key = 'preset_id') {
