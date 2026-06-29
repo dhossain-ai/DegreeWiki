@@ -111,10 +111,12 @@ export async function callAI(
   }
 
   // Step 3: build prompt from approved DegreeWiki context.
-  const prompt =
-    request.sessionType === 'finder'
-      ? buildFinderPrompt(request.context)
-      : buildChatPrompt(request.userMessage, request.context, request.chatMode)
+  const prompt = request.prompt
+    ?? (
+      request.sessionType === 'finder'
+        ? buildFinderPrompt(request.context)
+        : buildChatPrompt(request.userMessage, request.context, request.chatMode)
+    )
 
   // Step 4: use the DB-backed router. App-level validation and rate limits stay here.
   const routeResult = await runAIGatewayRoute({

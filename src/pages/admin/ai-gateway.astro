@@ -2,10 +2,12 @@
 import AdminLayout from '../../layouts/AdminLayout.astro'
 import { forbiddenAdminResponse, requireAdminPermission } from '../../lib/admin/guard'
 import {
+  AI_GATEWAY_ADMIN_USE_CASES,
   AI_GATEWAY_DB_PROVIDER_PROTOCOLS,
   AI_GATEWAY_LIVE_USE_CASES,
   AI_GATEWAY_PLANNED_PROVIDER_PROTOCOLS,
   AI_GATEWAY_TEST_PRESETS,
+  AI_GATEWAY_USE_CASE_DESCRIPTIONS,
   AI_GATEWAY_USE_CASES,
 } from '../../lib/ai/admin/constants'
 import { isAIGatewayEnvFallbackEnabled } from '../../lib/ai/admin/store'
@@ -184,6 +186,14 @@ function accessFlags(provider: any): string[] {
   return flags
 }
 
+function useCaseDescription(useCase: string): string {
+  return AI_GATEWAY_USE_CASE_DESCRIPTIONS[useCase as keyof typeof AI_GATEWAY_USE_CASE_DESCRIPTIONS] ?? 'No description available.'
+}
+
+function isAdminLiveUseCase(useCase: string): boolean {
+  return AI_GATEWAY_ADMIN_USE_CASES.includes(useCase as any)
+}
+
 const modelCountByProviderId = new Map<string, number>()
 for (const model of models) {
   if (!model.provider_account_id) continue
@@ -222,6 +232,7 @@ const healthIssueCount = healthRows.filter(
 const groupedPolicies = AI_GATEWAY_USE_CASES.map((useCase) => ({
   useCase,
   isLive: AI_GATEWAY_LIVE_USE_CASES.includes(useCase),
+  isAdmin: isAdminLiveUseCase(useCase),
   rows: policies.filter((policy) => policy.use_case === useCase),
 }))
 
@@ -238,6 +249,7 @@ const requestedTab = Astro.url.searchParams.get('tab') ?? 'overview'
 const activeTab = tabs.some((tab) => tab.id === requestedTab) ? requestedTab : 'overview'
 const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
   useCase,
+  isAdmin: isAdminLiveUseCase(useCase),
   rows: policies.filter((policy) => policy.use_case === useCase),
 }))
 ---
@@ -247,8 +259,11 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
       <h1 class="text-xl font-bold text-gray-900">AI Gateway</h1>
       <p class="mt-2 max-w-4xl text-sm text-gray-600">
         Manage DB-backed provider accounts, models, routing policies, health state, and admin-only
-        preset tests. Only <span class="font-medium text-gray-800">fit_finder_summary</span> and
-        <span class="font-medium text-gray-800"> chat_answer</span> are live product routes today.
+        preset tests. Student-facing live routes include
+        <span class="font-medium text-gray-800"> fit_finder_summary</span> and
+        <span class="font-medium text-gray-800"> chat_answer</span>. The admin article assistant
+        uses <span class="font-medium text-gray-800">admin_article_draft</span> for drafting and
+        SEO suggestions.
       </p>
     </div>
     <div class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
@@ -343,7 +358,8 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
         <li class="rounded-lg bg-white/70 px-4 py-3">2. Add model</li>
         <li class="rounded-lg bg-white/70 px-4 py-3">3. Add routing policy for <code>fit_finder_summary</code></li>
         <li class="rounded-lg bg-white/70 px-4 py-3">4. Add routing policy for <code>chat_answer</code></li>
-        <li class="rounded-lg bg-white/70 px-4 py-3">5. Run preset admin tests</li>
+        <li class="rounded-lg bg-white/70 px-4 py-3">5. Add routing policy for <code>admin_article_draft</code></li>
+        <li class="rounded-lg bg-white/70 px-4 py-3">6. Run preset admin tests</li>
       </ol>
       <div class="mt-4 grid gap-3 text-sm text-blue-950 md:grid-cols-3">
         <div class="rounded-lg bg-white/70 px-4 py-3">
@@ -383,8 +399,11 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
           <div class="rounded-lg border border-gray-200 p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <h3 class="text-sm font-semibold text-gray-900">{summary.useCase}</h3>
-              <span class="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">live product route</span>
+              <span class="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
+                {summary.isAdmin ? 'live admin route' : 'live product route'}
+              </span>
             </div>
+            <p class="mt-2 text-xs text-gray-500">{useCaseDescription(summary.useCase)}</p>
             {summary.rows.length === 0 ? (
               <p class="mt-3 text-sm text-gray-500">No DB routing rows configured yet; env fallback remains the practical route if enabled.</p>
             ) : (
@@ -859,7 +878,8 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
       <div>
         <h2 class="text-lg font-semibold text-gray-900">Routing Policies</h2>
         <p class="mt-1 text-sm text-gray-500">
-          Only <code>fit_finder_summary</code> and <code>chat_answer</code> currently drive live product routing.
+          <code>fit_finder_summary</code> and <code>chat_answer</code> drive student-facing routes.
+          <code>admin_article_draft</code> powers admin article drafting and SEO suggestions.
         </p>
       </div>
     </div>
@@ -883,6 +903,7 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
                   <option value={useCase}>{useCase}</option>
                 ))}
               </select>
+              <p class="mt-1 text-xs text-gray-500">Use <code>admin_article_draft</code> for admin article drafting and SEO suggestions.</p>
             </div>
             <div>
               <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>
@@ -931,12 +952,15 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
               <div class="flex flex-wrap items-center gap-2">
                 <h3 class="text-base font-semibold text-gray-900">{group.useCase}</h3>
                 <span class={group.isLive ? 'inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700' : 'inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600'}>
-                  {group.isLive ? 'live product route' : 'not live in product'}
+                  {group.isLive ? (group.isAdmin ? 'live admin route' : 'live product route') : 'not live in product'}
                 </span>
               </div>
+              <p class="mt-1 text-xs text-gray-500">{useCaseDescription(group.useCase)}</p>
               <p class="mt-1 text-sm text-gray-500">
                 {group.isLive
-                  ? 'Priority order below can affect active product traffic once rows are enabled.'
+                  ? (group.isAdmin
+                    ? 'Priority order below affects admin article drafting and SEO suggestions once rows are enabled.'
+                    : 'Priority order below can affect active product traffic once rows are enabled.')
                   : 'Configured for future use; not wired into product behavior yet.'}
               </p>
             </div>
@@ -1156,6 +1180,7 @@ const liveRouteSummaries = AI_GATEWAY_LIVE_USE_CASES.map((useCase) => ({
               <option value={useCase}>{useCase}</option>
             ))}
           </select>
+          <p class="mt-1 text-xs text-gray-500"><code>admin_article_draft</code> is the admin article assistant route.</p>
         </div>
         <div id="test-model-wrap" class="hidden">
           <label class="mb-1 block text-sm font-medium text-gray-700">Model</label>

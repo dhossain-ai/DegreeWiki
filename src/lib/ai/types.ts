@@ -11,6 +11,17 @@ export type AIUseCase =
   | 'scholarship_explanation'
   | 'admin_article_draft'
 
+export const ARTICLE_ASSIST_ACTIONS = [
+  'outline',
+  'seo_title',
+  'seo_description',
+  'summary',
+  'faq',
+  'risk_check',
+] as const
+
+export type ArticleAssistAction = typeof ARTICLE_ASSIST_ACTIONS[number]
+
 // Minimal profile summary passed into prompts.
 // All fields are optional — this is a partial view of student_profiles,
 // never the full row.
@@ -44,6 +55,9 @@ export interface AIRequest {
   conversationId?: string
   userMessage: string
   context: AIContext
+  // Optional caller-provided prompt override for non-chat/non-finder surfaces
+  // that still need the shared gateway, quota, and logging path.
+  prompt?: AIPrompt
   userId?: string
   sessionToken?: string
 }
