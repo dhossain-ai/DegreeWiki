@@ -2,14 +2,34 @@ export type AISessionType = 'finder' | 'chat'
 
 export type AIRole = 'user' | 'assistant' | 'system'
 
-export type AIUseCase =
-  | 'fit_finder_summary'
-  | 'chat_answer'
-  | 'intent_detection'
-  | 'subject_mapping'
-  | 'program_comparison'
-  | 'scholarship_explanation'
-  | 'admin_article_draft'
+export const AI_USE_CASES = [
+  'fit_finder_summary',
+  'chat_answer',
+  'intent_detection',
+  'subject_mapping',
+  'program_comparison',
+  'scholarship_explanation',
+  'admin_article_draft',
+] as const
+
+export type AIUseCase = typeof AI_USE_CASES[number]
+
+export const AI_USAGE_AUDIENCE_TIERS = [
+  'anonymous',
+  'authenticated_free',
+  'admin',
+  'paid_basic',
+  'paid_pro',
+] as const
+
+export type AIUsageAudienceTier = typeof AI_USAGE_AUDIENCE_TIERS[number]
+
+export const AI_USAGE_PERIODS = [
+  'daily',
+  'monthly',
+] as const
+
+export type AIUsagePeriod = typeof AI_USAGE_PERIODS[number]
 
 export const ARTICLE_ASSIST_ACTIONS = [
   'outline',
@@ -47,6 +67,7 @@ export interface AIContext {
 export interface AIRequest {
   sessionType: AISessionType
   useCase?: AIUseCase
+  audienceTier?: AIUsageAudienceTier
   // When sessionType === 'chat', set to 'saved_result' for context-bound saved-result chat.
   // Use 'site' for the logged-in public chatbot shell. Omit for generic/future chat surfaces.
   // Only used when sessionType === 'chat'.
@@ -266,7 +287,10 @@ export interface AIGatewayFailure {
 // Usage audit entry written to ai_usage_logs (Phase 25+).
 export interface AIUsageEntry {
   userId: string | null
+  anonymousSessionId?: string | null
   sessionType: AISessionType
+  useCase: AIUseCase
+  audienceTier: AIUsageAudienceTier
   tokensUsed: number
   modelUsed: string
   costEstimateUsd?: number | null

@@ -233,6 +233,7 @@ export async function runArticleAssist(
   const aiResponse = await callAI(
     {
       useCase: 'admin_article_draft',
+      audienceTier: 'admin',
       sessionType: 'chat',
       userMessage: `${ACTION_LABELS[input.action]} for article draft review.`,
       context,

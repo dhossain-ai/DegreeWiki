@@ -1,62 +1,64 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AIRuntimeEnv, AISessionType } from '../types'
+import type {
+  AIRuntimeEnv,
+  AISessionType,
+  AIUsageAudienceTier,
+  AIUsagePeriod,
+  AIUseCase,
+} from '../types'
 import { createServiceClient } from '../../supabase/service'
+import {
+  resolveAIUsageAudienceTier,
+  resolveAIUsageLimit,
+  type UsageLimitSource,
+} from './policies'
 
 export interface RateLimitResult {
   allowed: boolean
   remaining: number
+  limit: number
+  used: number
+  period: AIUsagePeriod
+  source: UsageLimitSource
+  audienceTier: AIUsageAudienceTier
   reason?: 'limit_exceeded' | 'service_unavailable'
+}
+
+export interface RateLimitRequest {
+  userId: string | null
+  sessionType: AISessionType
+  useCase: AIUseCase
+  audienceTier?: AIUsageAudienceTier
+  anonymousSessionId?: string | null
 }
 
 export interface RateLimitOpts {
   serviceClient: SupabaseClient | null
-  dailyLimit: number
+  env: AIRuntimeEnv
 }
 
-// checkRateLimit enforces a per-user daily AI call limit via ai_usage_logs.
-//
-// Fail-closed: any condition that prevents an authoritative count (no userId,
-// no service client, query error) returns allowed=false so Gemini is not called.
-//
-// Count is across all session_type values for the user on the current UTC day.
-// Anonymous rate limiting is deferred — no anonymous AI calls exist yet.
 export async function checkRateLimit(
-  userId: string | null,
-  _sessionType: AISessionType,
+  request: RateLimitRequest,
   opts: RateLimitOpts,
 ): Promise<RateLimitResult> {
-  if (userId === null) {
-    return { allowed: false, remaining: 0, reason: 'service_unavailable' }
+  const audienceTier = resolveAIUsageAudienceTier({
+    userId: request.userId,
+    anonymousSessionId: request.anonymousSessionId,
+    audienceTier: request.audienceTier,
+  })
+  const resolved = await resolveAIUsageLimit({
+    serviceClient: opts.serviceClient,
+    env: opts.env,
+    useCase: request.useCase,
+    userId: request.userId,
+    anonymousSessionId: request.anonymousSessionId,
+    audienceTier: request.audienceTier,
+  })
+
+  return {
+    ...resolved,
+    audienceTier,
   }
-
-  if (opts.serviceClient === null) {
-    return { allowed: false, remaining: 0, reason: 'service_unavailable' }
-  }
-
-  const now = new Date()
-  const todayStart = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  ))
-
-  const { count, error } = await opts.serviceClient
-    .from('ai_usage_logs')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .gte('created_at', todayStart.toISOString())
-
-  if (error) {
-    console.error('ai rate limit query failed:', error.message)
-    return { allowed: false, remaining: 0, reason: 'service_unavailable' }
-  }
-
-  const used = count ?? 0
-  if (used >= opts.dailyLimit) {
-    return { allowed: false, remaining: 0, reason: 'limit_exceeded' }
-  }
-
-  return { allowed: true, remaining: opts.dailyLimit - used }
 }
 
 // checkAIRateLimit is a server-only convenience wrapper used by API routes.
@@ -65,13 +67,11 @@ export async function checkRateLimit(
 // API routes under src/pages/ must use this function rather than calling
 // checkRateLimit directly with a manually constructed service client.
 export async function checkAIRateLimit(
-  userId: string | null,
-  sessionType: AISessionType,
+  request: RateLimitRequest,
   env: AIRuntimeEnv,
 ): Promise<RateLimitResult> {
   const serviceClient = env.SUPABASE_SERVICE_ROLE_KEY
     ? createServiceClient(env.SUPABASE_SERVICE_ROLE_KEY)
     : null
-  const dailyLimit = Math.max(1, parseInt(env.AI_RATE_LIMIT_USER_DAILY ?? '20', 10) || 20)
-  return checkRateLimit(userId, sessionType, { serviceClient, dailyLimit })
+  return checkRateLimit(request, { serviceClient, env })
 }

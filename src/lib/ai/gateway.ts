@@ -74,20 +74,32 @@ export async function callAI(
     ? createServiceClient(env.SUPABASE_SERVICE_ROLE_KEY)
     : null
 
-  const dailyLimit = Math.max(1, parseInt(env.AI_RATE_LIMIT_USER_DAILY ?? '20', 10) || 20)
   const useCase = request.useCase
     ?? (request.sessionType === 'finder' ? 'fit_finder_summary' : 'chat_answer')
 
   logAIDev('use case selected', { useCase })
 
   // Step 2: rate limit check — fail closed.
-  // No service client → denied. Anonymous user → denied. Query error → denied.
-  const { allowed, reason: limitReason } = await checkRateLimit(
-    request.userId ?? null,
-    request.sessionType,
-    { serviceClient, dailyLimit },
+  const rateLimit = await checkRateLimit(
+    {
+      userId: request.userId ?? null,
+      anonymousSessionId: request.sessionToken ?? null,
+      sessionType: request.sessionType,
+      useCase,
+      audienceTier: request.audienceTier,
+    },
+    { serviceClient, env },
   )
-  logAIDev('rate limit result', { allowed, reason: limitReason ?? null })
+  const { allowed, reason: limitReason } = rateLimit
+  logAIDev('rate limit result', {
+    allowed,
+    reason: limitReason ?? null,
+    source: rateLimit.source,
+    period: rateLimit.period,
+    used: rateLimit.used,
+    limit: rateLimit.limit,
+    audienceTier: rateLimit.audienceTier,
+  })
   if (!allowed) {
     if (import.meta.env.DEV && limitReason === 'service_unavailable' && !env.SUPABASE_SERVICE_ROLE_KEY) {
       console.warn('[AI gateway] AI call denied: SUPABASE_SERVICE_ROLE_KEY is not set. Add it to .env.local (local dev) or Cloudflare secrets (production) to enable AI rate limiting and AI calls.')
@@ -184,11 +196,14 @@ export async function callAI(
   // Only session metadata and token counts are logged. No prompt or response text.
   writeUsageLog(
     {
-      userId:           request.userId ?? null,
-      sessionType:      request.sessionType,
-      tokensUsed:       providerResponse.promptTokens + providerResponse.completionTokens,
-      modelUsed:        providerResponse.modelUsed,
-      costEstimateUsd:  null,
+      userId:             request.userId ?? null,
+      anonymousSessionId: request.sessionToken ?? null,
+      sessionType:        request.sessionType,
+      useCase,
+      audienceTier:       rateLimit.audienceTier,
+      tokensUsed:         providerResponse.promptTokens + providerResponse.completionTokens,
+      modelUsed:          providerResponse.modelUsed,
+      costEstimateUsd:    null,
     },
     serviceClient,
   ).catch(() => {

@@ -197,7 +197,14 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
     return systemNotice('login_required', SITE_LOGIN_REQUIRED_RESPONSE)
   }
 
-  const rateCheck = await checkAIRateLimit(user.id, 'chat', aiEnv)
+  const rateCheck = await checkAIRateLimit(
+    {
+      userId: user.id,
+      sessionType: 'chat',
+      useCase: 'chat_answer',
+    },
+    aiEnv,
+  )
   if (!rateCheck.allowed) {
     return jsonResponse(
       rateCheck.reason === 'limit_exceeded' ? 429 : 503,

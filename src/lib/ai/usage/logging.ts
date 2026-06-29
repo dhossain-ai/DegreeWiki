@@ -20,11 +20,14 @@ export async function writeUsageLog(
   const { error } = await serviceClient
     .from('ai_usage_logs')
     .insert({
-      user_id:           entry.userId,
-      session_type:      entry.sessionType,
-      tokens_used:       entry.tokensUsed,
-      model_used:        entry.modelUsed,
-      cost_estimate_usd: entry.costEstimateUsd ?? null,
+      user_id:              entry.userId,
+      anonymous_session_id: entry.anonymousSessionId ?? null,
+      session_type:         entry.sessionType,
+      use_case:             entry.useCase,
+      audience_tier:        entry.audienceTier,
+      tokens_used:          entry.tokensUsed,
+      model_used:           entry.modelUsed,
+      cost_estimate_usd:    entry.costEstimateUsd ?? null,
     })
 
   if (error) {

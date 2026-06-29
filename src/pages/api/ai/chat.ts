@@ -114,7 +114,14 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
 
   // Pre-check rate limit via server-only lib helper.
   // Privileged access is encapsulated inside checkAIRateLimit — not in this file.
-  const rateCheck = await checkAIRateLimit(user.id, 'chat', aiEnv)
+  const rateCheck = await checkAIRateLimit(
+    {
+      userId: user.id,
+      sessionType: 'chat',
+      useCase: 'chat_answer',
+    },
+    aiEnv,
+  )
   if (!rateCheck.allowed) {
     return jsonResponse(
       rateCheck.reason === 'limit_exceeded' ? 429 : 503,
