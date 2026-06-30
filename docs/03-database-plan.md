@@ -78,7 +78,7 @@ Important program data:
 
 ## Country Profile Enrichment
 
-Phase 73B adds additive enrichment columns on `countries` for richer destination profiles.
+Phases 73B, 73C, and 73D add and wire enrichment fields on `countries` for richer destination profiles.
 
 Implemented field groups:
 
@@ -89,12 +89,32 @@ Implemented field groups:
 - official education and visa source URLs
 - FAQ JSON content
 
-Deferred:
+Still deferred:
 
-- Phase 73C: admin country form wiring
-- Phase 73D: public destination page wiring
-- Phase 74: university schema/admin expansion
 - import/staging support for country enrichment
+
+## University Profile Enrichment
+
+Phase 74 adds additive enrichment columns on `universities` and wires them into the admin create/edit
+flow plus the public university profile pages.
+
+Implemented university enrichment groups:
+
+- profile identity and classification
+- campus summary
+- admissions and application summaries
+- application and international-admissions URLs
+- admissions contact email
+- language, scholarship, housing, student-life, international-student, and career-support summaries
+- ranking source URL
+- existing university SEO fields in admin/public wiring
+- edit-only verification/review timestamps in admin
+
+Still deferred for universities:
+
+- QS, THE, or national ranking-specific structured fields
+- university-wide tuition or application-fee fields
+- `indexing_status` admin/page behavior
 
 ## Auth/Admin Tables
 
