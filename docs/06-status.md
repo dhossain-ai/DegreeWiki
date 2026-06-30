@@ -5,9 +5,10 @@
 
 ## Current Project Status
 
-Phase 73C is complete. DegreeWiki now wires the Phase 73B country profile enrichment fields into
-the admin country create/edit UI, including destination facts, structured cost ranges, work-rights
-metadata, official source URLs, editorial country-profile sections, and FAQ JSON validation.
+Phase 73D is complete. DegreeWiki now wires the Phase 73B country enrichment fields into the
+public destination country page at `/destinations/[slug]`, including quick facts, structured cost
+and planning cards, visa/work guidance, education and scholarship sections, official source links,
+defensive FAQ rendering, and richer SEO fallbacks while removing duplicate overview rendering.
 
 Current branch: `main`
 
@@ -34,14 +35,14 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 73C checks run:
+- Phase 73D checks run:
   `npm run build`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
   `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
-- Phase 73C keeps scope tight after Phase 73B:
-  no public destination rendering changes yet, no university schema/admin changes, no
-  import/staging changes, no new dependencies, and no RLS changes.
+- Phase 73D keeps scope tight:
+  no schema changes, no migrations, no admin form changes, no import/staging changes, no
+  university schema/admin changes, no new dependencies, and no RLS changes.
 
 ## Known Open Notes
 
@@ -83,8 +84,11 @@ Very short import pipeline summary:
 - CSV import and persistent uploaded-file import storage remain deferred.
 - Destination country profiles now exist at `/destinations/[slug]`, but guide/article previews for
   countries remain deferred because articles still do not carry a proper country relation.
-- Country profile enrichment columns now exist in the schema, and the admin country form now wires
-  those fields for create/edit. Public destination page enrichment remains deferred to Phase 73D.
+- Country profile enrichment columns now exist in the schema, the admin country form wires those
+  fields for create/edit, and the public destination page now renders the enriched country content.
+- Destination sitemap/indexing enforcement remains intentionally deferred until country admin
+  exposes `indexing_status`, so published destination pages are still included in the sitemap
+  without additional indexing filtering.
 - University admin/schema work remains deferred to Phase 74.
 - `program_intakes` import remains intentionally deferred.
 

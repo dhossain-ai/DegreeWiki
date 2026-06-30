@@ -5,6 +5,31 @@
 
 ## Recent Task Log
 
+### Phase 73D - Public Country Profile Enrichment Wiring
+
+- Expanded `src/pages/destinations/[slug].astro` so public destination pages now query and render
+  the Phase 73B country enrichment fields, including quick facts, structured tuition/living-cost
+  ranges, visa/work guidance, education and scholarship content, official source links, and
+  defensively validated FAQ entries.
+- Removed the duplicate country overview rendering by switching the hero to a short overview teaser
+  and keeping the full overview in a single dedicated Overview section rendered as safe plain-text
+  paragraphs only.
+- Improved the country page hierarchy with a richer quick-facts grid, expanded section navigation,
+  grouped content cards, a stronger trust note, and country-specific empty states for program and
+  university previews.
+- Reused `ProgramCard` for the programs preview, fetched a slightly larger candidate set, and
+  diversified the visible preview in memory so one university is less likely to dominate the first
+  six cards.
+- Extended university previews to include public-safe overview teasers when available while keeping
+  the existing inline card pattern and country-filter CTA to `/universities?country=<uuid>`.
+- Wired country SEO fields on the public page with sensible fallbacks for title, description, H1,
+  canonical, and OG metadata, while intentionally deferring sitemap/indexing enforcement because
+  country admin still does not expose `indexing_status`.
+- Kept the phase public-page-only and low-risk: no schema changes, no migrations, no admin form
+  changes, no import/staging changes, no university schema/admin changes, and no new dependencies.
+- Ran `npm run build` plus the required safety greps for unsafe HTML/service-role usage and secret
+  key references in `src`.
+
 ### Phase 73C - Country Admin Form Wiring
 
 - Expanded `src/pages/admin/countries/new.astro` and `src/pages/admin/countries/[id].astro` so
