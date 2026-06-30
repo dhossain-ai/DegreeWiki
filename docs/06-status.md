@@ -5,10 +5,12 @@
 
 ## Current Project Status
 
-Phase 73D is complete. DegreeWiki now wires the Phase 73B country enrichment fields into the
-public destination country page at `/destinations/[slug]`, including quick facts, structured cost
-and planning cards, visa/work guidance, education and scholarship sections, official source links,
-defensive FAQ rendering, and richer SEO fallbacks while removing duplicate overview rendering.
+Phase 74 is complete. DegreeWiki now adds and wires university profile enrichment across schema,
+admin, and public university pages: additive university enrichment columns, grouped admin
+create/edit sections for existing and new profile fields, edit-only review/trust controls, richer
+public university sections, `seo_h1` support, and safe external ranking/application links while
+keeping university-wide tuition, application-fee, ranking-provider-specific fields, and indexing
+behavior deferred.
 
 Current branch: `main`
 
@@ -35,14 +37,15 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 73D checks run:
+- Phase 74 checks run:
   `npm run build`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
   `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
-- Phase 73D keeps scope tight:
-  no schema changes, no migrations, no admin form changes, no import/staging changes, no
-  university schema/admin changes, no new dependencies, and no RLS changes.
+- Phase 74 keeps scope tight:
+  no country changes, no import/staging changes, no new dependencies, no RLS changes, no
+  university-wide tuition/application-fee fields, no QS/THE/national ranking-specific fields, and
+  no indexing or sitemap enforcement changes.
 
 ## Known Open Notes
 
@@ -89,7 +92,15 @@ Very short import pipeline summary:
 - Destination sitemap/indexing enforcement remains intentionally deferred until country admin
   exposes `indexing_status`, so published destination pages are still included in the sitemap
   without additional indexing filtering.
-- University admin/schema work remains deferred to Phase 74.
+- University profile enrichment columns now exist in the schema, the admin university create/edit
+  forms wire both the previously hidden existing fields and the new enrichment fields, and the
+  public university pages now render the richer profile sections.
+- `indexing_status` still exists on universities but remains intentionally deferred for admin/public
+  behavior in this phase.
+- University-wide tuition/application-fee content and provider-specific ranking fields remain
+  intentionally deferred to keep university profiles plain-text, low-risk, and additive.
+- After creating the university enrichment migration, it must be applied to Supabase before live
+  testing or deployment of admin/public code that queries the new university columns.
 - `program_intakes` import remains intentionally deferred.
 
 ## Archive Index

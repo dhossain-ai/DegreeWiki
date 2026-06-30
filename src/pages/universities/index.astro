@@ -35,7 +35,7 @@ const cities    = citiesData    ?? []
 let query = supabase
   .from('universities')
   .select(
-    `id, name, slug, official_url, ranking_summary, countries(name), cities(name),
+    `id, name, slug, official_url, overview, ranking_summary, countries(name), cities(name),
      verification_status, last_verified_at, source_confidence_score,
      logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name)`,
     { count: 'exact' }
@@ -92,6 +92,26 @@ function uniInitials(name: string): string {
 function formatShortDate(d: string | null): string | null {
   if (!d) return null
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function normalizeText(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function splitPlainTextParagraphs(value: string | null | undefined): string[] {
+  return normalizeText(value)
+    .split(/\n\s*\n+/)
+    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, ' ').trim())
+    .filter(Boolean)
+}
+
+function teaserFromText(value: string | null | undefined, maxLength = 180): string | null {
+  const firstParagraph = splitPlainTextParagraphs(value)[0] ?? ''
+  if (!firstParagraph) return null
+  if (firstParagraph.length <= maxLength) return firstParagraph
+  const slice = firstParagraph.slice(0, maxLength)
+  const trimmed = slice.includes(' ') ? slice.slice(0, slice.lastIndexOf(' ')) : slice
+  return `${trimmed.trimEnd()}...`
 }
 
 function getVerificationInfo(status: string | null | undefined): { label: string; variant: 'verified' | 'neutral' } | null {
@@ -301,6 +321,7 @@ const headlineCount = error ? '200+' : overLimit ? '200+' : resultCount.toLocale
             const programCount = programCountByUniversity.get(u.id) ?? 0
             const verification = getVerificationInfo(u.verification_status)
             const sourceChecked = formatShortDate(u.last_verified_at)
+            const teaser = teaserFromText(u.overview, 180) ?? teaserFromText(u.ranking_summary, 180)
             return (
               <li class="rounded-xl border border-edge bg-surface p-5 hover:border-[#cbd5e1] hover:shadow-sm transition-all">
                 <div class="flex flex-col gap-4 sm:flex-row">
@@ -343,8 +364,8 @@ const headlineCount = error ? '200+' : overLimit ? '200+' : resultCount.toLocale
                     {sourceChecked && <Badge variant="neutral">Source checked {sourceChecked}</Badge>}
                   </div>
 
-                  {u.ranking_summary && (
-                    <p class="text-sm text-muted mt-3 line-clamp-2">{u.ranking_summary}</p>
+                  {teaser && (
+                    <p class="text-sm text-muted mt-3 line-clamp-3">{teaser}</p>
                   )}
 
                   <div class="mt-4 flex flex-wrap gap-3 border-t border-edge-subtle pt-3">

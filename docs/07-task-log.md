@@ -5,6 +5,33 @@
 
 ## Recent Task Log
 
+### Phase 74 - University Profile Enrichment Bundle
+
+- Added `028_university_profile_enrichment.sql` with additive nullable columns on `public.universities`
+  for profile identity, campus summary, admissions/application content, student-support content,
+  and a ranking source URL.
+- Expanded `src/pages/admin/universities/new.astro` and `src/pages/admin/universities/[id].astro`
+  so admins can now create and edit existing hidden university fields plus the new enrichment
+  fields, grouped into identity/location, profile, admissions/application, student support/life,
+  ranking, SEO, and edit-only review/trust sections.
+- Added conservative admin validation for official/application/ranking/canonical URLs, admissions
+  email, founded year, student count, selected country existence, selected city existence, and
+  city-to-country matching while preserving form values on validation errors.
+- Tightened the edit-only university data-source panel with URL validation and safe enum validation
+  without redesigning source management.
+- Expanded `src/pages/universities/[slug].astro` so public university pages now use `seo_h1`,
+  render secondary short/native naming when present, expand key facts, and show conditional plain-
+  text sections for admissions, campus life, international-student support, career support,
+  scholarships, housing, and language requirements.
+- Updated `src/pages/universities/index.astro` with a small teaser improvement so list cards prefer
+  `overview` text when available and fall back to `ranking_summary` otherwise, without redesigning
+  the listing page.
+- Kept the phase intentionally narrow: no country changes, no import/staging changes, no new
+  dependencies, no QS/THE/national ranking-specific fields, no university-wide tuition or
+  application-fee fields, and no indexing/sitemap enforcement changes.
+- Ran `npm run build` plus the required safety greps for unsafe HTML/service-role usage and
+  secret-key references in `src`.
+
 ### Phase 73D - Public Country Profile Enrichment Wiring
 
 - Expanded `src/pages/destinations/[slug].astro` so public destination pages now query and render
