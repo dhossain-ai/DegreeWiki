@@ -46,3 +46,12 @@ export function validateUrl(value: string, label: string): string | null {
   }
   return null
 }
+
+export function validateEmail(value: string, label: string): string | null {
+  if (!value || value.trim() === '') return null
+  const normalized = value.trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    return `${label} must be a valid email address.`
+  }
+  return null
+}

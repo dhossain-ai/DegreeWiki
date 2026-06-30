@@ -6,9 +6,12 @@ import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../
 import { toSlug } from '../../../lib/admin/slug'
 import {
   type FormErrors,
-  validateRequired,
+  validateEmail,
   validateIn,
+  validateNumeric,
+  validateRequired,
   validateSlug,
+  validateUrl,
 } from '../../../lib/admin/validate'
 
 const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
@@ -33,12 +36,179 @@ const normalizeReturnTo = (value: string | null) => {
 let returnTo = normalizeReturnTo(Astro.url.searchParams.get('returnTo'))
 
 const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME ?? ''
-
 const CONTENT_STATUS_OPTIONS = ['draft', 'in_review', 'published', 'unpublished', 'archived'] as const
-const VERIFICATION_OPTIONS   = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
-const SOURCE_TYPE_OPTIONS    = ['official_university', 'government', 'third_party', 'aggregator', 'user_submitted'] as const
-const CONFIDENCE_OPTIONS     = ['high', 'medium', 'low', 'unknown'] as const
-const SOURCE_STATUS_OPTIONS  = ['active', 'broken', 'redirected', 'archived'] as const
+const VERIFICATION_OPTIONS = ['unverified', 'partially_verified', 'verified', 'source_conflict', 'outdated', 'needs_review'] as const
+const SOURCE_TYPE_OPTIONS = ['official_university', 'government', 'third_party', 'aggregator', 'user_submitted'] as const
+const CONFIDENCE_OPTIONS = ['high', 'medium', 'low', 'unknown'] as const
+const SOURCE_STATUS_OPTIONS = ['active', 'broken', 'redirected', 'archived'] as const
+const CURRENT_YEAR = new Date().getFullYear() + 1
+
+type CountryOption = { id: string; name: string }
+type CityOption = { id: string; name: string; country_id: string }
+
+type UniversityRecord = {
+  id: string
+  name: string
+  slug: string
+  country_id: string
+  city_id: string | null
+  official_url: string | null
+  short_name: string | null
+  native_name: string | null
+  institution_type: string | null
+  ownership_type: string | null
+  founded_year: number | null
+  student_count: number | null
+  overview: string | null
+  campus_summary: string | null
+  ranking_summary: string | null
+  ranking_source_url: string | null
+  admission_overview: string | null
+  application_overview: string | null
+  application_portal_url: string | null
+  international_admissions_url: string | null
+  admission_email: string | null
+  language_requirement_overview: string | null
+  scholarship_overview: string | null
+  housing_overview: string | null
+  student_life_overview: string | null
+  international_student_overview: string | null
+  career_support_overview: string | null
+  content_status: string
+  verification_status: string
+  data_completeness_score: number
+  source_confidence_score: number
+  last_verified_at: string | null
+  next_review_due_at: string | null
+  logo_id: string | null
+  cover_image_id: string | null
+  og_image_id: string | null
+  seo_title: string | null
+  seo_description: string | null
+  seo_h1: string | null
+  canonical_url: string | null
+  og_title: string | null
+  og_description: string | null
+}
+
+type DataSourceRow = {
+  id: string
+  source_url: string
+  source_title: string | null
+  source_type: string
+  confidence_level: string
+  source_status: string
+  is_primary_source: boolean
+}
+
+type Values = {
+  name: string
+  slug: string
+  country_id: string
+  city_id: string
+  official_url: string
+  short_name: string
+  native_name: string
+  institution_type: string
+  ownership_type: string
+  founded_year: string
+  student_count: string
+  overview: string
+  campus_summary: string
+  ranking_summary: string
+  ranking_source_url: string
+  admission_overview: string
+  application_overview: string
+  application_portal_url: string
+  international_admissions_url: string
+  admission_email: string
+  language_requirement_overview: string
+  scholarship_overview: string
+  housing_overview: string
+  student_life_overview: string
+  international_student_overview: string
+  career_support_overview: string
+  content_status: string
+  verification_status: string
+  last_verified_at: string
+  next_review_due_at: string
+  logo_id: string
+  cover_image_id: string
+  og_image_id: string
+  seo_title: string
+  seo_description: string
+  seo_h1: string
+  canonical_url: string
+  og_title: string
+  og_description: string
+}
+
+type SourceValues = {
+  source_url: string
+  source_type: string
+  confidence_level: string
+  source_status: string
+  source_title: string
+  is_primary_source: boolean
+}
+
+function optionalString(value: string): string | null {
+  return value || null
+}
+
+function formatNullableNumber(value: number | null | undefined): string {
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function parseWholeNumber(value: string): number | null {
+  return value ? Number(value) : null
+}
+
+function validateWholeNumber(value: string, label: string, options: { min?: number; max?: number } = {}): string | null {
+  const numericError = validateNumeric(value, label, { min: options.min })
+  if (numericError) return numericError
+  if (!value) return null
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed)) return `${label} must be a whole number.`
+  if (options.max !== undefined && parsed > options.max) return `${label} must be ${options.max} or earlier.`
+  return null
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function formatDateTimeLocal(value: string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function validateDateTimeInput(value: string, label: string): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return `${label} must be a valid date and time.`
+  return null
+}
+
+function parseDateTimeInput(value: string): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function defaultSourceValues(): SourceValues {
+  return {
+    source_url: '',
+    source_type: 'third_party',
+    confidence_level: 'unknown',
+    source_status: 'active',
+    source_title: '',
+    is_primary_source: false,
+  }
+}
 
 const [
   { data: existing, error: loadError },
@@ -48,7 +218,18 @@ const [
 ] = await Promise.all([
   supabase
     .from('universities')
-    .select('id, name, slug, country_id, city_id, official_url, overview, content_status, verification_status, logo_id, cover_image_id, og_image_id')
+    .select(`
+      id, name, slug, country_id, city_id, official_url, short_name, native_name,
+      institution_type, ownership_type, founded_year, student_count, overview,
+      campus_summary, ranking_summary, ranking_source_url, admission_overview,
+      application_overview, application_portal_url, international_admissions_url,
+      admission_email, language_requirement_overview, scholarship_overview,
+      housing_overview, student_life_overview, international_student_overview,
+      career_support_overview, content_status, verification_status,
+      data_completeness_score, source_confidence_score, last_verified_at,
+      next_review_due_at, logo_id, cover_image_id, og_image_id,
+      seo_title, seo_description, seo_h1, canonical_url, og_title, og_description
+    `)
     .eq('id', id)
     .single(),
   supabase.from('countries').select('id, name').order('name', { ascending: true }),
@@ -60,35 +241,11 @@ if (loadError || !existing) {
   return new Response('University not found.', { status: 404 })
 }
 
-type UniversityRecord = {
-  id: string
-  name: string
-  slug: string
-  country_id: string
-  city_id: string | null
-  official_url: string | null
-  overview: string | null
-  content_status: string
-  verification_status: string
-  logo_id: string | null
-  cover_image_id: string | null
-  og_image_id: string | null
-}
-type DataSourceRow = {
-  id: string
-  source_url: string
-  source_title: string | null
-  source_type: string
-  confidence_level: string
-  source_status: string
-  is_primary_source: boolean
-}
-type CountryOption = { id: string; name: string }
-type CityOption = { id: string; name: string; country_id: string }
-
 const record = existing as UniversityRecord
 const countries = (countriesData ?? []) as CountryOption[]
 const cities = (citiesData ?? []) as CityOption[]
+const countryIdSet = new Set(countries.map((country) => country.id))
+const cityMap = new Map(cities.map((city) => [city.id, city]))
 
 const { data: sourcesData } = await supabase
   .from('data_sources')
@@ -96,35 +253,52 @@ const { data: sourcesData } = await supabase
   .eq('entity_type', 'university')
   .eq('entity_id', id)
   .order('is_primary_source', { ascending: false })
+
 const sources = (sourcesData ?? []) as DataSourceRow[]
 
-type Values = {
-  name: string
-  slug: string
-  country_id: string
-  city_id: string
-  official_url: string
-  overview: string
-  content_status: string
-  verification_status: string
-  logo_id: string
-  cover_image_id: string
-  og_image_id: string
+let values: Values = {
+  name: record.name,
+  slug: record.slug,
+  country_id: record.country_id,
+  city_id: record.city_id ?? '',
+  official_url: record.official_url ?? '',
+  short_name: record.short_name ?? '',
+  native_name: record.native_name ?? '',
+  institution_type: record.institution_type ?? '',
+  ownership_type: record.ownership_type ?? '',
+  founded_year: formatNullableNumber(record.founded_year),
+  student_count: formatNullableNumber(record.student_count),
+  overview: record.overview ?? '',
+  campus_summary: record.campus_summary ?? '',
+  ranking_summary: record.ranking_summary ?? '',
+  ranking_source_url: record.ranking_source_url ?? '',
+  admission_overview: record.admission_overview ?? '',
+  application_overview: record.application_overview ?? '',
+  application_portal_url: record.application_portal_url ?? '',
+  international_admissions_url: record.international_admissions_url ?? '',
+  admission_email: record.admission_email ?? '',
+  language_requirement_overview: record.language_requirement_overview ?? '',
+  scholarship_overview: record.scholarship_overview ?? '',
+  housing_overview: record.housing_overview ?? '',
+  student_life_overview: record.student_life_overview ?? '',
+  international_student_overview: record.international_student_overview ?? '',
+  career_support_overview: record.career_support_overview ?? '',
+  content_status: record.content_status,
+  verification_status: record.verification_status,
+  last_verified_at: formatDateTimeLocal(record.last_verified_at),
+  next_review_due_at: formatDateTimeLocal(record.next_review_due_at),
+  logo_id: record.logo_id ?? '',
+  cover_image_id: record.cover_image_id ?? '',
+  og_image_id: record.og_image_id ?? '',
+  seo_title: record.seo_title ?? '',
+  seo_description: record.seo_description ?? '',
+  seo_h1: record.seo_h1 ?? '',
+  canonical_url: record.canonical_url ?? '',
+  og_title: record.og_title ?? '',
+  og_description: record.og_description ?? '',
 }
 
-let values: Values = {
-  name:               record.name,
-  slug:               record.slug,
-  country_id:         record.country_id,
-  city_id:            record.city_id ?? '',
-  official_url:       record.official_url ?? '',
-  overview:           record.overview ?? '',
-  content_status:     record.content_status,
-  verification_status: record.verification_status,
-  logo_id:            record.logo_id ?? '',
-  cover_image_id:     record.cover_image_id ?? '',
-  og_image_id:        record.og_image_id ?? '',
-}
+let sourceValues = defaultSourceValues()
 let errors: FormErrors = {}
 let serverError = ''
 let sourceError = ''
@@ -134,22 +308,39 @@ if (Astro.request.method === 'POST') {
   returnTo = normalizeReturnTo(String(form.get('returnTo') ?? '')) || returnTo
 
   if (form.get('_action') === 'add_source') {
-    const srcUrl = String(form.get('source_url') ?? '').trim()
-    if (!srcUrl) {
-      sourceError = 'Source URL is required.'
-    } else {
+    const g = (key: string) => String(form.get(key) ?? '').trim()
+    sourceValues = {
+      source_url: g('source_url'),
+      source_type: g('source_type') || 'third_party',
+      confidence_level: g('confidence_level') || 'unknown',
+      source_status: g('source_status') || 'active',
+      source_title: g('source_title'),
+      is_primary_source: form.get('is_primary_source') === 'true',
+    }
+
+    sourceError =
+      validateRequired(sourceValues.source_url, 'Source URL')
+      ?? validateUrl(sourceValues.source_url, 'Source URL')
+      ?? validateIn(sourceValues.source_type, SOURCE_TYPE_OPTIONS, 'Source Type')
+      ?? validateIn(sourceValues.confidence_level, CONFIDENCE_OPTIONS, 'Confidence')
+      ?? validateIn(sourceValues.source_status, SOURCE_STATUS_OPTIONS, 'Source Status')
+      ?? ''
+
+    if (!sourceError) {
       const { error: srcErr } = await supabase.from('data_sources').insert({
         entity_type: 'university',
         entity_id: id,
-        source_url: srcUrl,
-        source_type: String(form.get('source_type') ?? 'third_party').trim() || 'third_party',
-        confidence_level: String(form.get('confidence_level') ?? 'unknown').trim() || 'unknown',
-        source_status: String(form.get('source_status') ?? 'active').trim() || 'active',
-        source_title: String(form.get('source_title') ?? '').trim() || null,
-        is_primary_source: form.get('is_primary_source') === 'true',
+        source_url: sourceValues.source_url,
+        source_type: sourceValues.source_type,
+        confidence_level: sourceValues.confidence_level,
+        source_status: sourceValues.source_status,
+        source_title: optionalString(sourceValues.source_title),
+        is_primary_source: sourceValues.is_primary_source,
       })
-      if (srcErr) { sourceError = 'Could not add source.' }
-      else {
+
+      if (srcErr) {
+        sourceError = 'Could not add source.'
+      } else {
         const editHref = returnTo
           ? `${Astro.url.pathname}?returnTo=${encodeURIComponent(returnTo)}`
           : Astro.url.pathname
@@ -157,18 +348,47 @@ if (Astro.request.method === 'POST') {
       }
     }
   } else {
+    const g = (key: string) => String(form.get(key) ?? '').trim()
     values = {
-      name:               String(form.get('name') ?? '').trim(),
-      slug:               String(form.get('slug') ?? '').trim(),
-      country_id:         String(form.get('country_id') ?? '').trim(),
-      city_id:            String(form.get('city_id') ?? '').trim(),
-      official_url:       String(form.get('official_url') ?? '').trim(),
-      overview:           String(form.get('overview') ?? '').trim(),
-      content_status:     String(form.get('content_status') ?? 'draft').trim(),
-      verification_status: String(form.get('verification_status') ?? 'unverified').trim(),
-      logo_id:            String(form.get('logo_id') ?? '').trim(),
-      cover_image_id:     String(form.get('cover_image_id') ?? '').trim(),
-      og_image_id:        String(form.get('og_image_id') ?? '').trim(),
+      name: g('name'),
+      slug: g('slug'),
+      country_id: g('country_id'),
+      city_id: g('city_id'),
+      official_url: g('official_url'),
+      short_name: g('short_name'),
+      native_name: g('native_name'),
+      institution_type: g('institution_type'),
+      ownership_type: g('ownership_type'),
+      founded_year: g('founded_year'),
+      student_count: g('student_count'),
+      overview: g('overview'),
+      campus_summary: g('campus_summary'),
+      ranking_summary: g('ranking_summary'),
+      ranking_source_url: g('ranking_source_url'),
+      admission_overview: g('admission_overview'),
+      application_overview: g('application_overview'),
+      application_portal_url: g('application_portal_url'),
+      international_admissions_url: g('international_admissions_url'),
+      admission_email: g('admission_email'),
+      language_requirement_overview: g('language_requirement_overview'),
+      scholarship_overview: g('scholarship_overview'),
+      housing_overview: g('housing_overview'),
+      student_life_overview: g('student_life_overview'),
+      international_student_overview: g('international_student_overview'),
+      career_support_overview: g('career_support_overview'),
+      content_status: g('content_status') || 'draft',
+      verification_status: g('verification_status') || 'unverified',
+      last_verified_at: g('last_verified_at'),
+      next_review_due_at: g('next_review_due_at'),
+      logo_id: g('logo_id'),
+      cover_image_id: g('cover_image_id'),
+      og_image_id: g('og_image_id'),
+      seo_title: g('seo_title'),
+      seo_description: g('seo_description'),
+      seo_h1: g('seo_h1'),
+      canonical_url: g('canonical_url'),
+      og_title: g('og_title'),
+      og_description: g('og_description'),
     }
 
     if (!values.slug && values.name) values.slug = toSlug(values.name)
@@ -182,18 +402,49 @@ if (Astro.request.method === 'POST') {
     if (slugErr) e.slug = slugErr
     const statusErr = validateIn(values.content_status, CONTENT_STATUS_OPTIONS, 'Status')
     if (statusErr) e.content_status = statusErr
-    const verErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
-    if (verErr) e.verification_status = verErr
+    const verificationErr = validateIn(values.verification_status, VERIFICATION_OPTIONS, 'Verification Status')
+    if (verificationErr) e.verification_status = verificationErr
+
+    const officialUrlErr = validateUrl(values.official_url, 'Official URL')
+    if (officialUrlErr) e.official_url = officialUrlErr
+    const portalUrlErr = validateUrl(values.application_portal_url, 'Application Portal URL')
+    if (portalUrlErr) e.application_portal_url = portalUrlErr
+    const internationalUrlErr = validateUrl(values.international_admissions_url, 'International Admissions URL')
+    if (internationalUrlErr) e.international_admissions_url = internationalUrlErr
+    const rankingSourceUrlErr = validateUrl(values.ranking_source_url, 'Ranking Source URL')
+    if (rankingSourceUrlErr) e.ranking_source_url = rankingSourceUrlErr
+    const canonicalUrlErr = validateUrl(values.canonical_url, 'Canonical URL')
+    if (canonicalUrlErr) e.canonical_url = canonicalUrlErr
+
+    const emailErr = validateEmail(values.admission_email, 'Admission Email')
+    if (emailErr) e.admission_email = emailErr
+
+    const foundedYearErr = validateWholeNumber(values.founded_year, 'Founded Year', { min: 0, max: CURRENT_YEAR })
+    if (foundedYearErr) e.founded_year = foundedYearErr
+    const studentCountErr = validateWholeNumber(values.student_count, 'Student Count', { min: 0 })
+    if (studentCountErr) e.student_count = studentCountErr
+
+    const lastVerifiedErr = validateDateTimeInput(values.last_verified_at, 'Last Verified')
+    if (lastVerifiedErr) e.last_verified_at = lastVerifiedErr
+    const nextReviewErr = validateDateTimeInput(values.next_review_due_at, 'Next Review Due')
+    if (nextReviewErr) e.next_review_due_at = nextReviewErr
+
+    if (!e.country_id && !countryIdSet.has(values.country_id)) {
+      e.country_id = 'Selected country not found.'
+    }
+    if (values.city_id) {
+      const selectedCity = cityMap.get(values.city_id)
+      if (!selectedCity) {
+        e.city_id = 'Selected city not found.'
+      } else if (selectedCity.country_id !== values.country_id) {
+        e.city_id = 'Selected city must belong to the selected country.'
+      }
+    }
+
     const validMediaIds = await validateReusableReadyMediaIds(supabase, [values.logo_id, values.cover_image_id, values.og_image_id])
-    if (values.logo_id && !validMediaIds.has(values.logo_id)) {
-      e.logo_id = 'Selected logo is not valid.'
-    }
-    if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) {
-      e.cover_image_id = 'Selected cover image is not valid.'
-    }
-    if (values.og_image_id && !validMediaIds.has(values.og_image_id)) {
-      e.og_image_id = 'Selected OG image is not valid.'
-    }
+    if (values.logo_id && !validMediaIds.has(values.logo_id)) e.logo_id = 'Selected logo is not valid.'
+    if (values.cover_image_id && !validMediaIds.has(values.cover_image_id)) e.cover_image_id = 'Selected cover image is not valid.'
+    if (values.og_image_id && !validMediaIds.has(values.og_image_id)) e.og_image_id = 'Selected OG image is not valid.'
 
     errors = e
 
@@ -201,26 +452,51 @@ if (Astro.request.method === 'POST') {
       const { error } = await supabase
         .from('universities')
         .update({
-          name:               values.name,
-          slug:               values.slug,
-          country_id:         values.country_id,
-          city_id:            values.city_id || null,
-          official_url:       values.official_url || null,
-          overview:           values.overview || null,
-          content_status:     values.content_status,
+          name: values.name,
+          slug: values.slug,
+          country_id: values.country_id,
+          city_id: optionalString(values.city_id),
+          official_url: optionalString(values.official_url),
+          short_name: optionalString(values.short_name),
+          native_name: optionalString(values.native_name),
+          institution_type: optionalString(values.institution_type),
+          ownership_type: optionalString(values.ownership_type),
+          founded_year: parseWholeNumber(values.founded_year),
+          student_count: parseWholeNumber(values.student_count),
+          overview: optionalString(values.overview),
+          campus_summary: optionalString(values.campus_summary),
+          ranking_summary: optionalString(values.ranking_summary),
+          ranking_source_url: optionalString(values.ranking_source_url),
+          admission_overview: optionalString(values.admission_overview),
+          application_overview: optionalString(values.application_overview),
+          application_portal_url: optionalString(values.application_portal_url),
+          international_admissions_url: optionalString(values.international_admissions_url),
+          admission_email: optionalString(values.admission_email),
+          language_requirement_overview: optionalString(values.language_requirement_overview),
+          scholarship_overview: optionalString(values.scholarship_overview),
+          housing_overview: optionalString(values.housing_overview),
+          student_life_overview: optionalString(values.student_life_overview),
+          international_student_overview: optionalString(values.international_student_overview),
+          career_support_overview: optionalString(values.career_support_overview),
+          content_status: values.content_status,
           verification_status: values.verification_status,
-          logo_id:            values.logo_id || null,
-          cover_image_id:     values.cover_image_id || null,
-          og_image_id:        values.og_image_id || null,
+          last_verified_at: parseDateTimeInput(values.last_verified_at),
+          next_review_due_at: parseDateTimeInput(values.next_review_due_at),
+          logo_id: optionalString(values.logo_id),
+          cover_image_id: optionalString(values.cover_image_id),
+          og_image_id: optionalString(values.og_image_id),
+          seo_title: optionalString(values.seo_title),
+          seo_description: optionalString(values.seo_description),
+          seo_h1: optionalString(values.seo_h1),
+          canonical_url: optionalString(values.canonical_url),
+          og_title: optionalString(values.og_title),
+          og_description: optionalString(values.og_description),
         })
         .eq('id', id)
 
       if (error) {
-        if (error.code === '23505') {
-          serverError = 'A university with this slug already exists.'
-        } else {
-          serverError = 'Could not save. Please try again.'
-        }
+        if (error.code === '23505') serverError = 'A university with this slug already exists.'
+        else serverError = 'Could not save. Please try again.'
       } else {
         return Astro.redirect(returnTo || '/admin/universities')
       }
@@ -228,7 +504,17 @@ if (Astro.request.method === 'POST') {
   }
 }
 
+const visibleCities = values.country_id
+  ? cities.filter((city) => city.country_id === values.country_id)
+  : cities
+
 const backToUniversitiesHref = returnTo || '/admin/universities'
+const inputClass = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+const selectClass = inputClass + ' bg-white'
+const labelClass = 'block text-sm font-medium text-gray-700 mb-1'
+const errorClass = 'mt-1 text-xs text-red-600'
+const helperClass = 'mt-1 text-xs text-gray-500'
+const sectionHeadClass = 'text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 pb-2 border-b border-gray-200'
 ---
 <AdminLayout title={`Edit ${record.name} — DegreeWiki Admin`} activePath="/admin/universities" userEmail={user.email ?? ''}>
   <div class="flex items-center justify-between mb-6">
@@ -240,82 +526,273 @@ const backToUniversitiesHref = returnTo || '/admin/universities'
     <div class="mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">{serverError}</div>
   )}
 
-  <form method="post" class="max-w-xl space-y-4">
+  <form method="post" class="max-w-4xl space-y-6">
     <input type="hidden" name="returnTo" value={returnTo} />
-    <div>
-      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-      <input type="text" id="name" name="name" value={values.name} required
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
-      {errors.name && <p class="mt-1 text-xs text-red-600">{errors.name}</p>}
+
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Basic Identity and Location</h2>
+
+      <div>
+        <label for="name" class={labelClass}>Name *</label>
+        <input type="text" id="name" name="name" value={values.name} required class={inputClass} />
+        {errors.name && <p class={errorClass}>{errors.name}</p>}
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="slug" class={labelClass}>Slug *</label>
+          <input type="text" id="slug" name="slug" value={values.slug} class={inputClass + ' font-mono'} />
+          {errors.slug && <p class={errorClass}>{errors.slug}</p>}
+        </div>
+        <div>
+          <label for="short_name" class={labelClass}>Short Name</label>
+          <input type="text" id="short_name" name="short_name" value={values.short_name} placeholder="e.g. UCL" class={inputClass} />
+        </div>
+      </div>
+
+      <div>
+        <label for="native_name" class={labelClass}>Native Name</label>
+        <input type="text" id="native_name" name="native_name" value={values.native_name} placeholder="Local-language institution name" class={inputClass} />
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="country_id" class={labelClass}>Country *</label>
+          <select id="country_id" name="country_id" class={selectClass}>
+            <option value="">— select a country —</option>
+            {countries.map((country) => (
+              <option value={country.id} selected={values.country_id === country.id}>{country.name}</option>
+            ))}
+          </select>
+          {errors.country_id && <p class={errorClass}>{errors.country_id}</p>}
+        </div>
+        <div>
+          <label for="city_id" class={labelClass}>City</label>
+          <select id="city_id" name="city_id" class={selectClass}>
+            <option value="">— none —</option>
+            {visibleCities.map((city) => (
+              <option value={city.id} selected={values.city_id === city.id}>{city.name}</option>
+            ))}
+          </select>
+          <p class={helperClass}>If selected, the city must belong to the chosen country.</p>
+          {errors.city_id && <p class={errorClass}>{errors.city_id}</p>}
+        </div>
+      </div>
+
+      <div>
+        <label for="official_url" class={labelClass}>Official URL</label>
+        <input type="url" id="official_url" name="official_url" value={values.official_url} placeholder="https://www.university.edu" class={inputClass} />
+        {errors.official_url && <p class={errorClass}>{errors.official_url}</p>}
+      </div>
+
+      <div>
+        <label for="content_status" class={labelClass}>Status *</label>
+        <select id="content_status" name="content_status" class={selectClass}>
+          {CONTENT_STATUS_OPTIONS.map((status) => (
+            <option value={status} selected={values.content_status === status}>{status}</option>
+          ))}
+        </select>
+        {errors.content_status && <p class={errorClass}>{errors.content_status}</p>}
+      </div>
     </div>
 
-    <div>
-      <label for="slug" class="block text-sm font-medium text-gray-700 mb-1">Slug *</label>
-      <input type="text" id="slug" name="slug" value={values.slug}
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
-      {errors.slug && <p class="mt-1 text-xs text-red-600">{errors.slug}</p>}
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Profile Details</h2>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="institution_type" class={labelClass}>Institution Type</label>
+          <input type="text" id="institution_type" name="institution_type" value={values.institution_type} placeholder="e.g. Research university, Polytechnic" class={inputClass} />
+        </div>
+        <div>
+          <label for="ownership_type" class={labelClass}>Ownership Type</label>
+          <input type="text" id="ownership_type" name="ownership_type" value={values.ownership_type} placeholder="e.g. Public, Private, State-funded" class={inputClass} />
+        </div>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="founded_year" class={labelClass}>Founded Year</label>
+          <input type="number" id="founded_year" name="founded_year" value={values.founded_year} min="0" max={CURRENT_YEAR} step="1" placeholder="1900" class={inputClass} />
+          {errors.founded_year && <p class={errorClass}>{errors.founded_year}</p>}
+        </div>
+        <div>
+          <label for="student_count" class={labelClass}>Student Count</label>
+          <input type="number" id="student_count" name="student_count" value={values.student_count} min="0" step="1" placeholder="25000" class={inputClass} />
+          {errors.student_count && <p class={errorClass}>{errors.student_count}</p>}
+        </div>
+      </div>
+
+      <div>
+        <label for="overview" class={labelClass}>Overview</label>
+        <textarea id="overview" name="overview" rows={5} class={inputClass}>{values.overview}</textarea>
+      </div>
+
+      <div>
+        <label for="campus_summary" class={labelClass}>Campus Summary</label>
+        <textarea id="campus_summary" name="campus_summary" rows={4} placeholder="Summarize campus footprint, setting, and notable location context." class={inputClass}>{values.campus_summary}</textarea>
+      </div>
     </div>
 
-    <div>
-      <label for="country_id" class="block text-sm font-medium text-gray-700 mb-1">Country *</label>
-      <select id="country_id" name="country_id"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-        <option value="">— select a country —</option>
-        {countries.map(c => (
-          <option value={c.id} selected={values.country_id === c.id}>{c.name}</option>
-        ))}
-      </select>
-      {errors.country_id && <p class="mt-1 text-xs text-red-600">{errors.country_id}</p>}
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Admissions and Application</h2>
+
+      <div>
+        <label for="admission_overview" class={labelClass}>Admission Overview</label>
+        <textarea id="admission_overview" name="admission_overview" rows={4} placeholder="General selectivity, process, and key expectations." class={inputClass}>{values.admission_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="application_overview" class={labelClass}>Application Overview</label>
+        <textarea id="application_overview" name="application_overview" rows={4} placeholder="Application flow, timing, and common next steps." class={inputClass}>{values.application_overview}</textarea>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="application_portal_url" class={labelClass}>Application Portal URL</label>
+          <input type="url" id="application_portal_url" name="application_portal_url" value={values.application_portal_url} placeholder="https://..." class={inputClass} />
+          {errors.application_portal_url && <p class={errorClass}>{errors.application_portal_url}</p>}
+        </div>
+        <div>
+          <label for="international_admissions_url" class={labelClass}>International Admissions URL</label>
+          <input type="url" id="international_admissions_url" name="international_admissions_url" value={values.international_admissions_url} placeholder="https://..." class={inputClass} />
+          {errors.international_admissions_url && <p class={errorClass}>{errors.international_admissions_url}</p>}
+        </div>
+      </div>
+
+      <div>
+        <label for="admission_email" class={labelClass}>Admission Email</label>
+        <input type="email" id="admission_email" name="admission_email" value={values.admission_email} placeholder="admissions@example.edu" class={inputClass} />
+        {errors.admission_email && <p class={errorClass}>{errors.admission_email}</p>}
+      </div>
     </div>
 
-    <div>
-      <label for="city_id" class="block text-sm font-medium text-gray-700 mb-1">City</label>
-      <select id="city_id" name="city_id"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-        <option value="">— none —</option>
-        {cities.map(c => (
-          <option value={c.id} selected={values.city_id === c.id}>{c.name}</option>
-        ))}
-      </select>
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Student Support and Life</h2>
+
+      <div>
+        <label for="language_requirement_overview" class={labelClass}>Language Requirement Overview</label>
+        <textarea id="language_requirement_overview" name="language_requirement_overview" rows={4} placeholder="Summarize common English or local-language expectations." class={inputClass}>{values.language_requirement_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="scholarship_overview" class={labelClass}>Scholarship Overview</label>
+        <textarea id="scholarship_overview" name="scholarship_overview" rows={4} placeholder="Outline common funding or merit-support routes." class={inputClass}>{values.scholarship_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="housing_overview" class={labelClass}>Housing Overview</label>
+        <textarea id="housing_overview" name="housing_overview" rows={4} placeholder="Describe halls, off-campus options, or accommodation support." class={inputClass}>{values.housing_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="student_life_overview" class={labelClass}>Student Life Overview</label>
+        <textarea id="student_life_overview" name="student_life_overview" rows={4} placeholder="Student clubs, campus culture, or city-life context." class={inputClass}>{values.student_life_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="international_student_overview" class={labelClass}>International Student Overview</label>
+        <textarea id="international_student_overview" name="international_student_overview" rows={4} placeholder="Support offices, orientation, visas, or arrival help." class={inputClass}>{values.international_student_overview}</textarea>
+      </div>
+
+      <div>
+        <label for="career_support_overview" class={labelClass}>Career Support Overview</label>
+        <textarea id="career_support_overview" name="career_support_overview" rows={4} placeholder="Career services, internships, placements, or alumni support." class={inputClass}>{values.career_support_overview}</textarea>
+      </div>
     </div>
 
-    <div>
-      <label for="official_url" class="block text-sm font-medium text-gray-700 mb-1">Official URL</label>
-      <input type="url" id="official_url" name="official_url" value={values.official_url}
-        placeholder="https://www.university.edu"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Ranking and Source</h2>
+
+      <div>
+        <label for="ranking_summary" class={labelClass}>Ranking Summary</label>
+        <textarea id="ranking_summary" name="ranking_summary" rows={4} placeholder="Plain-text ranking or reputation summary." class={inputClass}>{values.ranking_summary}</textarea>
+      </div>
+
+      <div>
+        <label for="ranking_source_url" class={labelClass}>Ranking Source URL</label>
+        <input type="url" id="ranking_source_url" name="ranking_source_url" value={values.ranking_source_url} placeholder="https://..." class={inputClass} />
+        {errors.ranking_source_url && <p class={errorClass}>{errors.ranking_source_url}</p>}
+      </div>
     </div>
 
-    <div>
-      <label for="overview" class="block text-sm font-medium text-gray-700 mb-1">Overview</label>
-      <textarea id="overview" name="overview" rows={4}
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{values.overview}</textarea>
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>SEO</h2>
+
+      <div>
+        <label for="seo_title" class={labelClass}>SEO Title</label>
+        <input type="text" id="seo_title" name="seo_title" value={values.seo_title} class={inputClass} />
+      </div>
+
+      <div>
+        <label for="seo_description" class={labelClass}>SEO Description</label>
+        <textarea id="seo_description" name="seo_description" rows={3} class={inputClass}>{values.seo_description}</textarea>
+      </div>
+
+      <div>
+        <label for="seo_h1" class={labelClass}>SEO H1</label>
+        <input type="text" id="seo_h1" name="seo_h1" value={values.seo_h1} class={inputClass} />
+      </div>
+
+      <div>
+        <label for="canonical_url" class={labelClass}>Canonical URL</label>
+        <input type="url" id="canonical_url" name="canonical_url" value={values.canonical_url} placeholder="https://..." class={inputClass} />
+        {errors.canonical_url && <p class={errorClass}>{errors.canonical_url}</p>}
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="og_title" class={labelClass}>OG Title</label>
+          <input type="text" id="og_title" name="og_title" value={values.og_title} class={inputClass} />
+        </div>
+        <div>
+          <label for="og_description" class={labelClass}>OG Description</label>
+          <textarea id="og_description" name="og_description" rows={3} class={inputClass}>{values.og_description}</textarea>
+        </div>
+      </div>
     </div>
 
-    <div>
-      <label for="content_status" class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
-      <select id="content_status" name="content_status"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-        {CONTENT_STATUS_OPTIONS.map(s => (
-          <option value={s} selected={values.content_status === s}>{s}</option>
-        ))}
-      </select>
-      {errors.content_status && <p class="mt-1 text-xs text-red-600">{errors.content_status}</p>}
+    <div class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <h2 class={sectionHeadClass}>Review and Trust</h2>
+
+      <div class="grid gap-4 md:grid-cols-3">
+        <div>
+          <label for="verification_status" class={labelClass}>Verification Status</label>
+          <select id="verification_status" name="verification_status" class={selectClass}>
+            {VERIFICATION_OPTIONS.map((status) => (
+              <option value={status} selected={values.verification_status === status}>{status}</option>
+            ))}
+          </select>
+          {errors.verification_status && <p class={errorClass}>{errors.verification_status}</p>}
+        </div>
+        <div>
+          <label for="last_verified_at" class={labelClass}>Last Verified</label>
+          <input type="datetime-local" id="last_verified_at" name="last_verified_at" value={values.last_verified_at} class={inputClass} />
+          {errors.last_verified_at && <p class={errorClass}>{errors.last_verified_at}</p>}
+        </div>
+        <div>
+          <label for="next_review_due_at" class={labelClass}>Next Review Due</label>
+          <input type="datetime-local" id="next_review_due_at" name="next_review_due_at" value={values.next_review_due_at} class={inputClass} />
+          {errors.next_review_due_at && <p class={errorClass}>{errors.next_review_due_at}</p>}
+        </div>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.05em] text-gray-500">Data completeness</p>
+          <p class="mt-1 text-lg font-semibold text-gray-900">{record.data_completeness_score}%</p>
+          <p class={helperClass}>Read-only internal quality signal.</p>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.05em] text-gray-500">Source confidence</p>
+          <p class="mt-1 text-lg font-semibold text-gray-900">{record.source_confidence_score}%</p>
+          <p class={helperClass}>Read-only internal trust signal.</p>
+        </div>
+      </div>
     </div>
 
-    <div>
-      <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Verification Status</label>
-      <select id="verification_status" name="verification_status"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-        {VERIFICATION_OPTIONS.map(s => (
-          <option value={s} selected={values.verification_status === s}>{s}</option>
-        ))}
-      </select>
-      {errors.verification_status && <p class="mt-1 text-xs text-red-600">{errors.verification_status}</p>}
-    </div>
-
-    <fieldset class="border border-gray-200 rounded-md p-4 space-y-4">
-      <legend class="text-sm font-medium text-gray-700 px-1">Images</legend>
+    <fieldset class="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+      <legend class="px-1 text-sm font-medium text-gray-700">Images</legend>
       <div>
         <MediaPicker
           fieldName="logo_id"
@@ -325,7 +802,7 @@ const backToUniversitiesHref = returnTo || '/admin/universities'
           cloudName={cloudName}
           defaultSubfolder="universities"
         />
-        {errors.logo_id && <p class="mt-1 text-xs text-red-600">{errors.logo_id}</p>}
+        {errors.logo_id && <p class={errorClass}>{errors.logo_id}</p>}
       </div>
       <div>
         <MediaPicker
@@ -336,7 +813,7 @@ const backToUniversitiesHref = returnTo || '/admin/universities'
           cloudName={cloudName}
           defaultSubfolder="universities"
         />
-        {errors.cover_image_id && <p class="mt-1 text-xs text-red-600">{errors.cover_image_id}</p>}
+        {errors.cover_image_id && <p class={errorClass}>{errors.cover_image_id}</p>}
       </div>
       <div>
         <MediaPicker
@@ -349,37 +826,36 @@ const backToUniversitiesHref = returnTo || '/admin/universities'
           copyFromField="cover_image_id"
           copyFromLabel="Cover Image"
         />
-        {errors.og_image_id && <p class="mt-1 text-xs text-red-600">{errors.og_image_id}</p>}
+        {errors.og_image_id && <p class={errorClass}>{errors.og_image_id}</p>}
       </div>
     </fieldset>
 
     <div class="flex gap-3 pt-2">
-      <button type="submit"
-        class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+      <button type="submit" class="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
         Save Changes
       </button>
       <a href={backToUniversitiesHref} class="px-4 py-2 text-sm text-gray-600 hover:underline">Cancel</a>
     </div>
   </form>
 
-  <!-- Data Sources Panel -->
-  <div class="mt-8 border-t border-gray-200 pt-6 max-w-xl">
+  <div class="mt-8 border-t border-gray-200 pt-6 max-w-4xl">
     <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Data Sources</h2>
 
     {sources.length > 0 ? (
       <div class="space-y-2 mb-6">
-        {sources.map(s => (
+        {sources.map((source) => (
           <div class="px-3 py-2 bg-gray-50 rounded border border-gray-200 text-sm">
             <div class="flex items-start gap-2">
-              {s.is_primary_source && (
+              {source.is_primary_source && (
                 <span class="shrink-0 inline-block px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded">primary</span>
               )}
-              <a href={s.source_url} target="_blank" rel="noopener noreferrer"
-                class="text-blue-600 hover:underline break-all font-mono text-xs">{s.source_url}</a>
+              <a href={source.source_url} target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline break-all font-mono text-xs">
+                {source.source_url}
+              </a>
             </div>
             <p class="text-xs text-gray-500 mt-1">
-              {s.source_type} · {s.confidence_level} confidence · {s.source_status}
-              {s.source_title ? ` · ${s.source_title}` : ''}
+              {source.source_type} · {source.confidence_level} confidence · {source.source_status}
+              {source.source_title ? ` · ${source.source_title}` : ''}
             </p>
           </div>
         ))}
@@ -395,46 +871,45 @@ const backToUniversitiesHref = returnTo || '/admin/universities'
       {sourceError && <p class="text-xs text-red-600 mb-2">{sourceError}</p>}
       <div class="space-y-3 bg-gray-50 p-4 rounded border border-gray-200">
         <div>
-          <label for="source_url" class="block text-sm font-medium text-gray-700 mb-1">URL *</label>
-          <input type="url" id="source_url" name="source_url" placeholder="https://..."
-            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <label for="source_url" class={labelClass}>URL *</label>
+          <input type="url" id="source_url" name="source_url" value={sourceValues.source_url} placeholder="https://..." class={inputClass} />
         </div>
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid gap-3 md:grid-cols-3">
           <div>
-            <label for="source_type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-            <select id="source_type" name="source_type"
-              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {SOURCE_TYPE_OPTIONS.map(t => <option value={t}>{t}</option>)}
+            <label for="source_type" class={labelClass}>Type</label>
+            <select id="source_type" name="source_type" class={selectClass}>
+              {SOURCE_TYPE_OPTIONS.map((option) => (
+                <option value={option} selected={sourceValues.source_type === option}>{option}</option>
+              ))}
             </select>
           </div>
           <div>
-            <label for="confidence_level" class="block text-sm font-medium text-gray-700 mb-1">Confidence</label>
-            <select id="confidence_level" name="confidence_level"
-              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {CONFIDENCE_OPTIONS.map(t => <option value={t}>{t}</option>)}
+            <label for="confidence_level" class={labelClass}>Confidence</label>
+            <select id="confidence_level" name="confidence_level" class={selectClass}>
+              {CONFIDENCE_OPTIONS.map((option) => (
+                <option value={option} selected={sourceValues.confidence_level === option}>{option}</option>
+              ))}
             </select>
           </div>
           <div>
-            <label for="source_status_input" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
-            <select id="source_status_input" name="source_status"
-              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {SOURCE_STATUS_OPTIONS.map(t => <option value={t}>{t}</option>)}
+            <label for="source_status_input" class={labelClass}>Status</label>
+            <select id="source_status_input" name="source_status" class={selectClass}>
+              {SOURCE_STATUS_OPTIONS.map((option) => (
+                <option value={option} selected={sourceValues.source_status === option}>{option}</option>
+              ))}
             </select>
           </div>
         </div>
         <div>
-          <label for="source_title" class="block text-sm font-medium text-gray-700 mb-1">Title (optional)</label>
-          <input type="text" id="source_title" name="source_title" placeholder="e.g. Official university homepage"
-            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <label for="source_title" class={labelClass}>Title (optional)</label>
+          <input type="text" id="source_title" name="source_title" value={sourceValues.source_title} placeholder="e.g. Official university homepage" class={inputClass} />
         </div>
         <div class="flex items-center gap-2">
-          <input type="checkbox" id="is_primary_source" name="is_primary_source" value="true"
-            class="h-4 w-4 text-blue-600 rounded border-gray-300" />
+          <input type="checkbox" id="is_primary_source" name="is_primary_source" value="true" checked={sourceValues.is_primary_source} class="h-4 w-4 text-blue-600 rounded border-gray-300" />
           <label for="is_primary_source" class="text-sm text-gray-700">Primary source</label>
         </div>
         <div>
-          <button type="submit"
-            class="px-3 py-1.5 text-xs font-medium bg-gray-700 text-white rounded-md hover:bg-gray-800">
+          <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-gray-700 text-white rounded-md hover:bg-gray-800">
             Add Source
           </button>
         </div>
