@@ -10,6 +10,8 @@ import SavedProgramEnhancement from '../components/public/SavedProgramEnhancemen
 import DestinationCard from '../components/public/cards/DestinationCard.astro'
 import ScholarshipRow from '../components/public/cards/ScholarshipRow.astro'
 import GuideCard from '../components/public/cards/GuideCard.astro'
+import Badge from '../components/ui/Badge.astro'
+import MediaImage from '../components/public/MediaImage.astro'
 import { createClient } from '../lib/supabase/server'
 import { SITE_URL } from '../lib/site'
 
@@ -31,6 +33,7 @@ const [
   { data: degreeLevelsData, error: degreeLevelsErr },
   { data: destinationsData, error: destinationsErr },
   { data: featuredProgramsData, error: featuredProgramsErr },
+  { data: featuredUniversitiesData, error: featuredUniversitiesErr },
   { data: subjectsData, error: subjectsErr },
   { data: scholarshipsData, error: scholarshipsErr },
   { data: guidesData, error: guidesErr },
@@ -65,6 +68,22 @@ const [
     .order('created_at', { ascending: false })
     .limit(80),
   supabase
+    .from('universities')
+    .select(`
+      id, name, slug, official_url, overview, ranking_summary,
+      country_id, city_id, institution_type, ownership_type,
+      data_completeness_score, source_confidence_score,
+      verification_status, last_verified_at,
+      countries(name), cities(name),
+      logo:media_assets!universities_logo_id_fkey(cloudinary_public_id, alt_text, display_name),
+      cover_image:media_assets!universities_cover_image_id_fkey(cloudinary_public_id, alt_text, display_name)
+    `)
+    .eq('content_status', 'published')
+    .order('data_completeness_score', { ascending: false })
+    .order('source_confidence_score', { ascending: false })
+    .order('name')
+    .limit(80),
+  supabase
     .from('subjects')
     .select('id, name')
     .order('name')
@@ -87,6 +106,7 @@ const [
 if (degreeLevelsErr)     console.error('homepage degree_levels error:',      degreeLevelsErr.message)
 if (destinationsErr)     console.error('homepage destinations error:',        destinationsErr.message)
 if (featuredProgramsErr) console.error('homepage featured programs error:',   featuredProgramsErr.message)
+if (featuredUniversitiesErr) console.error('homepage featured universities error:', featuredUniversitiesErr.message)
 if (subjectsErr)         console.error('homepage subjects error:',            subjectsErr.message)
 if (scholarshipsErr)     console.error('homepage scholarships error:',        scholarshipsErr.message)
 if (guidesErr)           console.error('homepage guides error:',              guidesErr.message)
@@ -95,9 +115,33 @@ if (guidesErr)           console.error('homepage guides error:',              gu
 const degreeLevels     = degreeLevelsData    ?? []
 const destinations     = destinationsData    ?? []
 const featuredPrograms = diversifyFeaturedPrograms(featuredProgramsData ?? [], 4)
+const featuredUniversityCandidates = featuredUniversitiesData ?? []
 const subjects         = subjectsData && subjectsData.length > 0 ? subjectsData : FALLBACK_SUBJECTS
 const scholarships     = scholarshipsData    ?? []
 const guides           = guidesData          ?? []
+
+const featuredUniversityCandidateIds = featuredUniversityCandidates.map((u: any) => u.id).filter(Boolean)
+let programCountByUniversity = new Map<string, number>()
+
+if (featuredUniversityCandidateIds.length > 0) {
+  const { data: universityProgramRows, error: universityProgramCountError } = await supabase
+    .from('programs')
+    .select('university_id')
+    .eq('content_status', 'published')
+    .in('university_id', featuredUniversityCandidateIds)
+    .limit(5000)
+
+  if (universityProgramCountError) {
+    console.error('homepage featured university program count error:', universityProgramCountError.message)
+  } else {
+    universityProgramRows?.forEach((row: any) => {
+      if (!row.university_id) return
+      programCountByUniversity.set(row.university_id, (programCountByUniversity.get(row.university_id) ?? 0) + 1)
+    })
+  }
+}
+
+const featuredUniversities = diversifyFeaturedUniversities(featuredUniversityCandidates, 6, programCountByUniversity)
 
 const featuredProgramIds = featuredPrograms.map((program: any) => program.id).filter(Boolean)
 let savedProgramIds = new Set<string>()
@@ -137,6 +181,98 @@ function programCompletenessScore(program: any): number {
   if (program.verification_status === 'verified') score += 2
   if (program.verification_status === 'partially_verified') score += 1
   return score
+}
+
+function normalizeText(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function splitPlainTextParagraphs(value: string | null | undefined): string[] {
+  return normalizeText(value)
+    .split(/\n\s*\n+/)
+    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, ' ').trim())
+    .filter(Boolean)
+}
+
+function teaserFromText(value: string | null | undefined, maxLength = 150): string | null {
+  const firstParagraph = splitPlainTextParagraphs(value)[0] ?? ''
+  if (!firstParagraph) return null
+  if (firstParagraph.length <= maxLength) return firstParagraph
+  const slice = firstParagraph.slice(0, maxLength)
+  const trimmed = slice.includes(' ') ? slice.slice(0, slice.lastIndexOf(' ')) : slice
+  return `${trimmed.trimEnd()}...`
+}
+
+function universityInitials(name: string): string {
+  const caps = name
+    .split(/\s+/)
+    .map((word: string) => word[0]?.toUpperCase() ?? '')
+    .filter(Boolean)
+  return caps.slice(0, 2).join('') || name.slice(0, 2).toUpperCase()
+}
+
+function universityCompletenessScore(university: any, programCounts: Map<string, number>): number {
+  let score = 0
+  const programCount = programCounts.get(university.id) ?? 0
+
+  if (programCount > 0) score += 50 + Math.min(programCount, 10)
+  score += Math.round((university.data_completeness_score ?? 0) / 5)
+  score += Math.round((university.source_confidence_score ?? 0) / 10)
+  if (university.verification_status === 'verified') score += 12
+  if (university.verification_status === 'partially_verified') score += 8
+  if (university.countries?.name) score += 5
+  if (university.cities?.name) score += 4
+  if (university.logo?.cloudinary_public_id) score += 5
+  if (university.cover_image?.cloudinary_public_id) score += 3
+  if (university.overview) score += 4
+  if (university.ranking_summary) score += 2
+  if (university.official_url) score += 2
+  if (university.institution_type) score += 1
+  if (university.ownership_type) score += 1
+
+  return score
+}
+
+function diversifyFeaturedUniversities(universities: any[], limit: number, programCounts: Map<string, number>): any[] {
+  const sorted = [...universities]
+    .filter((university) => university?.id && university?.slug && university?.name)
+    .sort((a, b) => {
+      const scoreDelta = universityCompletenessScore(b, programCounts) - universityCompletenessScore(a, programCounts)
+      if (scoreDelta !== 0) return scoreDelta
+
+      const programDelta = (programCounts.get(b.id) ?? 0) - (programCounts.get(a.id) ?? 0)
+      if (programDelta !== 0) return programDelta
+
+      return String(a.name ?? '').localeCompare(String(b.name ?? ''))
+    })
+
+  const selected: any[] = []
+  const usedUniversities = new Set<string>()
+  const usedCountries = new Set<string>()
+
+  const passes = [
+    (university: any) => (programCounts.get(university.id) ?? 0) > 0 && !usedCountries.has(university.country_id),
+    (university: any) => (programCounts.get(university.id) ?? 0) > 0,
+    (university: any) => !usedCountries.has(university.country_id),
+    () => true,
+  ]
+
+  function addUniversity(university: any) {
+    if (!university?.id || usedUniversities.has(university.id) || selected.length >= limit) return
+    selected.push(university)
+    usedUniversities.add(university.id)
+    if (university.country_id) usedCountries.add(university.country_id)
+  }
+
+  for (const pass of passes) {
+    for (const university of sorted) {
+      if (selected.length >= limit) break
+      if (pass(university)) addUniversity(university)
+    }
+    if (selected.length >= limit) break
+  }
+
+  return selected
 }
 
 function diversifyFeaturedPrograms(programs: any[], limit: number): any[] {
@@ -306,7 +442,82 @@ function formatAmount(
     </Section>
   )}
 
-  <!-- ── 4. Browse by study goal ── -->
+  <!-- ── 4. Featured universities (hidden if no published universities) ── -->
+  {featuredUniversities.length > 0 && (
+    <Section tone="canvas" width="wide">
+      <SectionHeader
+        eyebrow="University discovery"
+        title="Featured universities"
+        href="/universities"
+        linkText="Browse all universities"
+      />
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {featuredUniversities.map((u: any) => {
+          const location = [u.cities?.name, u.countries?.name].filter(Boolean).join(', ')
+          const programCount = programCountByUniversity.get(u.id) ?? 0
+          const verification =
+            u.verification_status === 'verified'
+              ? { label: 'Verified', variant: 'verified' as const }
+              : u.verification_status === 'partially_verified'
+                ? { label: 'Partially verified', variant: 'neutral' as const }
+                : null
+          const teaser = teaserFromText(u.overview, 150) ?? teaserFromText(u.ranking_summary, 150)
+
+          return (
+            <article class="flex h-full flex-col rounded-xl border border-edge bg-surface p-5 transition-all hover:border-[#cbd5e1] hover:shadow-sm">
+              <div class="flex items-start gap-4">
+                {u.logo?.cloudinary_public_id ? (
+                  <div class="h-14 w-14 flex-none overflow-hidden rounded-[10px] border border-edge bg-surface">
+                    <MediaImage
+                      publicId={u.logo.cloudinary_public_id}
+                      alt={u.logo.alt_text || u.logo.display_name || u.name}
+                      width={56}
+                      height={56}
+                      crop="fill"
+                      loading="lazy"
+                      class="h-full w-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div class="flex h-14 w-14 flex-none items-center justify-center rounded-[10px] border border-primary-border bg-primary-surface font-mono text-sm font-bold text-primary">
+                    {universityInitials(u.name)}
+                  </div>
+                )}
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[18px] font-semibold leading-snug tracking-[-0.01em] text-ink">
+                    <a href={`/universities/${u.slug}`} class="hover:text-primary">
+                      {u.name}
+                    </a>
+                  </h3>
+                  {location && <p class="mt-1 text-sm text-ink-secondary">{location}</p>}
+                </div>
+              </div>
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <Badge variant="info">{programCount} {programCount === 1 ? 'program' : 'programs'}</Badge>
+                {verification && <Badge variant={verification.variant}>{verification.label}</Badge>}
+              </div>
+
+              {teaser && (
+                <p class="mt-3 text-sm leading-6 text-muted line-clamp-3">{teaser}</p>
+              )}
+
+              <div class="mt-auto flex flex-wrap gap-x-4 gap-y-2 border-t border-edge-subtle pt-4 text-sm">
+                <a href={`/universities/${u.slug}`} class="font-semibold text-primary hover:text-primary-hover">
+                  View profile
+                </a>
+                <a href={`/programs?university=${u.id}`} class="font-semibold text-primary hover:text-primary-hover">
+                  Browse programs
+                </a>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </Section>
+  )}
+
+  <!-- ── 5. Browse by study goal ── -->
   <Section tone="canvas" width="wide">
     <SectionHeader
       eyebrow="Explore"
@@ -323,13 +534,13 @@ function formatAmount(
     </div>
   </Section>
 
-  <!-- ── 5. Popular destinations (hidden if none available) ── -->
+  <!-- ── 6. Popular destinations (hidden if none available) ── -->
   {destinations.length > 0 && (
     <Section tone="surface" width="wide">
       <SectionHeader
         eyebrow="Where to study"
         title="Popular destinations"
-        href="/universities"
+        href="/destinations"
         linkText="All destinations"
       />
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -345,7 +556,7 @@ function formatAmount(
     </Section>
   )}
 
-  <!-- ── 6. Scholarships & funding (hidden if none published) ── -->
+  <!-- ── 7. Scholarships & funding (hidden if none published) ── -->
   {scholarships.length > 0 && (
     <Section tone="canvas" width="wide">
       <SectionHeader
@@ -368,7 +579,7 @@ function formatAmount(
     </Section>
   )}
 
-  <!-- ── 7. Fit Finder CTA (stronger, bottom placement) ── -->
+  <!-- ── 8. Fit Finder CTA (stronger, bottom placement) ── -->
   <Section tone="surface" width="wide">
     <div class="rounded-xl bg-ink text-white p-8 sm:p-10 text-center">
       <p class="text-xs font-semibold uppercase tracking-wide text-white/60 mb-2">
@@ -388,7 +599,7 @@ function formatAmount(
     </div>
   </Section>
 
-  <!-- ── 8. Study abroad guides (hidden if none published) ── -->
+  <!-- ── 9. Study abroad guides (hidden if none published) ── -->
   {guides.length > 0 && (
     <Section tone="canvas" width="wide">
       <SectionHeader
