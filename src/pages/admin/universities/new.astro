@@ -1,6 +1,6 @@
 ---
 import AdminLayout from '../../../layouts/AdminLayout.astro'
-import { forbiddenAdminResponse, requireSuperAdmin } from '../../../lib/admin/guard'
+import { forbiddenAdminResponse, requireAnyAdminPermission } from '../../../lib/admin/guard'
 import MediaPicker from '../../../components/admin/MediaPicker.astro'
 import { loadReusableReadyMediaAssets, validateReusableReadyMediaIds } from '../../../lib/admin/media'
 import { toSlug } from '../../../lib/admin/slug'
@@ -14,7 +14,12 @@ import {
   validateUrl,
 } from '../../../lib/admin/validate'
 
-const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+const guard = await requireAnyAdminPermission(
+  Astro.cookies,
+  Astro.request,
+  Astro.url.pathname,
+  ['edit_content', 'publish_content', 'manage_universities'],
+)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
 if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
