@@ -50,10 +50,11 @@ const [
   supabase
     .from('programs')
     .select(`
-      id, title, slug,
+      id, title, slug, created_at,
+      university_id, country_id, degree_level_id, primary_subject_id,
       duration_months, language_of_instruction,
       tuition_min_amount, tuition_max_amount, tuition_currency, tuition_period,
-      verification_status,
+      verification_status, official_url, application_url,
       universities(name, slug),
       degree_levels(name, code),
       subjects!programs_primary_subject_id_fkey(name),
@@ -62,7 +63,7 @@ const [
     `)
     .eq('content_status', 'published')
     .order('created_at', { ascending: false })
-    .limit(4),
+    .limit(80),
   supabase
     .from('subjects')
     .select('id, name')
@@ -93,7 +94,7 @@ if (guidesErr)           console.error('homepage guides error:',              gu
 /* ── Defensive defaults ── */
 const degreeLevels     = degreeLevelsData    ?? []
 const destinations     = destinationsData    ?? []
-const featuredPrograms = featuredProgramsData ?? []
+const featuredPrograms = diversifyFeaturedPrograms(featuredProgramsData ?? [], 4)
 const subjects         = subjectsData && subjectsData.length > 0 ? subjectsData : FALLBACK_SUBJECTS
 const scholarships     = scholarshipsData    ?? []
 const guides           = guidesData          ?? []
@@ -120,6 +121,71 @@ if (user && featuredProgramIds.length > 0) {
 const dynamicDest = destinations.length > 0 ? destinations[0] : null
 
 /* ── Helper functions ── */
+
+function programCompletenessScore(program: any): number {
+  let score = 0
+  if (program.title) score += 3
+  if (program.slug) score += 3
+  if (program.universities?.name) score += 3
+  if (program.countries?.name) score += 3
+  if (program.degree_levels?.name || program.degree_levels?.code) score += 2
+  if (program.subjects?.name || program.primary_subject_id) score += 2
+  if (program.language_of_instruction) score += 1
+  if (program.duration_months) score += 1
+  if (program.tuition_min_amount != null || program.tuition_max_amount != null) score += 1
+  if (program.official_url || program.application_url) score += 1
+  if (program.verification_status === 'verified') score += 2
+  if (program.verification_status === 'partially_verified') score += 1
+  return score
+}
+
+function diversifyFeaturedPrograms(programs: any[], limit: number): any[] {
+  const sorted = [...programs].sort((a, b) => {
+    const scoreDelta = programCompletenessScore(b) - programCompletenessScore(a)
+    if (scoreDelta !== 0) return scoreDelta
+
+    const dateDelta = new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+    if (dateDelta !== 0) return dateDelta
+
+    return String(a.title ?? '').localeCompare(String(b.title ?? ''))
+  })
+
+  const selected: any[] = []
+  const usedPrograms = new Set<string>()
+  const usedUniversities = new Set<string>()
+  const usedCountries = new Set<string>()
+  const usedDegrees = new Set<string>()
+
+  const passes = [
+    (program: any) =>
+      !usedUniversities.has(program.university_id) &&
+      !usedCountries.has(program.country_id) &&
+      !usedDegrees.has(program.degree_level_id),
+    (program: any) => !usedUniversities.has(program.university_id),
+    (program: any) => !usedCountries.has(program.country_id) && !usedDegrees.has(program.degree_level_id),
+    (program: any) => !usedCountries.has(program.country_id) || !usedDegrees.has(program.degree_level_id),
+    () => true,
+  ]
+
+  function addProgram(program: any) {
+    if (!program?.id || usedPrograms.has(program.id) || selected.length >= limit) return
+    selected.push(program)
+    usedPrograms.add(program.id)
+    if (program.university_id) usedUniversities.add(program.university_id)
+    if (program.country_id) usedCountries.add(program.country_id)
+    if (program.degree_level_id) usedDegrees.add(program.degree_level_id)
+  }
+
+  for (const pass of passes) {
+    for (const program of sorted) {
+      if (selected.length >= limit) break
+      if (pass(program)) addProgram(program)
+    }
+    if (selected.length >= limit) break
+  }
+
+  return selected
+}
 
 function formatDuration(months: number | null | undefined): string | null {
   if (!months) return null
