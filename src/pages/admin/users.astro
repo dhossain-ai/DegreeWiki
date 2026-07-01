@@ -1,9 +1,14 @@
 ---
 import AdminLayout from '../../layouts/AdminLayout.astro'
-import { forbiddenAdminResponse, requireSuperAdmin } from '../../lib/admin/guard'
+import { forbiddenAdminResponse, requireAnyAdminPermission } from '../../lib/admin/guard'
 import { ACCOUNT_STATUS_BADGE, FALLBACK_BADGE } from '../../lib/admin/badges'
 
-const guard = await requireSuperAdmin(Astro.cookies, Astro.request, Astro.url.pathname)
+const guard = await requireAnyAdminPermission(
+  Astro.cookies,
+  Astro.request,
+  Astro.url.pathname,
+  ['manage_users', 'manage_roles'],
+)
 if (guard.type === 'redirect') return Astro.redirect(guard.to)
 if (guard.type === 'forbidden') return forbiddenAdminResponse()
 
