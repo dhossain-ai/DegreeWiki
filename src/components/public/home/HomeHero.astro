@@ -37,31 +37,45 @@ const masterLevel   = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'm
     </div>
 
     {/* Search card */}
-    <div class="bg-surface border border-edge rounded-2xl p-[18px] shadow-[0_6px_30px_rgba(11,31,58,0.06)] mb-6">
-      <form method="GET" action="/programs">
-        <div class="flex flex-col md:flex-row gap-3 items-end">
-          <div class="flex-[2_1_240px] min-w-0 flex flex-col gap-[7px]">
+    <div class="bg-surface border border-edge rounded-2xl p-4 sm:p-[18px] shadow-[0_6px_30px_rgba(11,31,58,0.06)] transition-[box-shadow,border-color,transform] duration-200 focus-within:border-primary/40 focus-within:shadow-[0_14px_36px_rgba(11,31,58,0.10)] mb-6">
+      <form method="GET" action="/programs" data-hero-search-form>
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_168px_168px_auto] md:items-end">
+          <div class="min-w-0 flex flex-col gap-[7px]">
             <label for="hero-q" class="block text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]">
               What do you want to study?
             </label>
-            <input
-              id="hero-q"
-              name="q"
-              type="search"
-              placeholder="e.g. Data Science, Law, Medicine"
-              autocomplete="off"
-              class="w-full rounded-[10px] border border-edge bg-surface px-[13px] py-[11px] text-sm text-ink
-                     placeholder:text-slate-light focus-visible:outline-none focus-visible:border-primary transition-colors"
-            />
+            <div class="relative" data-hero-suggest-root>
+              <input
+                id="hero-q"
+                name="q"
+                type="search"
+                placeholder="e.g. Data Science, Law, Medicine"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="hero-search-suggestions"
+                class="w-full h-[44px] rounded-[10px] border border-edge bg-surface px-[13px] py-[11px] text-sm text-ink
+                       placeholder:text-slate-light focus-visible:outline-none focus-visible:border-primary transition-colors"
+                data-hero-search-input
+              />
+              <div
+                id="hero-search-suggestions"
+                class="hero-suggestions absolute left-0 right-0 top-[calc(100%+8px)] z-30 hidden overflow-hidden rounded-xl border border-edge bg-surface shadow-[0_18px_46px_rgba(11,31,58,0.16)]"
+                role="listbox"
+                aria-label="Search suggestions"
+                data-hero-suggestions
+              ></div>
+            </div>
           </div>
-          <div class="md:w-[168px] flex flex-col gap-[7px]">
+          <div class="min-w-0 flex flex-col gap-[7px]">
             <label for="hero-degree" class="block text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]">
               Degree level
             </label>
             <select
               id="hero-degree"
               name="degree_level"
-              class="w-full rounded-[10px] border border-edge bg-surface px-[12px] py-[11px] text-sm text-ink
+              class="w-full h-[44px] rounded-[10px] border border-edge bg-surface px-[12px] py-[11px] text-sm text-ink
                      focus-visible:outline-none focus-visible:border-primary transition-colors"
             >
               <option value="">Any level</option>
@@ -70,14 +84,14 @@ const masterLevel   = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'm
               ))}
             </select>
           </div>
-          <div class="md:w-[168px] flex flex-col gap-[7px]">
+          <div class="min-w-0 flex flex-col gap-[7px]">
             <label for="hero-country" class="block text-[11px] font-semibold text-slate-light uppercase tracking-[0.05em]">
               Destination
             </label>
             <select
               id="hero-country"
               name="country"
-              class="w-full rounded-[10px] border border-edge bg-surface px-[12px] py-[11px] text-sm text-ink
+              class="w-full h-[44px] rounded-[10px] border border-edge bg-surface px-[12px] py-[11px] text-sm text-ink
                      focus-visible:outline-none focus-visible:border-primary transition-colors"
             >
               <option value="">Anywhere</option>
@@ -86,11 +100,11 @@ const masterLevel   = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'm
               ))}
             </select>
           </div>
-          <div>
+          <div class="min-w-0">
             <button
               type="submit"
-              class="w-full md:w-auto h-[44px] px-[26px] rounded-[10px] bg-primary text-white text-[14.5px] font-semibold
-                     hover:bg-primary-hover transition-colors whitespace-nowrap"
+              class="w-full h-[44px] px-[26px] rounded-[10px] bg-primary text-white text-[14.5px] font-semibold
+                     hover:bg-primary-hover active:translate-y-px transition-[background-color,transform] whitespace-nowrap"
             >
               Search
             </button>
@@ -99,21 +113,246 @@ const masterLevel   = degreeLevels.find(d => (d.code ?? '').toLowerCase() === 'm
       </form>
     </div>
 
-    <div class="flex flex-wrap gap-2">
+    <div class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
       {bachelorLevel && (
-        <SearchChip href={`/programs?degree_level=${bachelorLevel.id}`} label="Bachelor's" />
+        <SearchChip href={`/programs?degree_level=${bachelorLevel.id}`} label="Bachelor's" class="shrink-0" />
       )}
       {masterLevel && (
-        <SearchChip href={`/programs?degree_level=${masterLevel.id}`} label="Master's" />
+        <SearchChip href={`/programs?degree_level=${masterLevel.id}`} label="Master's" class="shrink-0" />
       )}
-      <SearchChip href="/scholarships" label="Find scholarships" />
+      <SearchChip href="/scholarships" label="Find scholarships" class="shrink-0" />
       {dynamicDestination && (
         <SearchChip
           href={`/programs?country=${dynamicDestination.id}`}
           label={`Study in ${dynamicDestination.name}`}
+          class="shrink-0"
         />
       )}
     </div>
 
   </Container>
 </section>
+
+<style>
+  .hero-suggestions {
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+
+  .hero-suggestions.is-open {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-suggestions {
+      transition: none;
+      transform: none;
+    }
+  }
+</style>
+
+<script>
+  (() => {
+    const form = document.querySelector('[data-hero-search-form]')
+    const root = document.querySelector('[data-hero-suggest-root]')
+    const input = document.querySelector('[data-hero-search-input]')
+    const panel = document.querySelector('[data-hero-suggestions]')
+
+    if (!(form instanceof HTMLFormElement) || !(root instanceof HTMLElement) || !(input instanceof HTMLInputElement) || !(panel instanceof HTMLElement)) return
+
+    const DEBOUNCE_MS = 275
+    const MIN_QUERY_LENGTH = 2
+    const GROUP_LABELS = {
+      programs: 'Programs',
+      subjects: 'Subjects',
+      universities: 'Universities',
+      destinations: 'Destinations',
+    }
+
+    let activeIndex = -1
+    let requestId = 0
+    let debounceTimer = 0
+    let suggestions = []
+
+    function normalize(value) {
+      return value.toLowerCase().trim().replace(/\s+/g, ' ')
+    }
+
+    function clearPanel() {
+      suggestions = []
+      activeIndex = -1
+      panel.replaceChildren()
+      panel.classList.add('hidden')
+      panel.classList.remove('is-open')
+      input.setAttribute('aria-expanded', 'false')
+      input.removeAttribute('aria-activedescendant')
+    }
+
+    function setActiveIndex(nextIndex) {
+      activeIndex = nextIndex
+      const options = Array.from(panel.querySelectorAll('[data-suggestion-option]'))
+      options.forEach((option, index) => {
+        const isActive = index === activeIndex
+        option.classList.toggle('bg-primary-surface', isActive)
+        option.classList.toggle('text-primary', isActive)
+        option.setAttribute('aria-selected', isActive ? 'true' : 'false')
+      })
+
+      if (activeIndex >= 0 && options[activeIndex]) {
+        input.setAttribute('aria-activedescendant', options[activeIndex].id)
+      } else {
+        input.removeAttribute('aria-activedescendant')
+      }
+    }
+
+    function openPanel() {
+      if (suggestions.length === 0) return
+      panel.classList.remove('hidden')
+      requestAnimationFrame(() => {
+        panel.classList.add('is-open')
+      })
+      input.setAttribute('aria-expanded', 'true')
+    }
+
+    function selectSuggestion(suggestion) {
+      if (!suggestion || typeof suggestion.href !== 'string') return
+      window.location.href = suggestion.href
+    }
+
+    function createOption(suggestion, index) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.id = `hero-search-suggestion-${index}`
+      button.className = 'flex w-full flex-col gap-0.5 px-3 py-2.5 text-left text-sm text-ink transition-colors hover:bg-primary-surface hover:text-primary'
+      button.setAttribute('role', 'option')
+      button.setAttribute('aria-selected', 'false')
+      button.dataset.suggestionOption = 'true'
+
+      const label = document.createElement('span')
+      label.className = 'font-semibold leading-snug'
+      label.textContent = suggestion.label
+      button.appendChild(label)
+
+      if (suggestion.meta) {
+        const meta = document.createElement('span')
+        meta.className = 'text-xs text-muted'
+        meta.textContent = suggestion.meta
+        button.appendChild(meta)
+      }
+
+      button.addEventListener('mouseenter', () => setActiveIndex(index))
+      button.addEventListener('click', () => selectSuggestion(suggestion))
+      return button
+    }
+
+    function renderSuggestions(grouped) {
+      panel.replaceChildren()
+      suggestions = []
+
+      for (const key of ['programs', 'subjects', 'universities', 'destinations']) {
+        const items = Array.isArray(grouped && grouped[key]) ? grouped[key] : []
+        if (items.length === 0) continue
+
+        const section = document.createElement('section')
+        section.className = 'border-b border-edge-subtle last:border-b-0'
+
+        const heading = document.createElement('p')
+        heading.className = 'px-3 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted'
+        heading.textContent = GROUP_LABELS[key]
+        section.appendChild(heading)
+
+        const list = document.createElement('div')
+        list.className = 'py-1'
+
+        for (const item of items) {
+          const suggestion = {
+            label: String(item.label || '').trim(),
+            meta: item.meta ? String(item.meta).trim() : '',
+            href: String(item.href || '').trim(),
+          }
+          if (!suggestion.label || !suggestion.href) continue
+
+          const index = suggestions.length
+          suggestions.push(suggestion)
+          list.appendChild(createOption(suggestion, index))
+        }
+
+        if (list.childElementCount > 0) {
+          section.appendChild(list)
+          panel.appendChild(section)
+        }
+      }
+
+      if (suggestions.length === 0) {
+        clearPanel()
+        return
+      }
+
+      activeIndex = -1
+      openPanel()
+    }
+
+    async function loadSuggestions(query) {
+      const currentRequestId = ++requestId
+      const params = new URLSearchParams({ q: query })
+
+      try {
+        const response = await fetch(`/api/search-suggestions?${params.toString()}`, {
+          headers: { Accept: 'application/json' },
+        })
+        if (!response.ok || currentRequestId !== requestId) return
+
+        const data = await response.json()
+        if (currentRequestId !== requestId) return
+        renderSuggestions(data && data.suggestions)
+      } catch {
+        if (currentRequestId === requestId) clearPanel()
+      }
+    }
+
+    input.addEventListener('input', () => {
+      window.clearTimeout(debounceTimer)
+      const query = normalize(input.value)
+      if (query.length < MIN_QUERY_LENGTH) {
+        clearPanel()
+        return
+      }
+
+      debounceTimer = window.setTimeout(() => {
+        loadSuggestions(query)
+      }, DEBOUNCE_MS)
+    })
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        clearPanel()
+        return
+      }
+
+      if (suggestions.length === 0) return
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        openPanel()
+        setActiveIndex(activeIndex < suggestions.length - 1 ? activeIndex + 1 : 0)
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        openPanel()
+        setActiveIndex(activeIndex > 0 ? activeIndex - 1 : suggestions.length - 1)
+      } else if (event.key === 'Enter' && activeIndex >= 0) {
+        event.preventDefault()
+        selectSuggestion(suggestions[activeIndex])
+      }
+    })
+
+    input.addEventListener('focus', () => {
+      if (suggestions.length > 0) openPanel()
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!root.contains(event.target)) clearPanel()
+    })
+  })()
+</script>

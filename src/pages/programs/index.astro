@@ -16,11 +16,22 @@ function parseUUID(v: string | null): string | undefined {
   return v && UUID_RE.test(v) ? v : undefined
 }
 
+function sanitizeKeyword(v: string | undefined): string | undefined {
+  const cleaned = v
+    ?.toLowerCase()
+    .replace(/[,%()]/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+
+  return cleaned || undefined
+}
+
 const STUDY_MODES = ['full_time', 'part_time', 'online', 'hybrid'] as const
 const DELIVERY_MODES = ['on_campus', 'online', 'hybrid', 'distance'] as const
 
 const sp = Astro.url.searchParams
 const q = sp.get('q')?.trim().slice(0, 100) || undefined
+const keyword = sanitizeKeyword(q)
 const countryId = parseUUID(sp.get('country'))
 const cityId = parseUUID(sp.get('city'))
 const universityId = parseUUID(sp.get('university'))
@@ -94,7 +105,18 @@ let query = supabase
   .order('title')
   .limit(201)
 
-if (q) query = query.ilike('title', `%${q}%`)
+if (keyword) {
+  const like = `%${keyword}%`
+  query = query.or(
+    [
+      `title.ilike.${like}`,
+      `language_of_instruction.ilike.${like}`,
+      `degree_award.ilike.${like}`,
+      `study_mode.ilike.${like}`,
+      `delivery_mode.ilike.${like}`,
+    ].join(','),
+  )
+}
 if (countryId) query = query.eq('country_id', countryId)
 if (cityId) query = query.eq('city_id', cityId)
 if (universityId) query = query.eq('university_id', universityId)
