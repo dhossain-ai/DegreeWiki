@@ -10,8 +10,13 @@ const redirectTo = sanitizeAuthRedirect(Astro.url.searchParams.get('redirect'))
 if (code) {
   const { error } = await supabase.auth.exchangeCodeForSession(code)
   if (error) {
-    return Astro.redirect('/login?auth=error')
+    return Astro.redirect(`/login?auth=error&redirect=${encodeURIComponent(redirectTo)}`)
   }
+}
+
+const { data: { user } } = await supabase.auth.getUser()
+if (!user) {
+  return Astro.redirect(`/login?auth=error&redirect=${encodeURIComponent(redirectTo)}`)
 }
 
 return Astro.redirect(await resolveAuthRedirectForUser(supabase, redirectTo))
