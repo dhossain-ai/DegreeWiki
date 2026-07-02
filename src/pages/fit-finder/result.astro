@@ -1,11 +1,13 @@
 ---
 import PublicLayout from '../../layouts/PublicLayout.astro'
 import MediaImage from '../../components/public/MediaImage.astro'
+import SavedProgramEnhancement from '../../components/public/SavedProgramEnhancement.astro'
 import { createClient } from '../../lib/supabase/server'
 import { SITE_URL } from '../../lib/site'
 import { getAIEnv } from '../../lib/ai/env'
 import { persistFinderResult } from '../../lib/ai/finder/persist'
 import { sanitizeAIExplanation } from '../../lib/ai/finder/sanitize'
+import { getFitMatchLabel, type FitMatchTone } from '../../lib/fit-finder/matches'
 
 const supabase = createClient(Astro.cookies, Astro.request)
 
@@ -73,6 +75,7 @@ let missingSignals: string[] = []
 let aiExplanation: string | null = null
 let savedResultId: string | null = null
 let persistAttempted = false
+let savedProgramIds = new Set<string>()
 
 function formatMode(value: string | null | undefined): string {
   return value ? value.replace(/_/g, ' ') : ''
@@ -89,6 +92,29 @@ function formatTuition(p: any): string | null {
         : `up to ${fmt(p.tuition_max_amount)}`
   const period = p.tuition_period?.replace(/_/g, ' ') ?? ''
   return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim()
+}
+
+function formatBudgetRange(min: number | null, max: number | null, currency: string | null): string | null {
+  if (!currency) return null
+  const prefix = currency.trim().toUpperCase()
+  const fmt = (value: number) => `${prefix} ${Number(value).toLocaleString()}`
+
+  if (min != null && max != null) {
+    if (min === max) return fmt(max)
+    return `${fmt(min)} - ${fmt(max)}`
+  }
+
+  if (max != null) return `Up to ${fmt(max)}`
+  if (min != null) return `${fmt(min)}+`
+  return null
+}
+
+function getLabelClasses(tone: FitMatchTone): string {
+  if (tone === 'strong') return 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+  if (tone === 'good') return 'bg-blue-50 text-blue-700 border border-blue-200'
+  if (tone === 'possible') return 'bg-violet-50 text-violet-700 border border-violet-200'
+  if (tone === 'ambitious') return 'bg-amber-50 text-amber-800 border border-amber-200'
+  return 'bg-slate-100 text-slate-700 border border-slate-200'
 }
 
 function hasEnglishRequirements(value: unknown): boolean {
@@ -368,7 +394,30 @@ if (!user) {
   }
 }
 
+if (user && matches.length > 0) {
+  const programIds = matches.map(match => match.program?.id).filter(Boolean) as string[]
+  if (programIds.length > 0) {
+    const { data: savedRows, error: savedError } = await supabase
+      .from('saved_items')
+      .select('entity_id')
+      .eq('user_id', user.id)
+      .eq('entity_type', 'program')
+      .in('entity_id', programIds)
+
+    if (savedError) {
+      console.error('fit finder result saved_items error:', savedError.message)
+    } else {
+      savedProgramIds = new Set((savedRows ?? []).map((row: any) => row.entity_id).filter(Boolean))
+    }
+  }
+}
+
 const pageTitle = 'Possible program matches'
+const currentPath = `${Astro.url.pathname}${Astro.url.search}`
+const saveLoginHref = `/login?redirect=${encodeURIComponent(currentPath)}`
+const budgetRangeLabel = profile
+  ? formatBudgetRange(profile.budget_min ?? null, profile.budget_max ?? null, profile.budget_currency ?? null)
+  : null
 const showDevPersistWarning =
   import.meta.env.DEV &&
   pageState === 'ready' &&
@@ -446,53 +495,70 @@ const aiCardPending = showAISummaryCard && !aiExplanation
       </div>
     ) : (
       <>
-        <div class="max-w-3xl mb-5">
-          <h1 class="text-2xl font-bold text-gray-900 mb-2">Possible program matches</h1>
-          <p class="text-gray-600">Based on your saved Fit Finder preferences.</p>
+        <div class="max-w-4xl mb-6">
+          <h1 class="text-3xl font-bold text-gray-900 mb-2">Your Fit Finder matches</h1>
+          <p class="text-gray-600">
+            Start with the strongest shortlist, then open the saved result when you want AI follow-up.
+          </p>
         </div>
 
-        <div class="max-w-3xl mb-5 bg-blue-50 border border-blue-100 rounded-md px-4 py-3 text-sm text-blue-800">
-          <p>Match scores show how many of your saved preferences a program aligned with. A higher score means more of your preferences were matched — it does not indicate your chances of admission, eligibility, or scholarship likelihood.</p>
-          <p class="mt-2">These are rule-based preference matches only. Match scores do not assess your eligibility, academic qualifications, admission chances, scholarship prospects, or visa outcomes. Always verify fees, deadlines, admission requirements, and eligibility directly with the official university source before applying.</p>
-        </div>
-
-        {(degreeLevelName || countryNames.length > 0 || subjectNames.length > 0 || budgetSummary) && (
-          <div class="max-w-3xl mb-5 bg-gray-50 border border-gray-200 rounded-md p-4">
-            <h2 class="text-sm font-semibold text-gray-900 mb-3">Your saved preferences used for matching</h2>
-            <dl class="space-y-1 text-sm">
-              {degreeLevelName && (
-                <div class="flex gap-2">
-                  <dt class="text-gray-500 shrink-0 w-36">Degree level</dt>
-                  <dd class="text-gray-900">{degreeLevelName}</dd>
-                </div>
-              )}
-              {countryNames.length > 0 && (
-                <div class="flex gap-2">
-                  <dt class="text-gray-500 shrink-0 w-36">Countries</dt>
-                  <dd class="text-gray-900">{countryNames.join(', ')}</dd>
-                </div>
-              )}
-              {subjectNames.length > 0 && (
-                <div class="flex gap-2">
-                  <dt class="text-gray-500 shrink-0 w-36">Subjects</dt>
-                  <dd class="text-gray-900">{subjectNames.join(', ')}</dd>
-                </div>
-              )}
-              {budgetSummary && (
-                <div class="flex gap-2">
-                  <dt class="text-gray-500 shrink-0 w-36">Budget</dt>
-                  <dd class="text-gray-900">{budgetSummary}</dd>
-                </div>
-              )}
-            </dl>
-            {savedSignalCount < 2 && (
-              <p class="text-xs text-gray-500 mt-3">
-                Adding more preferences can improve match quality.{' '}
-                <a href="/fit-finder" class="underline hover:text-gray-700">Update preferences</a>
-              </p>
-            )}
+        {savedResultId && (
+          <div class="max-w-4xl mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl bg-green-50 border border-green-100 text-sm text-green-800">
+            <span>Your matches have been saved to your account.</span>
+            <a href={`/fit-finder/results/${savedResultId}`} class="font-medium underline hover:text-green-900">
+              View saved result →
+            </a>
           </div>
         )}
+
+        <div class="max-w-4xl mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+              <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700 mb-2">Summary first</p>
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">
+                {matches.length === 1 ? '1 program matched your profile' : `${matches.length} programs matched your profile`}
+              </h2>
+              <p class="text-sm text-gray-600">
+                These are preference-based matches, not admission, scholarship, or visa guarantees.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 sm:min-w-[240px]">
+              <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
+                <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Matched</p>
+                <p class="mt-1 text-2xl font-bold text-slate-900">{matches.length}</p>
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
+                <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Saved signals</p>
+                <p class="mt-1 text-2xl font-bold text-slate-900">{savedSignalCount}</p>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
+              <dt class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Target degree</dt>
+              <dd class="mt-1 text-sm font-medium text-slate-900">{degreeLevelName ?? 'Not set yet'}</dd>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
+              <dt class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Budget range</dt>
+              <dd class="mt-1 text-sm font-medium text-slate-900">{budgetRangeLabel ?? budgetSummary ?? 'Not sure yet'}</dd>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
+              <dt class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Preferred subjects</dt>
+              <dd class="mt-1 text-sm font-medium text-slate-900">{subjectNames.length > 0 ? subjectNames.join(', ') : 'Not set yet'}</dd>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
+              <dt class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Preferred destinations</dt>
+              <dd class="mt-1 text-sm font-medium text-slate-900">{countryNames.length > 0 ? countryNames.join(', ') : 'Not set yet'}</dd>
+            </div>
+          </dl>
+
+          <p class="mt-4 text-xs text-slate-500">
+            Match labels are DegreeWiki shortlist guidance only. Always verify tuition, deadlines,
+            admission requirements, and eligibility with the official provider before applying.
+          </p>
+        </div>
 
         <div class="flex flex-wrap items-center gap-3 mb-7">
           <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
@@ -507,15 +573,6 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             </a>
           )}
         </div>
-
-        {savedResultId && (
-          <div class="max-w-3xl mb-5 flex items-center gap-3 px-4 py-2 rounded-md bg-green-50 border border-green-100 text-sm text-green-800">
-            Your matches have been saved.{' '}
-            <a href={`/fit-finder/results/${savedResultId}`} class="font-medium underline hover:text-green-900">
-              View saved result →
-            </a>
-          </div>
-        )}
         {persistAttempted && !savedResultId && (
           <p class="max-w-3xl mb-5 text-sm text-gray-400">Results could not be saved this time.</p>
         )}
@@ -527,7 +584,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
         {showAISummaryCard && (
           <div
             id="ai-summary-card"
-            class="max-w-3xl mb-7 bg-purple-50 border border-purple-100 rounded-md px-4 py-4"
+            class="max-w-4xl mb-7 bg-purple-50 border border-purple-100 rounded-2xl px-5 py-5"
             data-result-id={savedResultId}
             data-pending={aiCardPending ? 'true' : 'false'}
           >
@@ -597,107 +654,207 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             </div>
           </div>
         ) : (
-          <ul class="space-y-4">
-            {matches.map(match => {
+          <>
+            <div class="max-w-4xl mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 class="text-xl font-semibold text-gray-900">Top matches first</h2>
+                <p class="text-sm text-gray-600">Showing the first 6 matches, with more available below.</p>
+              </div>
+              {savedResultId && (
+                <a
+                  href={`/fit-finder/results/${savedResultId}#ai-advisor`}
+                  class="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+                >
+                  Ask AI about this shortlist
+                </a>
+              )}
+            </div>
+
+            <ul class="space-y-4" data-match-list data-initial-count="6" data-batch-size="6">
+            {matches.map((match, index) => {
               const p = match.program
               const tuition = formatTuition(p)
               const location = [p.countries?.name, p.cities?.name].filter(Boolean).join(', ')
+              const matchLabel = getFitMatchLabel(match.points, match.reasons.length, match.warnings.length)
+              const reasons = match.reasons.slice(0, 3)
+              const warnings = match.warnings.slice(0, 2)
               return (
-                <li class="border border-gray-200 rounded-lg p-5 bg-white">
-                  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
-                    <div class="flex items-start gap-3">
+                <li
+                  class="border border-gray-200 rounded-2xl p-5 bg-white shadow-sm"
+                  data-match-card
+                  style={index >= 6 ? 'display:none' : undefined}
+                >
+                  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-2 mb-3">
+                        <span class={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${getLabelClasses(matchLabel.tone)}`}>
+                          {matchLabel.label}
+                        </span>
+                        <span class="inline-flex items-center rounded-full bg-slate-100 border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600">
+                          Match #{index + 1}
+                        </span>
+                      </div>
+
+                      <div class="flex items-start gap-3">
                       {p.universities?.logo?.cloudinary_public_id && (
-                        <div class="flex-none w-10 h-10 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                        <div class="flex-none w-11 h-11 rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
                           <MediaImage
                             publicId={p.universities.logo.cloudinary_public_id}
                             alt={p.universities.logo.alt_text || p.universities.logo.display_name || p.universities.name}
-                            width={40}
-                            height={40}
+                            width={44}
+                            height={44}
                             crop="fill"
                             loading="lazy"
                             class="w-full h-full object-cover"
                           />
                         </div>
                       )}
-                      <div>
-                      <a href={`/programs/${p.slug}`} class="text-lg font-semibold text-blue-600 hover:underline leading-snug">
-                        {p.title}
-                      </a>
-                      <div class="text-sm text-gray-500 mt-1">
-                        {p.universities && (
-                          <a href={`/universities/${p.universities.slug}`} class="text-gray-700 font-medium hover:underline">
-                            {p.universities.name}
+                        <div class="min-w-0">
+                          <a href={`/programs/${p.slug}`} class="text-lg font-semibold text-blue-600 hover:underline leading-snug">
+                            {p.title}
+                          </a>
+                          <div class="text-sm text-gray-500 mt-1">
+                            {p.universities && (
+                              <a href={`/universities/${p.universities.slug}`} class="text-gray-700 font-medium hover:underline">
+                                {p.universities.name}
+                              </a>
+                            )}
+                            {p.universities && location && <span class="mx-1">·</span>}
+                            {location}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="flex flex-wrap gap-2 text-xs my-4">
+                        {p.degree_levels?.name && (
+                          <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{p.degree_levels.name}</span>
+                        )}
+                        {p.subjects?.name && (
+                          <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">{p.subjects.name}</span>
+                        )}
+                        {p.study_mode && (
+                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.study_mode)}</span>
+                        )}
+                        {p.delivery_mode && (
+                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.delivery_mode)}</span>
+                        )}
+                        {p.language_of_instruction && (
+                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{p.language_of_instruction}</span>
+                        )}
+                        {tuition && (
+                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{tuition}</span>
+                        )}
+                      </div>
+
+                      {reasons.length > 0 && (
+                        <div class="mb-3">
+                          <h2 class="text-sm font-semibold text-gray-900 mb-1">Why it fits</h2>
+                          <ul class="list-disc pl-5 text-sm text-gray-700 space-y-0.5">
+                            {reasons.map(reason => <li>{reason}</li>)}
+                          </ul>
+                        </div>
+                      )}
+
+                      {warnings.length > 0 && (
+                        <div class="mb-3">
+                          <h2 class="text-sm font-semibold text-gray-900 mb-1">Things to verify</h2>
+                          <ul class="list-disc pl-5 text-sm text-gray-600 space-y-0.5">
+                            {warnings.map(warning => <li>{warning}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    <div class="flex w-full shrink-0 flex-col gap-3 lg:w-[220px]">
+                      <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Quick read</p>
+                        <p class="mt-1 text-sm text-slate-700">
+                          {warnings.length > 0
+                            ? 'Good shortlist candidate, but verify the flagged details before applying.'
+                            : 'A cleaner shortlist option based on your saved preferences.'}
+                        </p>
+                      </div>
+
+                      <div class="flex flex-col gap-2">
+                        <a
+                          href={`/programs/${p.slug}`}
+                          class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                        >
+                          View program
+                        </a>
+                        <button
+                          type="button"
+                          class={[
+                            'inline-flex items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-sm font-medium transition-all',
+                            savedProgramIds.has(p.id)
+                              ? 'text-primary bg-primary-surface border-primary'
+                              : 'text-ink-secondary bg-surface border-edge hover:border-[#cbd5e1] hover:bg-[#f8fafc]',
+                          ].join(' ')}
+                          aria-pressed={savedProgramIds.has(p.id) ? 'true' : 'false'}
+                          aria-label={savedProgramIds.has(p.id) ? 'Remove from saved programs' : 'Save program'}
+                          title={user ? undefined : 'Sign in to save programs'}
+                          data-save-program-button={p.id}
+                          data-program-id={p.id}
+                          data-saved={savedProgramIds.has(p.id) ? 'true' : 'false'}
+                          data-save-authenticated={user ? 'true' : 'false'}
+                          data-save-login-href={saveLoginHref}
+                        >
+                          <svg
+                            class="flex-none"
+                            width="9"
+                            height="12"
+                            viewBox="0 0 9 12"
+                            fill={savedProgramIds.has(p.id) ? 'currentColor' : 'none'}
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                            data-save-icon
+                          >
+                            <path d="M0.75 0.75h7.5v10.5l-3.75-2.7-3.75 2.7V0.75z"/>
+                          </svg>
+                          <span data-save-label>{savedProgramIds.has(p.id) ? 'Saved' : 'Save'}</span>
+                        </button>
+                        {savedResultId && (
+                          <a
+                            href={`/fit-finder/results/${savedResultId}#ai-advisor`}
+                            class="inline-flex items-center justify-center rounded-full border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+                          >
+                            Ask AI
                           </a>
                         )}
-                        {p.universities && location && <span class="mx-1">·</span>}
-                        {location}
                       </div>
-                      </div>
-                    </div>
-                    <div class="shrink-0 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-center">
-                      <div class="text-xl font-bold text-blue-700">{match.percentage}%</div>
-                      <div class="text-xs text-blue-700">preference match</div>
-                    </div>
-                  </div>
 
-                  <div class="flex flex-wrap gap-2 text-xs mb-4">
-                    {p.degree_levels?.name && (
-                      <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{p.degree_levels.name}</span>
-                    )}
-                    {p.subjects?.name && (
-                      <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">{p.subjects.name}</span>
-                    )}
-                    {p.study_mode && (
-                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.study_mode)}</span>
-                    )}
-                    {p.delivery_mode && (
-                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.delivery_mode)}</span>
-                    )}
-                    {p.language_of_instruction && (
-                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{p.language_of_instruction}</span>
-                    )}
-                    {tuition && (
-                      <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{tuition}</span>
-                    )}
-                  </div>
-
-                  {match.reasons.length > 0 && (
-                    <div class="mb-3">
-                      <h2 class="text-sm font-semibold text-gray-900 mb-1">Why this may fit</h2>
-                      <ul class="list-disc pl-5 text-sm text-gray-700 space-y-0.5">
-                        {match.reasons.map(reason => <li>{reason}</li>)}
-                      </ul>
-                    </div>
-                  )}
-
-                  {match.warnings.length > 0 && (
-                    <div class="mb-3">
-                      <h2 class="text-sm font-semibold text-gray-900 mb-1">Things to verify</h2>
-                      <ul class="list-disc pl-5 text-sm text-gray-600 space-y-0.5">
-                        {match.warnings.map(warning => <li>{warning}</li>)}
-                      </ul>
-                    </div>
-                  )}
-
-                  <div class="text-sm text-gray-500 border-t border-gray-100 pt-3">
-                    Confirm fees, deadlines, admission requirements, and eligibility directly with the official source.
-                    {p.official_url && (
-                      <>
-                        {' '}
-                        <a href={p.official_url} target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">
+                      {p.official_url && (
+                        <a href={p.official_url} target="_blank" rel="noopener noreferrer" class="text-sm text-blue-600 hover:underline">
                           Official program page
                         </a>
-                      </>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </li>
               )
             })}
-          </ul>
+            </ul>
+
+            {matches.length > 6 && (
+              <div class="mt-5 flex justify-center">
+                <button
+                  type="button"
+                  class="inline-flex items-center rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  data-show-more-matches
+                >
+                  Show more matches
+                </button>
+              </div>
+            )}
+          </>
         )}
       </>
     )}
   </div>
+
+  <SavedProgramEnhancement />
 
   <script>
     // Async AI summary loader. Fetches the summary once after rule-based matches
@@ -749,7 +906,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             } else {
               showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
             }
-          })
+        })
           .catch(() => {
             showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
           })
@@ -757,6 +914,35 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             card.setAttribute('data-pending', 'done')
           })
       }
+    }
+
+    const matchList = document.querySelector('[data-match-list]')
+    const showMoreBtn = document.querySelector('[data-show-more-matches]')
+    if (matchList && showMoreBtn) {
+      const cards = Array.from(matchList.querySelectorAll('[data-match-card]'))
+      const initialCount = Number(matchList.getAttribute('data-initial-count') || '6')
+      const batchSize = Number(matchList.getAttribute('data-batch-size') || '6')
+      let visibleCount = initialCount
+
+      const updateVisible = () => {
+        cards.forEach((card, index) => {
+          card.style.display = index < visibleCount ? '' : 'none'
+        })
+
+        if (visibleCount >= cards.length) {
+          showMoreBtn.style.display = 'none'
+        } else {
+          showMoreBtn.style.display = ''
+          showMoreBtn.textContent = `Show ${Math.min(batchSize, cards.length - visibleCount)} more matches`
+        }
+      }
+
+      showMoreBtn.addEventListener('click', () => {
+        visibleCount = Math.min(cards.length, visibleCount + batchSize)
+        updateVisible()
+      })
+
+      updateVisible()
     }
   </script>
 </PublicLayout>
