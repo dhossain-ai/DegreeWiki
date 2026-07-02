@@ -7,30 +7,41 @@ const { resultId, initialMessages } = Astro.props
 const hasHistory = initialMessages.length > 0
 
 const SUGGESTED_QUESTIONS = [
-  'Why are these programs a good match for me?',
-  'Which matched program looks most affordable?',
-  'Compare my top 3 matched programs.',
+  'Which 3 programs should I check first?',
+  'Which options fit my budget best?',
   'What should I verify before applying?',
+  'Compare my top matches.',
 ]
 ---
 
-<div class="max-w-3xl mt-8 pt-6 border-t border-gray-100">
-  <h2 class="text-base font-semibold text-gray-900 mb-2">DegreeWiki AI Advisor</h2>
+<div id="ai-advisor" class="max-w-3xl rounded-2xl border border-purple-100 bg-white p-5 shadow-sm">
+  <h2 class="text-lg font-semibold text-gray-900 mb-2">Ask DegreeWiki AI about these matches</h2>
   <p class="text-sm text-gray-600 mb-3">
-    Ask follow-up questions about this saved Fit Finder result.
+    Ask follow-up questions about this shortlist only. The advisor can explain the matched
+    programs shown on this page, but it cannot search for new options.
   </p>
 
-  <div class="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-4 py-3 mb-4">
+  <div class="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4">
     AI answers are based on DegreeWiki context and are not admission, visa, or scholarship
-    guarantees. This chat is scoped to the programs in this saved result and cannot search
-    for new programs. Verify important details directly with official sources before applying.
+    guarantees. Verify important details directly with official sources before applying.
+  </div>
+
+  <div class="mb-4">
+    <p class="text-xs font-semibold uppercase tracking-[0.12em] text-purple-700 mb-2">Try a prompt</p>
+    <div class="flex flex-wrap gap-2">
+      {SUGGESTED_QUESTIONS.map(q => (
+        <button type="button" class="chat-suggestion text-xs bg-purple-50 hover:bg-purple-100 border border-purple-100 rounded-full px-3 py-1.5 text-purple-800 text-left">
+          {q}
+        </button>
+      ))}
+    </div>
   </div>
 
   <div id="chat-transcript" class="space-y-3 mb-4" style={hasHistory ? undefined : 'display:none'}>
     {initialMessages.map(msg => (
       <div class={msg.role === 'user'
-        ? 'bg-gray-100 rounded-md px-3 py-2 text-sm'
-        : 'bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-sm'}>
+        ? 'bg-gray-100 rounded-xl px-3 py-2 text-sm'
+        : 'bg-purple-50 border border-purple-100 rounded-xl px-3 py-2 text-sm'}>
         <span class={'block text-xs font-medium mb-1 ' + (msg.role === 'user' ? 'text-gray-500' : 'text-purple-700')}>
           {msg.role === 'user' ? 'You' : 'Assistant'}
         </span>
@@ -40,14 +51,7 @@ const SUGGESTED_QUESTIONS = [
   </div>
 
   <div id="chat-empty" class="mb-4" style={hasHistory ? 'display:none' : undefined}>
-    <p class="text-sm text-gray-500 mb-3">No questions yet. Try asking:</p>
-    <div class="flex flex-wrap gap-2">
-      {SUGGESTED_QUESTIONS.map(q => (
-        <button type="button" class="chat-suggestion text-xs bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-md px-3 py-1.5 text-gray-700 text-left">
-          {q}
-        </button>
-      ))}
-    </div>
+    <p class="text-sm text-gray-500">No questions yet. Pick a prompt above or ask your own question.</p>
   </div>
 
   <div id="chat-status" class="text-sm mb-3" style="display:none"></div>
@@ -59,22 +63,22 @@ const SUGGESTED_QUESTIONS = [
     id="chat-input"
     rows="3"
     maxlength="1000"
-    class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-    placeholder="Ask a question about these programs..."
+    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+    placeholder="Ask about your shortlist..."
   ></textarea>
 
   <div class="flex gap-2 mt-2">
     <button
       id="chat-submit"
       type="button"
-      class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       Ask
     </button>
     <button
       id="chat-clear"
       type="button"
-      class="px-3 py-2 text-sm text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="px-3 py-2 text-sm text-gray-500 border border-gray-200 rounded-full hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
       style={hasHistory ? undefined : 'display:none'}
     >
       Clear chat
@@ -95,8 +99,8 @@ const SUGGESTED_QUESTIONS = [
   function appendTurn(role, text) {
     const wrapper = document.createElement('div')
     wrapper.className = role === 'user'
-      ? 'bg-gray-100 rounded-md px-3 py-2 text-sm'
-      : 'bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-sm'
+      ? 'bg-gray-100 rounded-xl px-3 py-2 text-sm'
+      : 'bg-purple-50 border border-purple-100 rounded-xl px-3 py-2 text-sm'
 
     const label = document.createElement('span')
     label.className = 'block text-xs font-medium mb-1 ' +
@@ -138,7 +142,9 @@ const SUGGESTED_QUESTIONS = [
     if (err === 'invalid_message') return 'Please enter a valid question between 1 and 1000 characters.'
     if (err === 'message_rejected') return data && data.answer ? data.answer : "This question can't be answered here. Please ask about the programs in your saved result."
     if (err === 'unauthenticated') return 'Please sign in again to continue.'
-    if (err === 'not_found') return 'This result is not available. It may have been deleted or is no longer accessible.'
+    if (err === 'not_found') return 'This saved result is no longer available or you no longer have access to it.'
+    if (err === 'result_not_ready') return 'This saved result is not ready for AI follow-up yet. Run Fit Finder again to refresh it.'
+    if (err === 'advisor_context_failed') return 'DegreeWiki AI could not load the context for this shortlist right now. Please try again in a moment.'
     if (err === 'rate_limit_exceeded') return "You've reached today's AI usage limit. Please try again tomorrow."
     if (err === 'ai_unavailable') return 'AI is temporarily unavailable. Please try again in a few minutes.'
     if (err === 'internal_error') return 'Something went wrong. Please try again.'

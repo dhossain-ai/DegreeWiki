@@ -33,34 +33,37 @@ function formatTuition(p: {
   return [p.tuition_currency, range, period].filter(Boolean).join(' ').trim() || null
 }
 
+export type LoadChatContextResult =
+  | { status: 'ok'; context: ChatResultContext }
+  | { status: 'not_found' }
+  | { status: 'result_not_ready' }
+  | { status: 'context_load_failed' }
+
 // loadChatContext loads the saved Fit Finder result identified by resultId and
 // builds a ChatResultContext from the matched programs.
-//
-// Returns null when:
-//   - The result does not exist or belongs to another user (RLS returns no data)
-//   - The result_status is not 'complete' (result is not usable for chat)
-//   - Any query fails (error is logged server-side)
 //
 // The caller must pass an authenticated SSR Supabase client created from
 // the user's session cookies. RLS enforces that only the result owner sees data.
 export async function loadChatContext(
   resultId: string,
   supabase: SupabaseClient,
-): Promise<ChatResultContext | null> {
+): Promise<LoadChatContextResult> {
   const { data: result, error: resultError } = await supabase
     .from('ai_finder_results')
-    .select('id, result_status')
+    .select('id, result_status, shortlist_count')
     .eq('id', resultId)
     .maybeSingle()
 
   if (resultError) {
     console.error('chat context: ai_finder_results read error:', resultError.message)
-    return null
+    return { status: 'context_load_failed' }
   }
 
-  if (!result) return null
+  if (!result) return { status: 'not_found' }
 
-  if (result.result_status !== 'complete') return null
+  if (result.result_status !== 'complete' || (result.shortlist_count ?? 0) <= 0) {
+    return { status: 'result_not_ready' }
+  }
 
   const { data: matchRows, error: matchError } = await supabase
     .from('ai_finder_program_matches')
@@ -73,7 +76,7 @@ export async function loadChatContext(
         countries(name),
         cities(name),
         degree_levels(name),
-        subjects(name)
+        subjects!programs_primary_subject_id_fkey(name)
       )
     `)
     .eq('ai_finder_result_id', resultId)
@@ -82,7 +85,7 @@ export async function loadChatContext(
 
   if (matchError) {
     console.error('chat context: ai_finder_program_matches read error:', matchError.message)
-    return null
+    return { status: 'context_load_failed' }
   }
 
   const programs: ChatResultProgram[] = (matchRows ?? []).flatMap((row: any) => {
@@ -107,8 +110,15 @@ export async function loadChatContext(
     } satisfies ChatResultProgram]
   })
 
+  if (programs.length === 0) {
+    return { status: 'result_not_ready' }
+  }
+
   return {
-    resultId,
-    programs,
+    status: 'ok',
+    context: {
+      resultId,
+      programs,
+    },
   }
 }

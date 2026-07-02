@@ -29,6 +29,18 @@ function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
+function chatContextErrorResponse(error: 'not_found' | 'result_not_ready' | 'advisor_context_failed'): Response {
+  if (error === 'not_found') {
+    return jsonResponse(404, { ok: false, error })
+  }
+
+  if (error === 'result_not_ready') {
+    return jsonResponse(409, { ok: false, error })
+  }
+
+  return jsonResponse(503, { ok: false, error })
+}
+
 export const POST: APIRoute = async ({ cookies, request, locals }) => {
   // Parse JSON body.
   let body: unknown
@@ -69,16 +81,23 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
 
   // Static path: no LLM, no rate-limit, no provider usage log.
   if (decision.route === 'static') {
-    // Verify result ownership with authenticated SSR client (RLS enforced).
-    // Full context load is not needed for static responses.
-    const { data: resultRow } = await supabase
+    const { data: resultRow, error: resultError } = await supabase
       .from('ai_finder_results')
-      .select('id')
+      .select('id, result_status, shortlist_count')
       .eq('id', resultId)
       .maybeSingle()
 
+    if (resultError) {
+      console.error('chat api: static result read failed:', resultError.message)
+      return chatContextErrorResponse('advisor_context_failed')
+    }
+
     if (!resultRow) {
-      return jsonResponse(404, { ok: false, error: 'not_found' })
+      return chatContextErrorResponse('not_found')
+    }
+
+    if (resultRow.result_status !== 'complete' || (resultRow.shortlist_count ?? 0) <= 0) {
+      return chatContextErrorResponse('result_not_ready')
     }
 
     // Get or create the persistent conversation for this (user, result) pair.
@@ -133,10 +152,15 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   }
 
   // Load chat context via RLS-scoped SSR client. No service role.
-  // Returns null when result not found, not owned by user, or result_status !== 'complete'.
   const chatContext = await loadChatContext(resultId, supabase)
-  if (!chatContext) {
-    return jsonResponse(404, { ok: false, error: 'not_found' })
+  if (chatContext.status !== 'ok') {
+    if (chatContext.status === 'not_found') {
+      return chatContextErrorResponse('not_found')
+    }
+    if (chatContext.status === 'result_not_ready') {
+      return chatContextErrorResponse('result_not_ready')
+    }
+    return chatContextErrorResponse('advisor_context_failed')
   }
 
   // Get or create the persistent conversation for this (user, result) pair.
@@ -153,7 +177,7 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
   // chatContext.programs contains no internal UUIDs — safe to pass to the gateway.
   const aiContext: AIContext = {
     source: 'programs',
-    records: chatContext.programs as unknown as Array<Record<string, unknown>>,
+    records: chatContext.context.programs as unknown as Array<Record<string, unknown>>,
   }
 
   // Call AI gateway with saved-result chat mode.
@@ -191,13 +215,13 @@ export const POST: APIRoute = async ({ cookies, request, locals }) => {
     safetyPolicyVersion:   GUARDRAILS_VERSION,
     aiFinderResultId:      resultId,
     conversationId,
-    programsUsed: chatContext.programs.map(p => ({
+    programsUsed: chatContext.context.programs.map(p => ({
       rank:       p.rank,
       title:      p.title,
       university: p.university,
     })),
-    warningsIncluded:    chatContext.programs.some(p => p.warnings.length > 0),
-    missingTuitionCount: chatContext.programs.filter(p => !p.tuitionSummary).length,
+    warningsIncluded:    chatContext.context.programs.some(p => p.warnings.length > 0),
+    missingTuitionCount: chatContext.context.programs.filter(p => !p.tuitionSummary).length,
   }
 
   // Persist the chat turn. Privileged DB access is inside persistChatTurn — not here.
