@@ -12,6 +12,83 @@ const SUGGESTED_QUESTIONS = [
   'What should I verify before applying?',
   'Compare my top matches.',
 ]
+
+type InlineSegment = {
+  text: string
+  bold: boolean
+}
+
+type MessageBlock =
+  | { type: 'paragraph'; lines: InlineSegment[][] }
+  | { type: 'unordered-list'; items: InlineSegment[][][] }
+  | { type: 'ordered-list'; items: InlineSegment[][][] }
+
+function parseInlineSegments(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = []
+  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+
+  for (const part of parts) {
+    if (!part) continue
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      segments.push({ text: part.slice(2, -2), bold: true })
+    } else {
+      segments.push({ text: part, bold: false })
+    }
+  }
+
+  return segments.length > 0 ? segments : [{ text, bold: false }]
+}
+
+function parseAssistantMessage(content: string): MessageBlock[] {
+  const normalized = content.replace(/\r\n?/g, '\n')
+  const lines = normalized.split('\n')
+  const blocks: MessageBlock[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    if (!lines[index].trim()) {
+      index += 1
+      continue
+    }
+
+    const orderedMatch = lines[index].match(/^\s*\d+\.\s+(.+)$/)
+    if (orderedMatch) {
+      const items: InlineSegment[][][] = []
+      while (index < lines.length) {
+        const match = lines[index].match(/^\s*\d+\.\s+(.+)$/)
+        if (!match) break
+        items.push([[...parseInlineSegments(match[1])]])
+        index += 1
+      }
+      blocks.push({ type: 'ordered-list', items })
+      continue
+    }
+
+    const unorderedMatch = lines[index].match(/^\s*[-*]\s+(.+)$/)
+    if (unorderedMatch) {
+      const items: InlineSegment[][][] = []
+      while (index < lines.length) {
+        const match = lines[index].match(/^\s*[-*]\s+(.+)$/)
+        if (!match) break
+        items.push([[...parseInlineSegments(match[1])]])
+        index += 1
+      }
+      blocks.push({ type: 'unordered-list', items })
+      continue
+    }
+
+    const paragraphLines: InlineSegment[][] = []
+    while (index < lines.length) {
+      if (!lines[index].trim()) break
+      if (/^\s*\d+\.\s+(.+)$/.test(lines[index]) || /^\s*[-*]\s+(.+)$/.test(lines[index])) break
+      paragraphLines.push(parseInlineSegments(lines[index]))
+      index += 1
+    }
+    blocks.push({ type: 'paragraph', lines: paragraphLines })
+  }
+
+  return blocks
+}
 ---
 
 <div id="ai-advisor" class="max-w-3xl rounded-2xl border border-purple-100 bg-white p-5 shadow-sm">
@@ -45,7 +122,62 @@ const SUGGESTED_QUESTIONS = [
         <span class={'block text-xs font-medium mb-1 ' + (msg.role === 'user' ? 'text-gray-500' : 'text-purple-700')}>
           {msg.role === 'user' ? 'You' : 'Assistant'}
         </span>
-        <p class="text-gray-700">{msg.content}</p>
+        {msg.role === 'user' ? (
+          <p class="text-gray-700 whitespace-pre-wrap">{msg.content}</p>
+        ) : (
+          <div class="space-y-3 text-gray-700">
+            {parseAssistantMessage(msg.content).map(block => (
+              block.type === 'paragraph' ? (
+                <p class="leading-relaxed">
+                  {block.lines.map((line, lineIndex) => (
+                    <>
+                      {lineIndex > 0 && <br />}
+                      {line.map(segment => (
+                        segment.bold
+                          ? <strong class="font-semibold text-gray-900">{segment.text}</strong>
+                          : <>{segment.text}</>
+                      ))}
+                    </>
+                  ))}
+                </p>
+              ) : block.type === 'ordered-list' ? (
+                <ol class="list-decimal space-y-1 pl-5">
+                  {block.items.map(item => (
+                    <li class="leading-relaxed">
+                      {item.map((line, lineIndex) => (
+                        <>
+                          {lineIndex > 0 && <br />}
+                          {line.map(segment => (
+                            segment.bold
+                              ? <strong class="font-semibold text-gray-900">{segment.text}</strong>
+                              : <>{segment.text}</>
+                          ))}
+                        </>
+                      ))}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <ul class="list-disc space-y-1 pl-5">
+                  {block.items.map(item => (
+                    <li class="leading-relaxed">
+                      {item.map((line, lineIndex) => (
+                        <>
+                          {lineIndex > 0 && <br />}
+                          {line.map(segment => (
+                            segment.bold
+                              ? <strong class="font-semibold text-gray-900">{segment.text}</strong>
+                              : <>{segment.text}</>
+                          ))}
+                        </>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              )
+            ))}
+          </div>
+        )}
       </div>
     ))}
   </div>
@@ -96,6 +228,131 @@ const SUGGESTED_QUESTIONS = [
 
   let busy = false
 
+  function parseInlineSegments(text) {
+    const segments = []
+    const parts = text.split(/(\*\*[^*]+\*\*)/g)
+
+    for (const part of parts) {
+      if (!part) continue
+      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+        segments.push({ text: part.slice(2, -2), bold: true })
+      } else {
+        segments.push({ text: part, bold: false })
+      }
+    }
+
+    return segments.length > 0 ? segments : [{ text, bold: false }]
+  }
+
+  function parseAssistantMessage(text) {
+    const normalized = String(text ?? '').replace(/\r\n?/g, '\n')
+    const lines = normalized.split('\n')
+    const blocks = []
+    let index = 0
+
+    while (index < lines.length) {
+      if (!lines[index].trim()) {
+        index += 1
+        continue
+      }
+
+      let match = lines[index].match(/^\s*\d+\.\s+(.+)$/)
+      if (match) {
+        const items = []
+        while (index < lines.length) {
+          match = lines[index].match(/^\s*\d+\.\s+(.+)$/)
+          if (!match) break
+          items.push([parseInlineSegments(match[1])])
+          index += 1
+        }
+        blocks.push({ type: 'ordered-list', items })
+        continue
+      }
+
+      match = lines[index].match(/^\s*[-*]\s+(.+)$/)
+      if (match) {
+        const items = []
+        while (index < lines.length) {
+          match = lines[index].match(/^\s*[-*]\s+(.+)$/)
+          if (!match) break
+          items.push([parseInlineSegments(match[1])])
+          index += 1
+        }
+        blocks.push({ type: 'unordered-list', items })
+        continue
+      }
+
+      const paragraphLines = []
+      while (index < lines.length) {
+        if (!lines[index].trim()) break
+        if (/^\s*\d+\.\s+(.+)$/.test(lines[index]) || /^\s*[-*]\s+(.+)$/.test(lines[index])) break
+        paragraphLines.push(parseInlineSegments(lines[index]))
+        index += 1
+      }
+      blocks.push({ type: 'paragraph', lines: paragraphLines })
+    }
+
+    return blocks
+  }
+
+  function appendInlineSegments(parent, segments) {
+    segments.forEach(segment => {
+      if (!segment.text) return
+      if (segment.bold) {
+        const strong = document.createElement('strong')
+        strong.className = 'font-semibold text-gray-900'
+        strong.textContent = segment.text
+        parent.appendChild(strong)
+      } else {
+        parent.appendChild(document.createTextNode(segment.text))
+      }
+    })
+  }
+
+  function buildAssistantBody(text) {
+    const container = document.createElement('div')
+    container.className = 'space-y-3 text-gray-700'
+
+    const blocks = parseAssistantMessage(text)
+    if (blocks.length === 0) {
+      const paragraph = document.createElement('p')
+      paragraph.className = 'leading-relaxed'
+      paragraph.textContent = text
+      container.appendChild(paragraph)
+      return container
+    }
+
+    blocks.forEach(block => {
+      if (block.type === 'paragraph') {
+        const paragraph = document.createElement('p')
+        paragraph.className = 'leading-relaxed'
+        block.lines.forEach((line, lineIndex) => {
+          if (lineIndex > 0) paragraph.appendChild(document.createElement('br'))
+          appendInlineSegments(paragraph, line)
+        })
+        container.appendChild(paragraph)
+        return
+      }
+
+      const list = document.createElement(block.type === 'ordered-list' ? 'ol' : 'ul')
+      list.className = block.type === 'ordered-list' ? 'list-decimal space-y-1 pl-5' : 'list-disc space-y-1 pl-5'
+
+      block.items.forEach(item => {
+        const listItem = document.createElement('li')
+        listItem.className = 'leading-relaxed'
+        item.forEach((line, lineIndex) => {
+          if (lineIndex > 0) listItem.appendChild(document.createElement('br'))
+          appendInlineSegments(listItem, line)
+        })
+        list.appendChild(listItem)
+      })
+
+      container.appendChild(list)
+    })
+
+    return container
+  }
+
   function appendTurn(role, text) {
     const wrapper = document.createElement('div')
     wrapper.className = role === 'user'
@@ -107,9 +364,14 @@ const SUGGESTED_QUESTIONS = [
       (role === 'user' ? 'text-gray-500' : 'text-purple-700')
     label.textContent = role === 'user' ? 'You' : 'Assistant'
 
-    const body = document.createElement('p')
-    body.className = 'text-gray-700'
-    body.textContent = text
+    const body = role === 'user'
+      ? document.createElement('p')
+      : buildAssistantBody(text)
+
+    if (role === 'user') {
+      body.className = 'text-gray-700 whitespace-pre-wrap'
+      body.textContent = text
+    }
 
     wrapper.appendChild(label)
     wrapper.appendChild(body)
