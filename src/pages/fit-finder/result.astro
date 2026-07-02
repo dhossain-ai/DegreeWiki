@@ -427,6 +427,16 @@ const showDevPersistWarning =
 // result row was saved but does not yet have a cached explanation.
 const showAISummaryCard = pageState === 'ready' && matches.length > 0 && !!savedResultId
 const aiCardPending = showAISummaryCard && !aiExplanation
+const initialVisibleMatches = 6
+const savedResultHref = savedResultId ? `/fit-finder/results/${savedResultId}` : null
+const advisorHref = savedResultId ? `${savedResultHref}#ai-advisor` : null
+const matchLegend: Array<{ label: string; tone: FitMatchTone }> = [
+  { label: 'Strong match', tone: 'strong' },
+  { label: 'Good match', tone: 'good' },
+  { label: 'Possible match', tone: 'possible' },
+  { label: 'Ambitious', tone: 'ambitious' },
+  { label: 'Needs review', tone: 'review' },
+]
 ---
 <PublicLayout
   title={`${pageTitle} — DegreeWiki`}
@@ -505,8 +515,11 @@ const aiCardPending = showAISummaryCard && !aiExplanation
         {savedResultId && (
           <div class="max-w-4xl mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl bg-green-50 border border-green-100 text-sm text-green-800">
             <span>Your matches have been saved to your account.</span>
-            <a href={`/fit-finder/results/${savedResultId}`} class="font-medium underline hover:text-green-900">
+            <a href={savedResultHref!} class="font-medium underline hover:text-green-900">
               View saved result →
+            </a>
+            <a href={advisorHref!} class="font-medium underline hover:text-green-900">
+              Open AI advisor →
             </a>
           </div>
         )}
@@ -519,8 +532,19 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                 {matches.length === 1 ? '1 program matched your profile' : `${matches.length} programs matched your profile`}
               </h2>
               <p class="text-sm text-gray-600">
-                These are preference-based matches, not admission, scholarship, or visa guarantees.
+                {matches.length > 0
+                  ? `These labels show how closely each program lines up with the preferences you saved. The top ${Math.min(matches.length, initialVisibleMatches)} appear first so you can review the shortlist quickly.`
+                  : 'No programs earned enough matching signals yet. Broaden your preferences or update them to surface more shortlist options.'}
               </p>
+              {matches.length > 0 && (
+                <div class="mt-4 flex flex-wrap gap-2">
+                  {matchLegend.map(item => (
+                    <span class={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${getLabelClasses(item.tone)}`}>
+                      {item.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div class="grid grid-cols-2 gap-3 sm:min-w-[240px]">
@@ -529,8 +553,8 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                 <p class="mt-1 text-2xl font-bold text-slate-900">{matches.length}</p>
               </div>
               <div class="rounded-xl bg-slate-50 px-4 py-3 border border-slate-200">
-                <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Saved signals</p>
-                <p class="mt-1 text-2xl font-bold text-slate-900">{savedSignalCount}</p>
+                <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Profile signals used</p>
+                <p class="mt-1 text-2xl font-bold text-slate-900">{savedSignalCount}/4</p>
               </div>
             </div>
           </div>
@@ -554,17 +578,18 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             </div>
           </dl>
 
-          <p class="mt-4 text-xs text-slate-500">
-            Match labels are DegreeWiki shortlist guidance only. Always verify tuition, deadlines,
-            admission requirements, and eligibility with the official provider before applying.
-          </p>
+          {matches.length > 0 && (
+            <p class="mt-4 text-xs text-slate-500">
+              Match labels are shortlist guidance only. Verify tuition, deadlines, and eligibility with the official provider before you apply.
+            </p>
+          )}
         </div>
 
         <div class="flex flex-wrap items-center gap-3 mb-7">
-          <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          <a href="/fit-finder" class="inline-flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:w-auto">
             Update preferences
           </a>
-          <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+          <a href="/programs" class="inline-flex w-full items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 sm:w-auto">
             Browse all programs
           </a>
           {user && pageState === 'ready' && (
@@ -584,24 +609,49 @@ const aiCardPending = showAISummaryCard && !aiExplanation
         {showAISummaryCard && (
           <div
             id="ai-summary-card"
-            class="max-w-4xl mb-7 bg-purple-50 border border-purple-100 rounded-2xl px-5 py-5"
+            class="max-w-4xl mb-7 rounded-2xl border border-purple-100 bg-gradient-to-b from-[#faf5ff] to-white px-5 py-5"
             data-result-id={savedResultId}
             data-pending={aiCardPending ? 'true' : 'false'}
           >
-            <h2 class="text-sm font-semibold text-purple-900 mb-2">AI summary</h2>
-            <p class="text-xs text-purple-700 mb-3">
-              This explanation is AI-assisted and based only on your saved preferences and the matched programs shown here. Verify all details directly with official university sources before applying.
-            </p>
-            <div id="ai-summary-body" class="space-y-2">
-              {aiExplanation
-                ? aiExplanation.split(/\n\n+/).map(para => (
-                    <p class="text-sm text-gray-700 leading-relaxed">{para}</p>
-                  ))
-                : (
-                  <p id="ai-summary-status" class="text-sm text-gray-500 leading-relaxed">
-                    Preparing your personalized explanation…
-                  </p>
-                )}
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-purple-700">AI advisor</p>
+                <h2 class="mt-2 text-xl font-semibold text-slate-900">Keep this shortlist moving</h2>
+                <p class="mt-2 text-sm text-slate-600">
+                  Open the saved-result advisor to compare these matches, ask what to verify, and decide which programs belong in your shortlist.
+                </p>
+              </div>
+              <div class="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                <a
+                  href={advisorHref!}
+                  class="inline-flex items-center justify-center rounded-full bg-purple-700 px-4 py-2 text-sm font-medium text-white hover:bg-purple-800"
+                >
+                  Open AI advisor
+                </a>
+                <a
+                  href={savedResultHref!}
+                  class="inline-flex items-center justify-center rounded-full border border-purple-200 bg-white px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-50"
+                >
+                  Open saved result
+                </a>
+              </div>
+            </div>
+            <div class="mt-4 rounded-2xl border border-purple-100 bg-white/80 px-4 py-4">
+              <h3 class="text-sm font-semibold text-purple-900">Quick AI overview</h3>
+              <p class="mt-1 text-xs text-purple-700">
+                This overview is based on your saved preferences and the matched programs shown here. Verify important details with official sources before applying.
+              </p>
+              <div id="ai-summary-body" class="mt-3 space-y-2">
+                {aiExplanation
+                  ? aiExplanation.split(/\n\n+/).map(para => (
+                      <p class="text-sm text-gray-700 leading-relaxed">{para}</p>
+                    ))
+                  : (
+                    <p id="ai-summary-status" class="text-sm text-gray-500 leading-relaxed">
+                      Preparing a short AI overview...
+                    </p>
+                  )}
+              </div>
             </div>
           </div>
         )}
@@ -614,22 +664,22 @@ const aiCardPending = showAISummaryCard && !aiExplanation
 
         {pageState === 'no_matches' ? (
           <div class="max-w-2xl border border-gray-200 rounded-lg p-5 bg-gray-50">
-            <h2 class="text-base font-semibold text-gray-900 mb-2">No strong matches found for your preferences</h2>
+            <h2 class="text-base font-semibold text-gray-900 mb-2">No shortlist matches found yet for these preferences</h2>
             {candidatesChecked > 0 && (
               <p class="text-sm text-gray-600 mb-2">
-                {candidatesChecked} published programme{candidatesChecked === 1 ? '' : 's'} checked against your preferences — none scored above zero.
+                {candidatesChecked} published program{candidatesChecked === 1 ? '' : 's'} checked against your preferences, and none earned enough signals to appear here yet.
               </p>
             )}
             {candidatesChecked === 0 && (
               <p class="text-sm text-gray-600 mb-2">
-                No published programmes are available yet. This is expected during early data build-out.
+                No published programs are available yet. This is expected during early data build-out.
               </p>
             )}
             {degreeLevelName && candidatesChecked > 0 && (
               <p class="text-sm text-gray-600 mb-2">
-                DegreeWiki currently has limited or no published programmes for{' '}
+                DegreeWiki currently has limited or no published programs for{' '}
                 <strong class="font-medium text-gray-800">{degreeLevelName}</strong>.
-                {' '}If your goal allows it, try selecting a different degree level — master's programmes have the most coverage right now.
+                {' '}If your goal allows it, try selecting a different degree level. Master's programs have the most coverage right now.
               </p>
             )}
             <p class="text-sm text-gray-600 mb-2">
@@ -642,14 +692,14 @@ const aiCardPending = showAISummaryCard && !aiExplanation
               <li>Remove the budget filter temporarily to see more candidates.</li>
             </ul>
             <p class="text-xs text-gray-500 mb-4">
-              DegreeWiki's starter data is strongest for Finland master's programmes. More countries, degree levels, and scholarships are being added regularly.
+              DegreeWiki's starter data is strongest for Finland master's programs. More countries, degree levels, and scholarships are being added regularly.
             </p>
             <div class="flex flex-wrap gap-3">
               <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                 Update preferences
               </a>
               <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-white">
-                Browse all programmes
+                Browse all programs
               </a>
             </div>
           </div>
@@ -658,11 +708,13 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             <div class="max-w-4xl mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 class="text-xl font-semibold text-gray-900">Top matches first</h2>
-                <p class="text-sm text-gray-600">Showing the first 6 matches, with more available below.</p>
+                <p class="text-sm text-gray-600" data-visible-match-summary aria-live="polite">
+                  Showing {Math.min(matches.length, initialVisibleMatches)} of {matches.length} matches.
+                </p>
               </div>
-              {savedResultId && (
+              {advisorHref && (
                 <a
-                  href={`/fit-finder/results/${savedResultId}#ai-advisor`}
+                  href={advisorHref}
                   class="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
                 >
                   Ask AI about this shortlist
@@ -670,7 +722,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
               )}
             </div>
 
-            <ul class="space-y-4" data-match-list data-initial-count="6" data-batch-size="6">
+            <ul class="space-y-4" data-match-list data-initial-count={initialVisibleMatches} data-batch-size="6">
             {matches.map((match, index) => {
               const p = match.program
               const tuition = formatTuition(p)
@@ -678,11 +730,15 @@ const aiCardPending = showAISummaryCard && !aiExplanation
               const matchLabel = getFitMatchLabel(match.points, match.reasons.length, match.warnings.length)
               const reasons = match.reasons.slice(0, 3)
               const warnings = match.warnings.slice(0, 2)
+              const studyDetails = [
+                p.study_mode ? formatMode(p.study_mode) : null,
+                p.delivery_mode ? formatMode(p.delivery_mode) : null,
+              ].filter(Boolean).join(' · ')
               return (
                 <li
-                  class="border border-gray-200 rounded-2xl p-5 bg-white shadow-sm"
+                  class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5"
                   data-match-card
-                  style={index >= 6 ? 'display:none' : undefined}
+                  style={index >= initialVisibleMatches ? 'display:none' : undefined}
                 >
                   <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div class="min-w-0 flex-1">
@@ -725,29 +781,38 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                         </div>
                       </div>
 
-                      <div class="flex flex-wrap gap-2 text-xs my-4">
+                      <div class="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                         {p.degree_levels?.name && (
-                          <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{p.degree_levels.name}</span>
+                          <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p class="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Degree</p>
+                            <p class="mt-1 text-sm font-medium text-slate-900">{p.degree_levels.name}</p>
+                          </div>
                         )}
                         {p.subjects?.name && (
-                          <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">{p.subjects.name}</span>
-                        )}
-                        {p.study_mode && (
-                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.study_mode)}</span>
-                        )}
-                        {p.delivery_mode && (
-                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{formatMode(p.delivery_mode)}</span>
+                          <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p class="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Subject</p>
+                            <p class="mt-1 text-sm font-medium text-slate-900">{p.subjects.name}</p>
+                          </div>
                         )}
                         {p.language_of_instruction && (
-                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{p.language_of_instruction}</span>
+                          <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p class="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Language</p>
+                            <p class="mt-1 text-sm font-medium text-slate-900">{p.language_of_instruction}</p>
+                          </div>
                         )}
                         {tuition && (
-                          <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{tuition}</span>
+                          <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p class="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Tuition</p>
+                            <p class="mt-1 text-sm font-medium text-slate-900">{tuition}</p>
+                          </div>
                         )}
                       </div>
+                      {studyDetails && (
+                        <p class="mt-3 text-xs text-slate-500">Study format: {studyDetails}</p>
+                      )}
 
                       {reasons.length > 0 && (
-                        <div class="mb-3">
+                        <div class="mt-4">
                           <h2 class="text-sm font-semibold text-gray-900 mb-1">Why it fits</h2>
                           <ul class="list-disc pl-5 text-sm text-gray-700 space-y-0.5">
                             {reasons.map(reason => <li>{reason}</li>)}
@@ -756,7 +821,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                       )}
 
                       {warnings.length > 0 && (
-                        <div class="mb-3">
+                        <div class="mt-4">
                           <h2 class="text-sm font-semibold text-gray-900 mb-1">Things to verify</h2>
                           <ul class="list-disc pl-5 text-sm text-gray-600 space-y-0.5">
                             {warnings.map(warning => <li>{warning}</li>)}
@@ -765,17 +830,13 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                       )}
                     </div>
 
-                    <div class="flex w-full shrink-0 flex-col gap-3 lg:w-[220px]">
-                      <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Quick read</p>
-                        <p class="mt-1 text-sm text-slate-700">
-                          {warnings.length > 0
-                            ? 'Good shortlist candidate, but verify the flagged details before applying.'
-                            : 'A cleaner shortlist option based on your saved preferences.'}
-                        </p>
-                      </div>
-
-                      <div class="flex flex-col gap-2">
+                    <div class="flex w-full shrink-0 flex-col gap-2 lg:w-[230px]">
+                      <p class="text-xs text-slate-500">
+                        {warnings.length > 0
+                          ? 'Promising shortlist option. Check the flagged details before you save or apply.'
+                          : 'A cleaner shortlist option based on your saved preferences.'}
+                      </p>
+                      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
                         <a
                           href={`/programs/${p.slug}`}
                           class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -791,13 +852,17 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                               : 'text-ink-secondary bg-surface border-edge hover:border-[#cbd5e1] hover:bg-[#f8fafc]',
                           ].join(' ')}
                           aria-pressed={savedProgramIds.has(p.id) ? 'true' : 'false'}
-                          aria-label={savedProgramIds.has(p.id) ? 'Remove from saved programs' : 'Save program'}
+                          aria-label={savedProgramIds.has(p.id) ? 'Remove from shortlist' : 'Save to shortlist'}
                           title={user ? undefined : 'Sign in to save programs'}
                           data-save-program-button={p.id}
                           data-program-id={p.id}
                           data-saved={savedProgramIds.has(p.id) ? 'true' : 'false'}
                           data-save-authenticated={user ? 'true' : 'false'}
                           data-save-login-href={saveLoginHref}
+                          data-save-label-idle="Save to shortlist"
+                          data-save-label-active="Saved to shortlist"
+                          data-save-aria-idle="Save to shortlist"
+                          data-save-aria-active="Remove from shortlist"
                         >
                           <svg
                             class="flex-none"
@@ -813,11 +878,11 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                           >
                             <path d="M0.75 0.75h7.5v10.5l-3.75-2.7-3.75 2.7V0.75z"/>
                           </svg>
-                          <span data-save-label>{savedProgramIds.has(p.id) ? 'Saved' : 'Save'}</span>
+                          <span data-save-label>{savedProgramIds.has(p.id) ? 'Saved to shortlist' : 'Save to shortlist'}</span>
                         </button>
-                        {savedResultId && (
+                        {advisorHref && (
                           <a
-                            href={`/fit-finder/results/${savedResultId}#ai-advisor`}
+                            href={advisorHref}
                             class="inline-flex items-center justify-center rounded-full border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
                           >
                             Ask AI
@@ -826,7 +891,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
                       </div>
 
                       {p.official_url && (
-                        <a href={p.official_url} target="_blank" rel="noopener noreferrer" class="text-sm text-blue-600 hover:underline">
+                        <a href={p.official_url} target="_blank" rel="noopener noreferrer" class="text-xs font-medium text-blue-600 hover:underline">
                           Official program page
                         </a>
                       )}
@@ -858,7 +923,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
 
   <script>
     // Async AI summary loader. Fetches the summary once after rule-based matches
-    // are already on screen. Renders with textContent only — never innerHTML.
+    // are already on screen. Renders with textContent only.
     // No automatic retry loop: a single fetch per page load.
     const card = document.getElementById('ai-summary-card')
     if (card && card.getAttribute('data-pending') === 'true') {
@@ -887,7 +952,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
           return p
         })
         if (nodes.length === 0) {
-          showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
+          showText('AI overview is unavailable right now. Your saved result and rule-based matches are still available.')
           return
         }
         body.replaceChildren(...nodes)
@@ -904,11 +969,11 @@ const aiCardPending = showAISummaryCard && !aiExplanation
             if (res.ok && data && data.ok && typeof data.ai_explanation === 'string') {
               render(data.ai_explanation)
             } else {
-              showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
+              showText('AI overview is unavailable right now. Your saved result and rule-based matches are still available.')
             }
         })
           .catch(() => {
-            showText('AI summary is unavailable right now. Your rule-based matches are still shown.')
+            showText('AI overview is unavailable right now. Your saved result and rule-based matches are still available.')
           })
           .finally(() => {
             card.setAttribute('data-pending', 'done')
@@ -918,6 +983,7 @@ const aiCardPending = showAISummaryCard && !aiExplanation
 
     const matchList = document.querySelector('[data-match-list]')
     const showMoreBtn = document.querySelector('[data-show-more-matches]')
+    const visibleSummary = document.querySelector('[data-visible-match-summary]')
     if (matchList && showMoreBtn) {
       const cards = Array.from(matchList.querySelectorAll('[data-match-card]'))
       const initialCount = Number(matchList.getAttribute('data-initial-count') || '6')
@@ -928,6 +994,12 @@ const aiCardPending = showAISummaryCard && !aiExplanation
         cards.forEach((card, index) => {
           card.style.display = index < visibleCount ? '' : 'none'
         })
+
+        if (visibleSummary) {
+          visibleSummary.textContent = visibleCount >= cards.length
+            ? `Showing all ${cards.length} matches.`
+            : `Showing ${Math.min(visibleCount, cards.length)} of ${cards.length} matches.`
+        }
 
         if (visibleCount >= cards.length) {
           showMoreBtn.style.display = 'none'

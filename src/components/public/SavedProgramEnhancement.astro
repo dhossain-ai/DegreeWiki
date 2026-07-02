@@ -5,10 +5,26 @@
 
     if (buttons.length === 0) return
 
+    function getIdleLabel(button) {
+      return button.dataset.saveLabelIdle || 'Save'
+    }
+
+    function getActiveLabel(button) {
+      return button.dataset.saveLabelActive || 'Saved'
+    }
+
+    function getIdleAriaLabel(button) {
+      return button.dataset.saveAriaIdle || 'Save program'
+    }
+
+    function getActiveAriaLabel(button) {
+      return button.dataset.saveAriaActive || 'Remove from saved programs'
+    }
+
     function setSavedState(button, saved) {
       button.dataset.saved = saved ? 'true' : 'false'
       button.setAttribute('aria-pressed', saved ? 'true' : 'false')
-      button.setAttribute('aria-label', saved ? 'Remove from saved programs' : 'Save program')
+      button.setAttribute('aria-label', saved ? getActiveAriaLabel(button) : getIdleAriaLabel(button))
       button.classList.toggle('text-primary', saved)
       button.classList.toggle('bg-primary-surface', saved)
       button.classList.toggle('border-primary', saved)
@@ -20,7 +36,7 @@
       if (icon) icon.setAttribute('fill', saved ? 'currentColor' : 'none')
 
       const label = button.querySelector('[data-save-label]')
-      if (label) label.textContent = saved ? 'Saved' : 'Save'
+      if (label) label.textContent = saved ? getActiveLabel(button) : getIdleLabel(button)
     }
 
     function setBusy(button, busy) {
@@ -36,7 +52,7 @@
       const saved = button.dataset.saved === 'true'
       label.textContent = message
       window.setTimeout(() => {
-        label.textContent = saved ? 'Saved' : 'Save'
+        label.textContent = saved ? getActiveLabel(button) : getIdleLabel(button)
       }, 1800)
     }
 
