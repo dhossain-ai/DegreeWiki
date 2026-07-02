@@ -154,7 +154,7 @@ const latestResultHasAISummary = !!latestResult?.ai_explanation?.trim()
 const latestPreviewLocation = latestPreview
   ? [latestPreview.countryName, latestPreview.cityName].filter(Boolean).join(', ')
   : ''
-const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI about your latest result'
+const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI about latest result'
 ---
 <PublicLayout title="Student Dashboard — DegreeWiki" noindex={true}>
   <div class="max-w-5xl mx-auto px-4 py-10">
@@ -165,9 +165,9 @@ const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI abo
           Signed in as <span class="text-gray-700">{user.email}</span>
         </p>
       )}
-      <p class="text-sm text-gray-600">
-        Manage your Fit Finder profile, saved results, and DegreeWiki AI advisor.
-      </p>
+        <p class="text-sm text-gray-600">
+          Manage your Fit Finder profile, saved results, and the AI advisor attached to saved Fit Finder results.
+        </p>
     </div>
 
     <section class="mb-8">
@@ -319,7 +319,7 @@ const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI abo
               </a>
               {latestResultIsUsable && (
                 <a href={latestResultUrl} class="px-3 py-1.5 text-sm text-purple-700 border border-purple-200 rounded-md hover:bg-purple-50">
-                  {hasConversationHistory ? 'Continue AI chat' : 'Open AI advisor'}
+                  {hasConversationHistory ? 'Continue AI chat' : 'Ask AI about latest result'}
                 </a>
               )}
             </div>
