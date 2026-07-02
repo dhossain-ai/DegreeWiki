@@ -23,6 +23,7 @@ type LookupOption = {
 type Values = {
   current_country_id: string
   target_degree_level_id: string
+  budget_preference: string
   budget_min: string
   budget_max: string
   budget_currency: string
@@ -39,9 +40,10 @@ type Values = {
 const emptyValues = (): Values => ({
   current_country_id: '',
   target_degree_level_id: '',
+  budget_preference: '',
   budget_min: '',
   budget_max: '',
-  budget_currency: '',
+  budget_currency: 'EUR',
   gpa: '',
   english_score_type: '',
   english_score: '',
@@ -69,6 +71,7 @@ function fromForm(form: FormData): Values {
   return {
     current_country_id: g('current_country_id'),
     target_degree_level_id: g('target_degree_level_id'),
+    budget_preference: g('budget_preference'),
     budget_min: g('budget_min'),
     budget_max: g('budget_max'),
     budget_currency: g('budget_currency').toUpperCase(),
@@ -180,6 +183,21 @@ function validateNumber(value: string, label: string, min: number): string | nul
   return null
 }
 
+function inferBudgetPreference(
+  minValue: number | null | undefined,
+  maxValue: number | null | undefined,
+): string {
+  const min = minValue == null ? null : Number(minValue)
+  const max = maxValue == null ? null : Number(maxValue)
+
+  if (min == null && max == null) return ''
+  if (min === null && max === 3000) return 'under_3000'
+  if (min === 3000 && max === 6000) return '3000_6000'
+  if (min === 6000 && max === 10000) return '6000_10000'
+  if (min === 10000 && max === null) return '10000_plus'
+  return 'custom'
+}
+
 function validateValues(
   values: Values,
   originCountries: LookupOption[],
@@ -208,13 +226,23 @@ function validateValues(
     }
   }
 
+  if (!values.target_degree_level_id) {
+    errors.target_degree_level_id = 'Choose the degree level you want to study.'
+  }
+
   const badTargetCountry = normalized.invalid.student_profile_countries[0]
     ?? values.student_profile_countries.find(id => !destinationCountryIds.has(id))
   if (badTargetCountry) errors.student_profile_countries = 'Select valid target countries.'
+  if (values.student_profile_countries.length === 0) {
+    errors.student_profile_countries = 'Choose at least one destination.'
+  }
 
   const badSubject = normalized.invalid.student_profile_subjects[0]
     ?? values.student_profile_subjects.find(id => !subjectIds.has(id))
   if (badSubject) errors.student_profile_subjects = 'Select valid subjects.'
+  if (values.student_profile_subjects.length === 0) {
+    errors.student_profile_subjects = 'Choose at least one subject.'
+  }
 
   const budgetMinErr = validateNumber(values.budget_min, 'Minimum budget', 0)
   if (budgetMinErr) errors.budget_min = budgetMinErr
@@ -226,6 +254,17 @@ function validateValues(
     if (Number(values.budget_max) < Number(values.budget_min)) {
       errors.budget_max = 'Maximum budget must be greater than or equal to minimum budget.'
     }
+  }
+
+  const budgetPreference = values.budget_preference
+  const hasBudgetChoice = budgetPreference.length > 0 || values.budget_max.length > 0 || values.budget_min.length > 0
+  if (!hasBudgetChoice) {
+    errors.budget_max = 'Choose a budget option to continue.'
+  } else if (budgetPreference !== 'not_sure' && !values.budget_max) {
+    errors.budget_max = 'Add a budget so DegreeWiki can narrow your shortlist.'
+  }
+  if (budgetPreference !== 'not_sure' && (values.budget_min || values.budget_max) && !values.budget_currency) {
+    errors.budget_currency = 'Choose a budget currency.'
   }
 
   const gpaErr = validateNumber(values.gpa, 'GPA', 0)
@@ -288,6 +327,7 @@ let values = emptyValues()
 let errors: FormErrors = {}
 let serverError = ''
 let authMessage = ''
+let savedPreferencesLoaded = false
 
 if (Astro.request.method === 'GET' && user) {
   const { data: profile, error: profileError } = await supabase
@@ -323,9 +363,10 @@ if (Astro.request.method === 'GET' && user) {
     values = {
       current_country_id: profile.current_country_id ?? '',
       target_degree_level_id: profile.target_degree_level_id ?? '',
+      budget_preference: inferBudgetPreference(profile.budget_min, profile.budget_max),
       budget_min: profile.budget_min == null ? '' : String(profile.budget_min),
       budget_max: profile.budget_max == null ? '' : String(profile.budget_max),
-      budget_currency: profile.budget_currency ?? '',
+      budget_currency: profile.budget_currency ?? 'EUR',
       gpa: profile.gpa == null ? '' : String(profile.gpa),
       english_score_type: profile.english_score_type ?? '',
       english_score: profile.english_score == null ? '' : String(profile.english_score),
@@ -335,6 +376,22 @@ if (Astro.request.method === 'GET' && user) {
       student_profile_subjects: (subjectRows ?? []).map((row: any) => row.subject_id).filter(Boolean),
       student_profile_countries: (countryRows ?? []).map((row: any) => row.country_id).filter(Boolean),
     }
+
+    savedPreferencesLoaded = Boolean(
+      values.current_country_id
+      || values.target_degree_level_id
+      || values.budget_preference
+      || values.budget_min
+      || values.budget_max
+      || values.gpa
+      || values.english_score_type
+      || values.english_score
+      || values.work_experience_years
+      || values.study_start_preference
+      || values.additional_notes
+      || values.student_profile_subjects.length > 0
+      || values.student_profile_countries.length > 0,
+    )
   }
 }
 
@@ -445,189 +502,718 @@ const selectClass = inputClass + ' bg-white'
 const labelClass = 'block text-sm font-medium text-gray-700 mb-1'
 const errorClass = 'mt-1 text-xs text-red-600'
 const hintClass = 'mt-1 text-xs text-gray-500'
-const sectionClass = 'border border-gray-200 rounded-lg p-4 bg-white'
-const sectionHeadClass = 'text-base font-semibold text-gray-900 mb-4'
 const isSelected = (items: string[], id: string) => items.includes(id)
+const currentBudgetMode = values.budget_preference || ((values.budget_min || values.budget_max) ? 'custom' : '')
+
+let initialWizardStep = 0
+if (
+  errors.gpa ||
+  errors.english_score_type ||
+  errors.english_score ||
+  errors.work_experience_years ||
+  errors.study_start_preference ||
+  errors.additional_notes ||
+  errors.current_country_id
+) {
+  initialWizardStep = 4
+} else if (errors.budget_min || errors.budget_max || errors.budget_currency) {
+  initialWizardStep = 3
+} else if (errors.student_profile_countries) {
+  initialWizardStep = 2
+} else if (errors.student_profile_subjects) {
+  initialWizardStep = 1
+}
 ---
 <PublicLayout
   title="Fit Finder — DegreeWiki"
-  description="Save study preferences for future DegreeWiki program matching."
+  description="Answer a few quick questions and DegreeWiki will match you with programs based on your goals, budget, and preferences."
   noindex={true}
   canonical={SITE_URL + '/fit-finder'}
 >
-  <div class="max-w-5xl mx-auto px-4 py-8">
-    <div class="max-w-2xl">
-      <h1 class="text-2xl font-bold text-gray-900 mb-2">Fit Finder</h1>
-      <p class="text-sm text-gray-600 mb-4">
-        Save your study preferences to see possible program matches based on your inputs.
-      </p>
-      <p class="text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-md px-3 py-2 mb-2">
-        DegreeWiki currently has the strongest starter data for Finland master's programmes. Broadening destinations will expand matches as more data is added.
-      </p>
-    </div>
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div class="min-w-0">
+        <div class="rounded-[28px] border border-slate-200 bg-[linear-gradient(135deg,#eff6ff_0%,#ffffff_55%,#f8fafc_100%)] p-6 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700 mb-2">Fit Finder</p>
+          <h1 class="text-3xl font-bold text-gray-900 mb-3">Build your study shortlist</h1>
+          <p class="max-w-2xl text-sm leading-6 text-gray-600">
+            Answer a few quick questions and DegreeWiki will match you with programs based on your goals, budget, and preferences.
+          </p>
+        </div>
 
-    {authMessage && (
-      <div class="max-w-2xl mb-5 px-4 py-3 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-900">
-        {authMessage}{' '}
-        <a href="/login?redirect=/fit-finder" class="font-medium underline">Sign in to continue</a>.
-      </div>
-    )}
+        {authMessage && (
+          <div class="mt-5 max-w-3xl px-4 py-3 rounded-xl bg-yellow-50 border border-yellow-200 text-sm text-yellow-900">
+            {authMessage}{' '}
+            <a href="/login?redirect=/fit-finder" class="font-medium underline">Sign in to continue</a>.
+          </div>
+        )}
 
-    {serverError && (
-      <div class="max-w-2xl mb-5 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
-        {serverError}
-      </div>
-    )}
+        {serverError && (
+          <div class="mt-5 max-w-3xl px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+            {serverError}
+          </div>
+        )}
 
-    <form method="post" action="/fit-finder" class="max-w-2xl space-y-5">
-      <section class={sectionClass}>
-        <h2 class={sectionHeadClass}>Study preferences</h2>
-        <div class="space-y-4">
-          <div>
-            <label for="current_country_id" class={labelClass}>Where are you from?</label>
-            <select id="current_country_id" name="current_country_id" class={selectClass}>
-              <option value="">Select a country</option>
-              {originCountries.map(country => (
-                <option value={country.id} selected={values.current_country_id === country.id}>{country.name}</option>
-              ))}
-            </select>
-            <p class={hintClass}>Your home country or the country where you currently live.</p>
-            {errors.current_country_id && <p class={errorClass}>{errors.current_country_id}</p>}
+        {savedPreferencesLoaded && (
+          <div class="mt-5 max-w-3xl px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-sm text-blue-900">
+            Your saved preferences are loaded. Update anything, then run Fit Finder to create a new match result.
+          </div>
+        )}
+
+        <form
+          method="post"
+          action="/fit-finder"
+          class="mt-6 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
+          data-fit-finder-wizard
+          data-initial-step={String(initialWizardStep)}
+        >
+          <input type="hidden" id="budget_preference" name="budget_preference" value={values.budget_preference} />
+          <input type="hidden" id="english_score_type" name="english_score_type" value={values.english_score_type} />
+
+          <div class="mb-6 flex flex-wrap gap-2" data-step-tabs>
+            {['Study goal', 'Subject', 'Destinations', 'Budget', 'Optional details'].map((stepLabel, index) => (
+              <button
+                type="button"
+                class={[
+                  'rounded-full border px-3 py-1.5 text-sm transition-all duration-200 ease-out motion-reduce:transition-none active:scale-[0.98]',
+                  index === initialWizardStep
+                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-slate-50 text-slate-500',
+                ].join(' ')}
+                data-step-tab
+                data-step-index={String(index)}
+              >
+                <span class="font-medium">{index + 1}.</span> {stepLabel}
+              </button>
+            ))}
           </div>
 
-          <div>
-            <label for="target_degree_level_id" class={labelClass}>Degree level you want to study</label>
-            <select id="target_degree_level_id" name="target_degree_level_id" class={selectClass}>
-              <option value="">Select a degree level</option>
+          <section data-step-panel data-step-index="0" class={initialWizardStep === 0 ? '' : 'hidden'}>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700 mb-2">Step 1</p>
+            <h2 class="text-2xl font-semibold text-gray-900 mb-2">What do you want to study next?</h2>
+            <p class="text-sm text-gray-600 mb-5">
+              Start with the qualification you are aiming for. You can add academic background later.
+            </p>
+
+            <div class="grid gap-3 sm:grid-cols-2">
               {degreeLevels.map(level => (
-                <option value={level.id} selected={values.target_degree_level_id === level.id}>{level.name}</option>
-              ))}
-            </select>
-            <p class={hintClass}>Choose the qualification you are aiming for.</p>
-            {errors.target_degree_level_id && <p class={errorClass}>{errors.target_degree_level_id}</p>}
-          </div>
-
-          <div>
-            <p class={labelClass}>Countries you want to study in</p>
-            <div class="max-h-52 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white">
-              {destinationCountries.map(country => (
-                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                <label
+                  class={[
+                    'cursor-pointer rounded-2xl border p-4 transition-all duration-200 ease-out motion-reduce:transition-none',
+                    values.target_degree_level_id === level.id
+                      ? 'border-blue-300 bg-blue-50 shadow-sm'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
+                  ].join(' ')}
+                >
                   <input
-                    type="checkbox"
-                    name="student_profile_countries"
-                    value={country.id}
-                    checked={isSelected(values.student_profile_countries, country.id)}
-                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                    type="radio"
+                    name="target_degree_level_id"
+                    value={level.id}
+                    checked={values.target_degree_level_id === level.id}
+                    class="sr-only"
+                    data-degree-option
                   />
-                  <span class="text-sm text-gray-800">{country.name}</span>
+                  <span class="block text-base font-semibold text-gray-900">{level.name}</span>
+                  <span class="mt-1 block text-sm text-gray-600">
+                    Use this as the main filter for your shortlist.
+                  </span>
                 </label>
               ))}
             </div>
-            <p class={hintClass}>Select every destination you are open to.</p>
-            {errors.student_profile_countries && <p class={errorClass}>{errors.student_profile_countries}</p>}
-          </div>
+            {errors.target_degree_level_id && <p class={errorClass}>{errors.target_degree_level_id}</p>}
+          </section>
 
-          <div>
-            <p class={labelClass}>What do you want to study?</p>
-            <div class="max-h-56 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white">
+          <section data-step-panel data-step-index="1" class={initialWizardStep === 1 ? '' : 'hidden'}>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700 mb-2">Step 2</p>
+            <h2 class="text-2xl font-semibold text-gray-900 mb-2">Which subject fits your plan?</h2>
+            <p class="text-sm text-gray-600 mb-5">
+              Search and pick one or more subject areas. We’ll use them to shape your shortlist.
+            </p>
+            <p class="mb-4 text-sm font-medium text-slate-500" data-subject-count>
+              {values.student_profile_subjects.length} {values.student_profile_subjects.length === 1 ? 'subject' : 'subjects'} selected
+            </p>
+
+            <div class="mb-4">
+              <label for="subject-search" class={labelClass}>Search subjects</label>
+              <input
+                id="subject-search"
+                type="search"
+                class={inputClass}
+                placeholder="Type a subject like Computer Science or Business"
+                data-subject-search
+              />
+            </div>
+
+            <div class="grid gap-2 sm:grid-cols-2" data-subject-grid>
               {subjects.map(subject => (
-                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                <label
+                  class={[
+                    'cursor-pointer rounded-2xl border px-4 py-3 text-sm transition-all duration-200 ease-out motion-reduce:transition-none',
+                    isSelected(values.student_profile_subjects, subject.id)
+                      ? 'border-blue-300 bg-blue-50 text-blue-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  ].join(' ')}
+                  data-subject-option
+                  data-subject-label={subject.name.toLowerCase()}
+                >
                   <input
                     type="checkbox"
                     name="student_profile_subjects"
                     value={subject.id}
                     checked={isSelected(values.student_profile_subjects, subject.id)}
-                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                    class="sr-only"
                   />
-                  <span class="text-sm text-gray-800">{subject.name}</span>
+                  <span class="font-medium">{subject.name}</span>
                 </label>
               ))}
             </div>
-            <p class={hintClass}>Select one or more subject areas.</p>
             {errors.student_profile_subjects && <p class={errorClass}>{errors.student_profile_subjects}</p>}
-          </div>
-        </div>
-      </section>
+          </section>
 
-      <section class={sectionClass}>
-        <h2 class={sectionHeadClass}>Budget</h2>
-        <p class={hintClass + ' mb-3'}>Per academic year, in your chosen currency.</p>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label for="budget_min" class={labelClass}>Minimum budget</label>
-            <input id="budget_min" name="budget_min" type="number" min="0" step="any" value={values.budget_min} class={inputClass} />
-            {errors.budget_min && <p class={errorClass}>{errors.budget_min}</p>}
-          </div>
-          <div>
-            <label for="budget_max" class={labelClass}>Maximum budget</label>
-            <input id="budget_max" name="budget_max" type="number" min="0" step="any" value={values.budget_max} class={inputClass} />
-            {errors.budget_max && <p class={errorClass}>{errors.budget_max}</p>}
-          </div>
-          <div>
-            <label for="budget_currency" class={labelClass}>Currency</label>
-            <input id="budget_currency" name="budget_currency" type="text" maxlength={SHORT_TEXT_MAX} value={values.budget_currency} placeholder="USD" class={inputClass + ' font-mono'} />
-            {errors.budget_currency && <p class={errorClass}>{errors.budget_currency}</p>}
-          </div>
-        </div>
-      </section>
+          <section data-step-panel data-step-index="2" class={initialWizardStep === 2 ? '' : 'hidden'}>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700 mb-2">Step 3</p>
+            <h2 class="text-2xl font-semibold text-gray-900 mb-2">Where would you like to study?</h2>
+            <p class="text-sm text-gray-600 mb-5">
+              Pick every destination you would seriously consider. The more open you are, the broader your shortlist can be.
+            </p>
+            <p class="mb-4 text-sm font-medium text-slate-500" data-destination-count>
+              {values.student_profile_countries.length} {values.student_profile_countries.length === 1 ? 'destination' : 'destinations'} selected
+            </p>
 
-      <section class={sectionClass}>
-        <h2 class={sectionHeadClass}>Academic background</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label for="gpa" class={labelClass}>GPA</label>
-            <input id="gpa" name="gpa" type="number" min="0" step="any" value={values.gpa} class={inputClass} />
-            {errors.gpa && <p class={errorClass}>{errors.gpa}</p>}
-          </div>
-          <div>
-            <label for="work_experience_years" class={labelClass}>Work experience years</label>
-            <input id="work_experience_years" name="work_experience_years" type="number" min="0" step="1" value={values.work_experience_years} class={inputClass} />
-            {errors.work_experience_years && <p class={errorClass}>{errors.work_experience_years}</p>}
-          </div>
-          <div>
-            <label for="english_score_type" class={labelClass}>English score type</label>
-            <input id="english_score_type" name="english_score_type" type="text" maxlength={SHORT_TEXT_MAX} value={values.english_score_type} placeholder="IELTS, TOEFL, PTE" class={inputClass} />
-            {errors.english_score_type && <p class={errorClass}>{errors.english_score_type}</p>}
-          </div>
-          <div>
-            <label for="english_score" class={labelClass}>English score</label>
-            <input id="english_score" name="english_score" type="number" min="0" step="any" value={values.english_score} class={inputClass} />
-            <p class={hintClass}>For example: IELTS 6.5, TOEFL 90, or PTE 62.</p>
-            {errors.english_score && <p class={errorClass}>{errors.english_score}</p>}
-          </div>
-        </div>
-      </section>
+            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {destinationCountries.map(country => (
+                <label
+                  class={[
+                    'cursor-pointer rounded-2xl border px-4 py-3 text-sm transition-all duration-200 ease-out motion-reduce:transition-none',
+                    isSelected(values.student_profile_countries, country.id)
+                      ? 'border-blue-300 bg-blue-50 text-blue-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  ].join(' ')}
+                >
+                  <input
+                    type="checkbox"
+                    name="student_profile_countries"
+                    value={country.id}
+                    checked={isSelected(values.student_profile_countries, country.id)}
+                    class="sr-only"
+                  />
+                  <span class="font-medium">{country.name}</span>
+                </label>
+              ))}
+            </div>
+            <p class={hintClass}>Open to suggestions? Pick a few destinations to widen the shortlist.</p>
+            {errors.student_profile_countries && <p class={errorClass}>{errors.student_profile_countries}</p>}
+          </section>
 
-      <section class={sectionClass}>
-        <h2 class={sectionHeadClass}>Timing and notes</h2>
-        <div class="space-y-4">
-          <div>
-            <label for="study_start_preference" class={labelClass}>Study start preference</label>
-            <input id="study_start_preference" name="study_start_preference" type="text" maxlength={START_PREF_MAX} value={values.study_start_preference} placeholder="Sep 2026, Spring intake, Anytime" class={inputClass} />
-            {errors.study_start_preference && <p class={errorClass}>{errors.study_start_preference}</p>}
-          </div>
-          <div>
-            <label for="additional_notes" class={labelClass}>Additional notes</label>
-            <textarea id="additional_notes" name="additional_notes" rows="5" maxlength={NOTES_MAX} class={inputClass}>{values.additional_notes}</textarea>
-            <p class={hintClass}>Do not include documents, passport details, bank information, or other sensitive personal data.</p>
-            {errors.additional_notes && <p class={errorClass}>{errors.additional_notes}</p>}
-          </div>
-        </div>
-      </section>
+          <section data-step-panel data-step-index="3" class={initialWizardStep === 3 ? '' : 'hidden'}>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700 mb-2">Step 4</p>
+            <h2 class="text-2xl font-semibold text-gray-900 mb-2">What budget feels realistic?</h2>
+            <p class="text-sm text-gray-600 mb-5">
+              Choose a quick budget range or switch to a custom amount. We default to EUR for the current destination mix.
+            </p>
 
-      <div class="flex flex-wrap items-center gap-3">
-        <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-          Save preferences
-        </button>
-        <a href="/programs" class="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
-          Browse programs
-        </a>
-        {user && (
-          <a href="/fit-finder/results" class="text-sm text-gray-500 hover:text-gray-700">
-            View saved results →
-          </a>
-        )}
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-budget-presets>
+              {[
+                { key: 'under_3000', label: 'Under €3,000', min: '', max: '3000', currency: 'EUR' },
+                { key: '3000_6000', label: '€3,000–€6,000', min: '3000', max: '6000', currency: 'EUR' },
+                { key: '6000_10000', label: '€6,000–€10,000', min: '6000', max: '10000', currency: 'EUR' },
+                { key: '10000_plus', label: '€10,000+', min: '10000', max: '', currency: 'EUR' },
+                { key: 'not_sure', label: 'Not sure', min: '', max: '', currency: '' },
+                { key: 'custom', label: 'Custom budget', min: values.budget_min, max: values.budget_max, currency: values.budget_currency || 'EUR' },
+              ].map(option => (
+                <button
+                  type="button"
+                  class={[
+                    'rounded-2xl border p-4 text-left transition-all duration-200 ease-out motion-reduce:transition-none active:scale-[0.99]',
+                    currentBudgetMode === option.key
+                      ? 'border-blue-300 bg-blue-50 shadow-sm'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
+                  ].join(' ')}
+                  data-budget-choice={option.key}
+                  data-budget-min={option.min}
+                  data-budget-max={option.max}
+                  data-budget-currency={option.currency}
+                >
+                  <span class="block text-base font-semibold text-gray-900">{option.label}</span>
+                  <span class="mt-1 block text-sm text-gray-600">
+                    {option.key === 'not_sure'
+                      ? 'Continue without a budget filter for now.'
+                      : option.key === 'custom'
+                        ? 'Type your own minimum and maximum.'
+                        : 'Use this as a quick yearly tuition guide.'}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div
+              class={['mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4', currentBudgetMode === 'custom' ? '' : 'hidden'].join(' ')}
+              data-budget-custom-panel
+            >
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label for="budget_min" class={labelClass}>Minimum budget</label>
+                  <input id="budget_min" name="budget_min" type="number" min="0" step="any" value={values.budget_min} class={inputClass} />
+                  {errors.budget_min && <p class={errorClass}>{errors.budget_min}</p>}
+                </div>
+                <div>
+                  <label for="budget_max" class={labelClass}>Maximum budget</label>
+                  <input id="budget_max" name="budget_max" type="number" min="0" step="any" value={values.budget_max} class={inputClass} />
+                  {errors.budget_max && <p class={errorClass}>{errors.budget_max}</p>}
+                </div>
+                <div>
+                  <label for="budget_currency" class={labelClass}>Currency</label>
+                  <input id="budget_currency" name="budget_currency" type="text" maxlength={SHORT_TEXT_MAX} value={values.budget_currency} placeholder="EUR" class={inputClass + ' font-mono'} />
+                  {errors.budget_currency && <p class={errorClass}>{errors.budget_currency}</p>}
+                </div>
+              </div>
+            </div>
+
+            {(errors.budget_max || errors.budget_currency) && currentBudgetMode !== 'custom' && (
+              <p class={errorClass}>{errors.budget_max || errors.budget_currency}</p>
+            )}
+          </section>
+
+          <section data-step-panel data-step-index="4" class={initialWizardStep === 4 ? '' : 'hidden'}>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700 mb-2">Step 5</p>
+            <h2 class="text-2xl font-semibold text-gray-900 mb-2">Optional details that can add context</h2>
+            <p class="text-sm text-gray-600 mb-5">
+              These are optional. Add them only if they help you explain your situation more clearly.
+            </p>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label for="current_country_id" class={labelClass}>Where are you currently based?</label>
+                <select id="current_country_id" name="current_country_id" class={selectClass}>
+                  <option value="">Prefer not to say</option>
+                  {originCountries.map(country => (
+                    <option value={country.id} selected={values.current_country_id === country.id}>{country.name}</option>
+                  ))}
+                </select>
+                <p class={hintClass}>Optional, but helpful for context.</p>
+                {errors.current_country_id && <p class={errorClass}>{errors.current_country_id}</p>}
+              </div>
+
+              <div>
+                <label for="gpa" class={labelClass}>GPA</label>
+                <input id="gpa" name="gpa" type="number" min="0" step="any" value={values.gpa} class={inputClass} placeholder="Optional" />
+                {errors.gpa && <p class={errorClass}>{errors.gpa}</p>}
+              </div>
+
+              <div>
+                <label for="english_score_type_select" class={labelClass}>English test</label>
+                <select id="english_score_type_select" class={selectClass} data-english-type-select>
+                  <option value="">Not adding this right now</option>
+                  <option value="IELTS" selected={values.english_score_type === 'IELTS'}>IELTS</option>
+                  <option value="TOEFL" selected={values.english_score_type === 'TOEFL'}>TOEFL</option>
+                  <option value="PTE" selected={values.english_score_type === 'PTE'}>PTE</option>
+                  <option value="Duolingo" selected={values.english_score_type === 'Duolingo'}>Duolingo</option>
+                  <option value="Other" selected={values.english_score_type !== '' && !['IELTS', 'TOEFL', 'PTE', 'Duolingo'].includes(values.english_score_type)}>Other</option>
+                </select>
+                <div class={['mt-3', values.english_score_type !== '' && !['IELTS', 'TOEFL', 'PTE', 'Duolingo'].includes(values.english_score_type) ? '' : 'hidden'].join(' ')} data-english-other-wrap>
+                  <input
+                    id="english_score_type_other"
+                    type="text"
+                    maxlength={SHORT_TEXT_MAX}
+                    value={values.english_score_type !== '' && !['IELTS', 'TOEFL', 'PTE', 'Duolingo'].includes(values.english_score_type) ? values.english_score_type : ''}
+                    class={inputClass}
+                    placeholder="Enter test name"
+                    data-english-other-input
+                  />
+                </div>
+                {errors.english_score_type && <p class={errorClass}>{errors.english_score_type}</p>}
+              </div>
+
+              <div class={values.english_score_type ? '' : 'hidden'} data-english-score-wrap>
+                <label for="english_score" class={labelClass}>English score</label>
+                <input id="english_score" name="english_score" type="number" min="0" step="any" value={values.english_score} class={inputClass} placeholder="Optional" />
+                <p class={hintClass}>Example: IELTS 6.5, TOEFL 90, or PTE 62.</p>
+                {errors.english_score && <p class={errorClass}>{errors.english_score}</p>}
+              </div>
+
+              <div data-work-experience-wrap>
+                <label for="work_experience_years" class={labelClass}>Work experience</label>
+                <input id="work_experience_years" name="work_experience_years" type="number" min="0" step="1" value={values.work_experience_years} class={inputClass} placeholder="Optional" />
+                <p class={hintClass}>Most useful for master's and postgraduate plans.</p>
+                {errors.work_experience_years && <p class={errorClass}>{errors.work_experience_years}</p>}
+              </div>
+
+              <div>
+                <label for="study_start_preference" class={labelClass}>Preferred intake or start date</label>
+                <input id="study_start_preference" name="study_start_preference" type="text" maxlength={START_PREF_MAX} value={values.study_start_preference} placeholder="Sep 2026, Spring intake, Flexible" class={inputClass} />
+                {errors.study_start_preference && <p class={errorClass}>{errors.study_start_preference}</p>}
+              </div>
+            </div>
+
+            <div class="mt-4">
+              <label for="additional_notes" class={labelClass}>Anything else we should keep in mind?</label>
+              <textarea id="additional_notes" name="additional_notes" rows="4" maxlength={NOTES_MAX} class={inputClass}>{values.additional_notes}</textarea>
+              <p class={hintClass}>Keep it general. Skip documents, passport details, bank details, or anything highly sensitive.</p>
+              {errors.additional_notes && <p class={errorClass}>{errors.additional_notes}</p>}
+            </div>
+          </section>
+
+          <div class="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-all duration-200 ease-out hover:bg-slate-50 motion-reduce:transition-none active:scale-[0.98] disabled:opacity-50"
+                data-step-prev
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                class="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:bg-blue-700 motion-reduce:transition-none active:scale-[0.98]"
+                data-step-next
+              >
+                Next
+              </button>
+              <button
+                type="submit"
+                class="hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-all duration-200 ease-out hover:bg-slate-800 motion-reduce:transition-none active:scale-[0.98]"
+                data-step-submit
+              >
+                Save and see matches
+              </button>
+              <button
+                type="button"
+                class="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-500 transition-all duration-200 ease-out hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 motion-reduce:transition-none active:scale-[0.98]"
+                data-reset-wizard
+              >
+                Clear selections
+              </button>
+            </div>
+
+            <p class="hidden text-sm text-red-600" data-wizard-error aria-live="polite"></p>
+
+            <div class="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+              <a href="/programs" class="hover:text-slate-700">Browse programs</a>
+              {user && (
+                <a href="/fit-finder/results" class="hover:text-slate-700">
+                  View saved results →
+                </a>
+              )}
+            </div>
+          </div>
+        </form>
       </div>
-    </form>
+
+      <aside class="lg:sticky lg:top-24 h-fit rounded-[28px] border border-slate-200 bg-slate-50 p-5 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 mb-2">Fit Finder guide</p>
+        <h2 class="text-lg font-semibold text-slate-900 mb-3">How it works</h2>
+        <ul class="space-y-3 pl-5 text-sm text-slate-600 list-disc">
+          <li>Choose your study goal</li>
+          <li>Add destinations and budget</li>
+          <li>Get matched with real program data</li>
+        </ul>
+      </aside>
+    </div>
   </div>
+
+  <script define:vars={{ initialWizardStep }}>
+    const wizard = document.querySelector('[data-fit-finder-wizard]')
+    if (wizard) {
+      const panels = Array.from(wizard.querySelectorAll('[data-step-panel]'))
+      const tabs = Array.from(wizard.querySelectorAll('[data-step-tab]'))
+      const prevBtn = wizard.querySelector('[data-step-prev]')
+      const nextBtn = wizard.querySelector('[data-step-next]')
+      const submitBtn = wizard.querySelector('[data-step-submit]')
+      const budgetPreferenceInput = wizard.querySelector('#budget_preference')
+      const budgetMinInput = wizard.querySelector('#budget_min')
+      const budgetMaxInput = wizard.querySelector('#budget_max')
+      const budgetCurrencyInput = wizard.querySelector('#budget_currency')
+      const budgetCustomPanel = wizard.querySelector('[data-budget-custom-panel]')
+      const budgetButtons = Array.from(wizard.querySelectorAll('[data-budget-choice]'))
+      const subjectSearch = wizard.querySelector('[data-subject-search]')
+      const subjectOptions = Array.from(wizard.querySelectorAll('[data-subject-option]'))
+      const degreeOptions = Array.from(wizard.querySelectorAll('[data-degree-option]'))
+      const englishTypeSelect = wizard.querySelector('[data-english-type-select]')
+      const englishHiddenInput = wizard.querySelector('#english_score_type')
+      const englishOtherWrap = wizard.querySelector('[data-english-other-wrap]')
+      const englishOtherInput = wizard.querySelector('[data-english-other-input]')
+      const englishScoreWrap = wizard.querySelector('[data-english-score-wrap]')
+      const workExperienceWrap = wizard.querySelector('[data-work-experience-wrap]')
+      const subjectCount = wizard.querySelector('[data-subject-count]')
+      const destinationCount = wizard.querySelector('[data-destination-count]')
+      const resetBtn = wizard.querySelector('[data-reset-wizard]')
+      const wizardError = wizard.querySelector('[data-wizard-error]')
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      let currentStep = Number(initialWizardStep || 0)
+
+      const stepErrorMessage = (stepIndex) => {
+        if (stepIndex === 0) return 'Choose your target degree to continue.'
+        if (stepIndex === 1) return 'Pick at least one subject to continue.'
+        if (stepIndex === 2) return 'Choose at least one destination to continue.'
+        if (stepIndex === 3) return 'Choose a budget option, or use Not sure to continue.'
+        return ''
+      }
+
+      const setWizardError = (message) => {
+        if (!wizardError) return
+        wizardError.textContent = message
+        wizardError.classList.toggle('hidden', message.length === 0)
+      }
+
+      const formatCountLabel = (count, singular, plural) => `${count} ${count === 1 ? singular : plural} selected`
+
+      const updateSelectionCounts = () => {
+        const subjectsSelected = wizard.querySelectorAll('input[name="student_profile_subjects"]:checked').length
+        const destinationsSelected = wizard.querySelectorAll('input[name="student_profile_countries"]:checked').length
+        if (subjectCount) subjectCount.textContent = formatCountLabel(subjectsSelected, 'subject', 'subjects')
+        if (destinationCount) destinationCount.textContent = formatCountLabel(destinationsSelected, 'destination', 'destinations')
+      }
+
+      const syncSelectableCards = () => {
+        degreeOptions.forEach((option) => {
+          const label = option.closest('label')
+          if (!label) return
+          const active = option.checked
+          label.classList.toggle('border-blue-300', active)
+          label.classList.toggle('bg-blue-50', active)
+          label.classList.toggle('shadow-sm', active)
+          label.classList.toggle('border-slate-200', !active)
+          label.classList.toggle('bg-white', !active)
+        })
+
+        wizard.querySelectorAll('input[name="student_profile_subjects"]').forEach((option) => {
+          const label = option.closest('label')
+          if (!label) return
+          const active = option.checked
+          label.classList.toggle('border-blue-300', active)
+          label.classList.toggle('bg-blue-50', active)
+          label.classList.toggle('text-blue-900', active)
+          label.classList.toggle('border-slate-200', !active)
+          label.classList.toggle('bg-white', !active)
+          label.classList.toggle('text-slate-700', !active)
+        })
+
+        wizard.querySelectorAll('input[name="student_profile_countries"]').forEach((option) => {
+          const label = option.closest('label')
+          if (!label) return
+          const active = option.checked
+          label.classList.toggle('border-blue-300', active)
+          label.classList.toggle('bg-blue-50', active)
+          label.classList.toggle('text-blue-900', active)
+          label.classList.toggle('border-slate-200', !active)
+          label.classList.toggle('bg-white', !active)
+          label.classList.toggle('text-slate-700', !active)
+        })
+      }
+
+      const syncEnglishType = () => {
+        const selected = englishTypeSelect.value
+        const isOther = selected === 'Other'
+        englishOtherWrap.classList.toggle('hidden', !isOther)
+        if (isOther) {
+          englishHiddenInput.value = (englishOtherInput.value || '').trim()
+        } else {
+          englishHiddenInput.value = selected
+        }
+        englishScoreWrap.classList.toggle('hidden', englishHiddenInput.value.length === 0)
+      }
+
+      const syncDegreeOptionalState = () => {
+        const checked = degreeOptions.find(option => option.checked)
+        const label = checked ? checked.closest('label')?.textContent || '' : ''
+        const isBachelor = /bachelor/i.test(label)
+        workExperienceWrap.classList.toggle('hidden', isBachelor)
+      }
+
+      const updateBudgetUI = () => {
+        const mode = budgetPreferenceInput.value
+        budgetButtons.forEach((button) => {
+          const active = button.getAttribute('data-budget-choice') === mode
+          button.classList.toggle('border-blue-300', active)
+          button.classList.toggle('bg-blue-50', active)
+          button.classList.toggle('shadow-sm', active)
+          button.classList.toggle('border-slate-200', !active)
+          button.classList.toggle('bg-white', !active)
+        })
+        budgetCustomPanel.classList.toggle('hidden', mode !== 'custom')
+        if ((mode === 'custom' || (mode.length > 0 && mode !== 'not_sure')) && !budgetCurrencyInput.value) {
+          budgetCurrencyInput.value = 'EUR'
+        }
+      }
+
+      const setBudgetMode = (mode, min, max, currency) => {
+        budgetPreferenceInput.value = mode
+        if (mode === 'custom') {
+          if (!budgetCurrencyInput.value) budgetCurrencyInput.value = 'EUR'
+        } else {
+          budgetMinInput.value = min || ''
+          budgetMaxInput.value = max || ''
+          budgetCurrencyInput.value = currency || ''
+        }
+        updateBudgetUI()
+      }
+
+      const validateStep = (stepIndex) => {
+        if (stepIndex === 0) {
+          return !!wizard.querySelector('input[name="target_degree_level_id"]:checked')
+        }
+        if (stepIndex === 1) {
+          return wizard.querySelectorAll('input[name="student_profile_subjects"]:checked').length > 0
+        }
+        if (stepIndex === 2) {
+          return wizard.querySelectorAll('input[name="student_profile_countries"]:checked').length > 0
+        }
+        if (stepIndex === 3) {
+          const mode = budgetPreferenceInput.value
+          if (!mode) return false
+          if (mode === 'not_sure') return true
+          if (mode === 'custom') {
+            return (budgetMaxInput.value || '').trim().length > 0 && (budgetCurrencyInput.value || '').trim().length > 0
+          }
+          return true
+        }
+        return true
+      }
+
+      const updateStepUI = () => {
+        panels.forEach((panel) => {
+          const stepIndex = Number(panel.getAttribute('data-step-index') || '0')
+          const active = stepIndex === currentStep
+          panel.classList.toggle('hidden', !active)
+          if (active && !prefersReducedMotion) {
+            panel.animate(
+              [
+                { opacity: 0, transform: 'translateY(10px)' },
+                { opacity: 1, transform: 'translateY(0px)' },
+              ],
+              { duration: 220, easing: 'ease-out' },
+            )
+          }
+        })
+
+        tabs.forEach((tab) => {
+          const stepIndex = Number(tab.getAttribute('data-step-index') || '0')
+          const active = stepIndex === currentStep
+          tab.classList.toggle('border-blue-200', active)
+          tab.classList.toggle('bg-blue-50', active)
+          tab.classList.toggle('text-blue-700', active)
+          tab.classList.toggle('border-slate-200', !active)
+          tab.classList.toggle('bg-slate-50', !active)
+          tab.classList.toggle('text-slate-500', !active)
+        })
+
+        prevBtn.disabled = currentStep === 0
+        nextBtn.classList.toggle('hidden', currentStep === panels.length - 1)
+        submitBtn.classList.toggle('hidden', currentStep !== panels.length - 1)
+        setWizardError('')
+        updateSelectionCounts()
+      }
+
+      const clearWizard = () => {
+        wizard.querySelectorAll('input[name="target_degree_level_id"]').forEach((input) => {
+          input.checked = false
+        })
+        wizard.querySelectorAll('input[name="student_profile_subjects"], input[name="student_profile_countries"]').forEach((input) => {
+          input.checked = false
+        })
+
+        budgetPreferenceInput.value = ''
+        budgetMinInput.value = ''
+        budgetMaxInput.value = ''
+        budgetCurrencyInput.value = 'EUR'
+        wizard.querySelector('#current_country_id').value = ''
+        wizard.querySelector('#gpa').value = ''
+        wizard.querySelector('#english_score').value = ''
+        wizard.querySelector('#work_experience_years').value = ''
+        wizard.querySelector('#study_start_preference').value = ''
+        wizard.querySelector('#additional_notes').value = ''
+        if (subjectSearch) subjectSearch.value = ''
+        if (englishTypeSelect) englishTypeSelect.value = ''
+        if (englishHiddenInput) englishHiddenInput.value = ''
+        if (englishOtherInput) englishOtherInput.value = ''
+
+        subjectOptions.forEach((option) => option.classList.remove('hidden'))
+        currentStep = 0
+        setWizardError('')
+        syncSelectableCards()
+        updateBudgetUI()
+        syncEnglishType()
+        syncDegreeOptionalState()
+        updateStepUI()
+      }
+
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const targetStep = Number(tab.getAttribute('data-step-index') || '0')
+          if (targetStep > currentStep && !validateStep(currentStep)) {
+            setWizardError(stepErrorMessage(currentStep))
+            return
+          }
+          currentStep = targetStep
+          updateStepUI()
+        })
+      })
+
+      prevBtn?.addEventListener('click', () => {
+        currentStep = Math.max(0, currentStep - 1)
+        updateStepUI()
+      })
+
+      nextBtn?.addEventListener('click', () => {
+        if (!validateStep(currentStep)) {
+          setWizardError(stepErrorMessage(currentStep))
+          return
+        }
+        currentStep = Math.min(panels.length - 1, currentStep + 1)
+        updateStepUI()
+      })
+
+      budgetButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          setWizardError('')
+          setBudgetMode(
+            button.getAttribute('data-budget-choice') || '',
+            button.getAttribute('data-budget-min') || '',
+            button.getAttribute('data-budget-max') || '',
+            button.getAttribute('data-budget-currency') || '',
+          )
+        })
+      })
+
+      subjectSearch?.addEventListener('input', () => {
+        const term = subjectSearch.value.trim().toLowerCase()
+        subjectOptions.forEach((option) => {
+          const label = option.getAttribute('data-subject-label') || ''
+          option.classList.toggle('hidden', term.length > 0 && !label.includes(term))
+        })
+      })
+
+      degreeOptions.forEach((option) => {
+        option.addEventListener('change', () => {
+          setWizardError('')
+          syncSelectableCards()
+          syncDegreeOptionalState()
+        })
+      })
+
+      englishTypeSelect?.addEventListener('change', syncEnglishType)
+      englishOtherInput?.addEventListener('input', syncEnglishType)
+
+      wizard.querySelectorAll('input[name="student_profile_subjects"], input[name="student_profile_countries"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          setWizardError('')
+          syncSelectableCards()
+          updateSelectionCounts()
+        })
+      })
+
+      resetBtn?.addEventListener('click', clearWizard)
+
+      if (!budgetPreferenceInput.value && (budgetMinInput.value || budgetMaxInput.value)) {
+        budgetPreferenceInput.value = 'custom'
+      }
+
+      syncSelectableCards()
+      updateSelectionCounts()
+      updateBudgetUI()
+      syncEnglishType()
+      syncDegreeOptionalState()
+      updateStepUI()
+    }
+  </script>
 </PublicLayout>
