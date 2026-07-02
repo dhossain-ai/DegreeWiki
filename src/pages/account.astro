@@ -29,14 +29,25 @@ type LatestPreview = {
   cityName: string | null
 }
 
+type SavedProgramPreview = {
+  id: string
+  slug: string
+  title: string
+  universityName: string | null
+  countryName: string | null
+  cityName: string | null
+  savedAt: string
+}
+
 let profileExists = false
 let savedCount = 0
 let savedProgramCount = 0
 let latestResult: LatestResult | null = null
 let latestPreview: LatestPreview | null = null
 let hasConversationHistory = false
+let savedProgramPreviews: SavedProgramPreview[] = []
 
-const [profileResult, savedCountResult, savedProgramCountResult, latestResultResult] = await Promise.all([
+const [profileResult, savedCountResult, savedProgramCountResult, latestResultResult, savedProgramPreviewRowsResult] = await Promise.all([
   supabase
     .from('student_profiles')
     .select('id')
@@ -57,6 +68,13 @@ const [profileResult, savedCountResult, savedProgramCountResult, latestResultRes
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle(),
+  supabase
+    .from('saved_items')
+    .select('entity_id, created_at')
+    .eq('user_id', user.id)
+    .eq('entity_type', 'program')
+    .order('created_at', { ascending: false })
+    .limit(3),
 ])
 
 if (profileResult.error) {
@@ -81,6 +99,46 @@ if (latestResultResult.error) {
   console.error('account: latest ai_finder_results query error:', latestResultResult.error.message)
 } else if (latestResultResult.data) {
   latestResult = latestResultResult.data as LatestResult
+}
+
+if (savedProgramPreviewRowsResult.error) {
+  console.error('account: saved_items preview query error:', savedProgramPreviewRowsResult.error.message)
+} else {
+  const savedRows = savedProgramPreviewRowsResult.data ?? []
+  const savedProgramIds = savedRows.map((row: any) => row.entity_id).filter(Boolean)
+
+  if (savedProgramIds.length > 0) {
+    const { data: programRows, error: programPreviewError } = await supabase
+      .from('programs')
+      .select(`
+        id, title, slug,
+        universities(name),
+        countries(name),
+        cities(name)
+      `)
+      .eq('content_status', 'published')
+      .in('id', savedProgramIds)
+
+    if (programPreviewError) {
+      console.error('account: saved program preview programs query error:', programPreviewError.message)
+    } else {
+      const programById = new Map((programRows ?? []).map((program: any) => [program.id, program]))
+      savedProgramPreviews = savedRows.flatMap((row: any) => {
+        const program = programById.get(row.entity_id)
+        if (!program?.slug) return []
+
+        return [{
+          id: program.id,
+          slug: program.slug,
+          title: program.title ?? '',
+          universityName: program.universities?.name ?? null,
+          countryName: program.countries?.name ?? null,
+          cityName: program.cities?.name ?? null,
+          savedAt: row.created_at,
+        }]
+      })
+    }
+  }
 }
 
 if (latestResult?.id) {
@@ -143,234 +201,463 @@ function formatDate(iso: string): string {
   })
 }
 
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function formatWelcomeName(): string {
+  const metadata = (user.user_metadata ?? {}) as Record<string, unknown>
+  const rawName = [metadata.given_name, metadata.full_name, metadata.name]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+
+  if (rawName) {
+    return rawName.trim().split(/\s+/)[0] ?? rawName.trim()
+  }
+
+  const emailPrefix = user.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim()
+  if (!emailPrefix) return 'student'
+
+  return emailPrefix
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+const welcomeName = formatWelcomeName()
 const savedLabel = savedCount === 1 ? '1 saved result' : `${savedCount} saved results`
 const savedProgramLabel = savedProgramCount === 1 ? '1 saved program' : `${savedProgramCount} saved programs`
 const latestResultIsUsable = !!latestResult &&
   latestResult.result_status === 'complete' &&
   latestResult.shortlist_count > 0
 const latestResultUrl = latestResult ? `/fit-finder/results/${latestResult.id}` : '/fit-finder/result'
+const latestAdvisorUrl = latestResult ? `/fit-finder/results/${latestResult.id}#ai-advisor` : '/fit-finder/result'
 const latestResultDate = latestResult?.created_at ? formatDate(latestResult.created_at) : null
 const latestResultHasAISummary = !!latestResult?.ai_explanation?.trim()
 const latestPreviewLocation = latestPreview
-  ? [latestPreview.countryName, latestPreview.cityName].filter(Boolean).join(', ')
+  ? [latestPreview.cityName, latestPreview.countryName].filter(Boolean).join(', ')
   : ''
-const aiAdvisorLabel = hasConversationHistory ? 'Continue AI chat' : 'Ask AI about latest result'
+const profileStepComplete = profileExists
+const matchesStepComplete = latestResultIsUsable
+const shortlistStepComplete = savedProgramCount > 0
+const aiReviewStepComplete = hasConversationHistory
+
+const progressSteps = [
+  {
+    label: 'Profile',
+    description: profileStepComplete ? 'Preferences saved' : 'Start your Fit Finder profile',
+    tone: profileStepComplete ? 'complete' : 'next',
+  },
+  {
+    label: 'Matches',
+    description: matchesStepComplete ? 'Latest shortlist ready' : 'Run Fit Finder to get matches',
+    tone: matchesStepComplete ? 'complete' : profileStepComplete ? 'next' : 'locked',
+  },
+  {
+    label: 'Shortlist',
+    description: shortlistStepComplete ? savedProgramLabel : 'Save programs you want to compare',
+    tone: shortlistStepComplete ? 'complete' : matchesStepComplete ? 'next' : 'locked',
+  },
+  {
+    label: 'AI review',
+    description: aiReviewStepComplete ? 'Conversation started' : latestResultIsUsable ? 'Ask DegreeWiki AI about your matches' : 'Unlocks after a saved result',
+    tone: aiReviewStepComplete ? 'complete' : latestResultIsUsable ? 'next' : 'locked',
+  },
+  {
+    label: 'Apply',
+    description: 'Coming soon',
+    tone: 'coming-soon',
+  },
+]
+
+let nextStep = {
+  eyebrow: 'Recommended next step',
+  title: 'Start your Fit Finder profile',
+  copy: 'Tell DegreeWiki what you want to study, where you want to go, and what budget you want to stay within.',
+  primaryLabel: 'Start your Fit Finder profile',
+  primaryHref: '/fit-finder',
+  secondaryLabel: 'Browse programs',
+  secondaryHref: '/programs',
+}
+
+if (profileExists && !latestResult) {
+  nextStep = {
+    eyebrow: 'Recommended next step',
+    title: 'Run Fit Finder to get your first matches',
+    copy: 'Your preferences are saved. Turn them into a shortlist so you can review matched programs and come back later.',
+    primaryLabel: 'Run Fit Finder',
+    primaryHref: '/fit-finder/result',
+    secondaryLabel: 'Update preferences',
+    secondaryHref: '/fit-finder',
+  }
+} else if (latestResult && savedProgramCount === 0) {
+  nextStep = {
+    eyebrow: 'Recommended next step',
+    title: 'Review your top matches and save programs',
+    copy: 'Your latest results are ready. Save the strongest options to start building a shortlist you can compare later.',
+    primaryLabel: 'Review matches',
+    primaryHref: latestResultUrl,
+    secondaryLabel: 'Browse programs',
+    secondaryHref: '/programs',
+  }
+} else if (savedProgramCount > 0) {
+  nextStep = {
+    eyebrow: 'Recommended next step',
+    title: 'Compare your shortlist or ask AI about your matches',
+    copy: latestResultIsUsable
+      ? 'You already have saved programs. Revisit your shortlist, then use DegreeWiki AI to compare options and check what to verify before applying.'
+      : 'You already have saved programs. Revisit your shortlist and keep refining it as you compare your options.',
+    primaryLabel: 'View shortlist',
+    primaryHref: '/account/saved-programs',
+    secondaryLabel: latestResultIsUsable ? 'Open AI advisor' : 'Run Fit Finder',
+    secondaryHref: latestResultIsUsable ? latestAdvisorUrl : '/fit-finder/result',
+  }
+}
 ---
-<PublicLayout title="Student Dashboard — DegreeWiki" noindex={true}>
-  <div class="max-w-5xl mx-auto px-4 py-10">
-    <div class="max-w-3xl mb-8">
-      <h1 class="text-3xl font-bold text-gray-900 mb-2">Student Dashboard</h1>
-      {user.email && (
-        <p class="text-sm text-gray-500 mb-2">
-          Signed in as <span class="text-gray-700">{user.email}</span>
-        </p>
-      )}
-        <p class="text-sm text-gray-600">
-          Manage your Fit Finder profile, saved results, and the AI advisor attached to saved Fit Finder results.
-        </p>
-    </div>
+<PublicLayout title="Your study plan — DegreeWiki" noindex={true}>
+  <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+    <section class="mb-6 overflow-hidden rounded-[28px] border border-[#dbe7ff] bg-[linear-gradient(135deg,#f7fbff_0%,#eef4ff_45%,#ffffff_100%)] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+      <div class="grid gap-6 px-5 py-6 sm:px-7 sm:py-7 lg:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.9fr)] lg:px-8 lg:py-8">
+        <div class="min-w-0">
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Your study plan</p>
+          <h1 class="max-w-3xl text-3xl font-bold tracking-[-0.03em] text-slate-950 sm:text-4xl">
+            Welcome back, {welcomeName}
+          </h1>
+          <p class="mt-3 max-w-3xl text-base leading-7 text-slate-650 sm:text-lg">
+            Continue your study-abroad plan. Review your latest matches, update your preferences, or ask DegreeWiki AI what to check next.
+          </p>
+          {user.email && (
+            <p class="mt-3 text-sm text-slate-500">
+              Signed in as <span class="font-medium text-slate-700">{user.email}</span>
+            </p>
+          )}
 
-    <section class="mb-8">
-      <div class="rounded-xl border border-blue-100 bg-blue-50 p-6">
-        <p class="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-2">Primary action</p>
-        <h2 class="text-xl font-semibold text-gray-900 mb-2">Find programs that fit your profile</h2>
-        <p class="text-sm text-gray-600 mb-4">
-          Save or update your preferences, then review matched programs and follow up with the AI advisor on saved results.
-        </p>
-        <div class="flex flex-wrap gap-3">
-          <a href="/fit-finder" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-            Run Fit Finder
-          </a>
-          <a href="/fit-finder/results" class="px-4 py-2 text-sm text-blue-700 border border-blue-200 rounded-md hover:bg-white">
-            View saved results
-          </a>
+          <div class="mt-5 flex flex-wrap gap-2.5">
+            <span class="inline-flex items-center rounded-full border border-blue-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
+              {profileExists ? 'Profile ready' : 'Profile not started'}
+            </span>
+            <span class="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
+              {savedLabel}
+            </span>
+            <span class="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
+              {savedProgramLabel}
+            </span>
+          </div>
+        </div>
+
+        <div class="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_12px_30px_rgba(37,99,235,0.08)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">{nextStep.eyebrow}</p>
+          <h2 class="mt-2 text-xl font-semibold tracking-[-0.02em] text-slate-950">{nextStep.title}</h2>
+          <p class="mt-2 text-sm leading-6 text-slate-600">{nextStep.copy}</p>
+          <div class="mt-5 flex flex-wrap gap-3">
+            <a href={nextStep.primaryHref} class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700">
+              {nextStep.primaryLabel}
+            </a>
+            <a href={nextStep.secondaryHref} class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50">
+              {nextStep.secondaryLabel}
+            </a>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="mb-8">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Your status</h2>
-      <div class="grid gap-4 md:grid-cols-4">
-        <article class="rounded-xl border border-gray-200 bg-white p-5">
-          <p class="text-sm font-medium text-gray-900 mb-1">Fit Finder profile</p>
-          <p class="text-sm text-gray-600 mb-4">
-            {profileExists ? 'Complete' : 'Not set up yet'}
-          </p>
-          <a href="/fit-finder" class="text-sm font-medium text-blue-600 hover:underline">
-            {profileExists ? 'Update preferences' : 'Start preferences'} →
-          </a>
-        </article>
-
-        <article class="rounded-xl border border-gray-200 bg-white p-5">
-          <p class="text-sm font-medium text-gray-900 mb-1">Saved results</p>
-          <p class="text-sm text-gray-600 mb-4">{savedLabel}</p>
-          <a href="/fit-finder/results" class="text-sm font-medium text-blue-600 hover:underline">
-            View saved results →
-          </a>
-        </article>
-
-        <article class="rounded-xl border border-gray-200 bg-white p-5">
-          <p class="text-sm font-medium text-gray-900 mb-1">Saved programs</p>
-          <p class="text-sm text-gray-600 mb-4">{savedProgramLabel}</p>
-          <a href="/account/saved-programs" class="text-sm font-medium text-blue-600 hover:underline">
-            View saved programs →
-          </a>
-        </article>
-
-        <article class="rounded-xl border border-gray-200 bg-white p-5">
-          <p class="text-sm font-medium text-gray-900 mb-1">AI advisor</p>
-          {!latestResult && (
-            <>
-              <p class="text-sm text-gray-600 mb-4">
-                The AI advisor becomes available after you run Fit Finder and save a result with matched programs.
-              </p>
-              <a href="/fit-finder/result" class="text-sm font-medium text-blue-600 hover:underline">
-                Run Fit Finder →
-              </a>
-            </>
-          )}
-          {latestResult && latestResultIsUsable && (
-            <>
-              <p class="text-sm text-gray-600 mb-4">
-                Open your latest saved result to ask follow-up questions about the programs already matched for you.
-              </p>
-              <a href={latestResultUrl} class="text-sm font-medium text-blue-600 hover:underline">
-                {aiAdvisorLabel} →
-              </a>
-            </>
-          )}
-          {latestResult && !latestResultIsUsable && (
-            <>
-              <p class="text-sm text-gray-600 mb-4">
-                Your latest saved result is not ready for the AI advisor yet. Run Fit Finder again to refresh your matches.
-              </p>
-              <a href="/fit-finder/result" class="text-sm font-medium text-blue-600 hover:underline">
-                Run Fit Finder →
-              </a>
-            </>
-          )}
-        </article>
-      </div>
-    </section>
-
-    <section class="mb-8">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Latest result</h2>
-      {!latestResult ? (
-        <div class="rounded-xl border border-gray-200 bg-gray-50 p-5">
-          <h3 class="text-base font-semibold text-gray-900 mb-2">No saved Fit Finder result yet</h3>
-          <p class="text-sm text-gray-600 mb-4">
-            Run Fit Finder to save a matched-program result you can revisit later and open with the DegreeWiki AI advisor.
-          </p>
-          <a href="/fit-finder" class="text-sm font-medium text-blue-600 hover:underline">
-            Run Fit Finder →
-          </a>
-        </div>
-      ) : (
-        <div class="rounded-xl border border-gray-200 bg-white p-5">
-          <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.95fr)]">
+      <div class="space-y-6">
+        <section class="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_12px_36px_rgba(15,23,42,0.05)] sm:p-6">
+          <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2 mb-2">
-                {latestResultDate && (
-                  <span class="text-sm font-medium text-gray-900">{latestResultDate}</span>
-                )}
-                {latestResult.result_status === 'complete' && latestResult.shortlist_count > 0 && (
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-100">
-                    Ready
-                  </span>
-                )}
-                {latestResult.result_status !== 'complete' && (
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 border border-yellow-200">
-                    Incomplete
-                  </span>
-                )}
-                {latestResult.result_status === 'complete' && latestResult.shortlist_count > 0 && latestResultHasAISummary && (
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
-                    AI summary
-                  </span>
-                )}
-                {latestResult.result_status === 'complete' && latestResult.shortlist_count > 0 && !latestResultHasAISummary && (
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                    No AI summary
-                  </span>
+              <p class="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Latest matches</p>
+              {!latestResult ? (
+                <>
+                  <h2 class="text-2xl font-semibold tracking-[-0.02em] text-slate-950">Start Fit Finder to get your first shortlist</h2>
+                  <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                    Once you run Fit Finder, your latest matches will appear here so you can continue right where you left off.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div class="flex flex-wrap items-center gap-2">
+                    {latestResultDate && (
+                      <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">
+                        Saved {latestResultDate}
+                      </span>
+                    )}
+                    {latestResultIsUsable && (
+                      <span class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                        Ready to review
+                      </span>
+                    )}
+                    {!latestResultIsUsable && (
+                      <span class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                        Needs a fresh run
+                      </span>
+                    )}
+                    {latestResultIsUsable && latestResultHasAISummary && (
+                      <span class="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700">
+                        AI summary available
+                      </span>
+                    )}
+                    {latestResultIsUsable && !latestResultHasAISummary && (
+                      <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                        Rule-based shortlist
+                      </span>
+                    )}
+                  </div>
+
+                  <h2 class="mt-3 text-2xl font-semibold tracking-[-0.02em] text-slate-950 sm:text-[2rem]">
+                    {latestResult.shortlist_count === 1 ? '1 match ready to review' : `${latestResult.shortlist_count} matches ready to review`}
+                  </h2>
+                  <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                    {latestResultIsUsable
+                      ? 'Continue with your latest Fit Finder result, revisit the strongest option, and decide what belongs in your shortlist.'
+                      : 'Your latest saved result is not ready for follow-up yet. Run Fit Finder again to create a fresh complete shortlist.'}
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div class="grid min-w-[180px] grid-cols-2 gap-3 lg:w-[220px]">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Saved results</p>
+                <p class="mt-1 text-2xl font-bold text-slate-950">{savedCount}</p>
+              </div>
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Shortlist</p>
+                <p class="mt-1 text-2xl font-bold text-slate-950">{savedProgramCount}</p>
+              </div>
+            </div>
+          </div>
+
+          {!latestResult ? (
+            <div class="mt-6 flex flex-wrap gap-3">
+              <a href="/fit-finder" class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                Start Fit Finder
+              </a>
+              <a href="/programs" class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50">
+                Browse programs
+              </a>
+            </div>
+          ) : (
+            <div class="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(220px,0.85fr)]">
+              <div class="rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-5">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">Top program from your latest result</p>
+                {latestPreview ? (
+                  <>
+                    <h3 class="mt-3 text-xl font-semibold tracking-[-0.02em] text-slate-950">{latestPreview.title}</h3>
+                    <p class="mt-2 text-sm font-medium text-slate-700">{latestPreview.universityName ?? 'University details not available yet'}</p>
+                    {latestPreviewLocation && (
+                      <p class="mt-1 text-sm text-slate-500">{latestPreviewLocation}</p>
+                    )}
+                  </>
+                ) : (
+                  <p class="mt-3 text-sm text-slate-600">
+                    Your shortlist summary is saved, but the top-program preview is not available right now.
+                  </p>
                 )}
               </div>
 
-              <h3 class="text-base font-semibold text-gray-900 mb-1">
-                {latestResult.shortlist_count === 1
-                  ? '1 program matched'
-                  : `${latestResult.shortlist_count} programs matched`}
-              </h3>
-              {latestPreview && (
-                <div class="text-sm text-gray-600 mb-3">
-                  <p class="font-medium text-gray-800">{latestPreview.title}</p>
-                  <p>{[latestPreview.universityName, latestPreviewLocation].filter(Boolean).join(' · ')}</p>
+              <div class="rounded-[24px] border border-blue-100 bg-blue-50 p-5">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">Continue from here</p>
+                <p class="mt-3 text-sm leading-6 text-slate-700">
+                  {latestResultIsUsable
+                    ? 'Review the shortlist, save the strongest options, and open the AI advisor when you want help comparing them.'
+                    : 'Refresh this result first so your latest matches and AI follow-up are ready again.'}
+                </p>
+                <div class="mt-5 flex flex-wrap gap-3">
+                  <a href={latestResultUrl} class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                    Review matches
+                  </a>
+                  <a
+                    href={latestResultIsUsable ? latestAdvisorUrl : '/fit-finder/result'}
+                    class="inline-flex items-center justify-center rounded-full border border-blue-200 bg-white px-4 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                  >
+                    {latestResultIsUsable ? 'Ask AI about your matches' : 'Run Fit Finder'}
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section class="rounded-[28px] border border-purple-100 bg-[linear-gradient(180deg,#ffffff_0%,#faf7ff_100%)] p-5 shadow-[0_12px_36px_rgba(88,28,135,0.05)] sm:p-6">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-purple-700">Ask DegreeWiki AI about your matches</p>
+          {latestResult ? (
+            <>
+              <h2 class="mt-2 text-2xl font-semibold tracking-[-0.02em] text-slate-950">Use AI to compare your latest shortlist</h2>
+              <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Compare programs, understand budget fit, and check what to verify before applying.
+              </p>
+              {latestResultIsUsable ? (
+                <div class="mt-5 flex flex-wrap gap-3">
+                  <a href={latestAdvisorUrl} class="inline-flex items-center justify-center rounded-full bg-purple-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-purple-800">
+                    Open AI advisor
+                  </a>
+                  <a href={latestResultUrl} class="inline-flex items-center justify-center rounded-full border border-purple-200 bg-white px-4 py-2.5 text-sm font-medium text-purple-700 hover:bg-purple-50">
+                    Review matches first
+                  </a>
+                </div>
+              ) : (
+                <div class="mt-5 flex flex-wrap gap-3">
+                  <a href="/fit-finder/result" class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                    Run Fit Finder
+                  </a>
+                  <a href={latestResultUrl} class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50">
+                    View latest result
+                  </a>
                 </div>
               )}
-              {!latestResultIsUsable && (
-                <p class="text-sm text-gray-600">
-                  This saved result is not ready for AI follow-up yet. Re-run Fit Finder to create a fresh complete result.
-                </p>
-              )}
-            </div>
-
-            <div class="flex flex-wrap gap-2 shrink-0">
-              <a href={latestResultUrl} class="px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-md hover:bg-blue-50">
-                View latest result
-              </a>
-              {latestResultIsUsable && (
-                <a href={latestResultUrl} class="px-3 py-1.5 text-sm text-purple-700 border border-purple-200 rounded-md hover:bg-purple-50">
-                  {hasConversationHistory ? 'Continue AI chat' : 'Ask AI about latest result'}
+            </>
+          ) : (
+            <>
+              <h2 class="mt-2 text-2xl font-semibold tracking-[-0.02em] text-slate-950">AI unlocks after your first Fit Finder result</h2>
+              <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Run Fit Finder and save a shortlist first. Then you can ask DegreeWiki AI to compare the programs already matched for you.
+              </p>
+              <div class="mt-5">
+                <a href="/fit-finder" class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                  Start Fit Finder
                 </a>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-
-    <section>
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Browse and support</h2>
-      <div class="grid gap-4 md:grid-cols-2">
-        <div class="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden bg-white">
-          <a href="/programs" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <p class="text-sm font-medium text-gray-900">Browse programs</p>
-            <span class="text-gray-400 text-sm">&rarr;</span>
-          </a>
-          <a href="/account/saved-programs" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <p class="text-sm font-medium text-gray-900">Saved programs</p>
-            <span class="text-gray-400 text-sm">&rarr;</span>
-          </a>
-          <a href="/guides" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <p class="text-sm font-medium text-gray-900">Guides</p>
-            <span class="text-gray-400 text-sm">&rarr;</span>
-          </a>
-        </div>
-
-        <div class="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden bg-white">
-          <a href="/privacy" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <p class="text-sm font-medium text-gray-900">Privacy policy</p>
-            <span class="text-gray-400 text-sm">&rarr;</span>
-          </a>
-          <a href="/terms" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <p class="text-sm font-medium text-gray-900">Terms</p>
-            <span class="text-gray-400 text-sm">&rarr;</span>
-          </a>
-          <a href="/disclaimer" class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <p class="text-sm font-medium text-gray-900">Disclaimer</p>
-            <span class="text-gray-400 text-sm">&rarr;</span>
-          </a>
-          <div class="p-4">
-            <form method="post" action="/api/auth/logout">
-              <button
-                type="submit"
-                class="text-sm font-medium text-red-600 hover:text-red-700 cursor-pointer"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
-        </div>
+              </div>
+            </>
+          )}
+        </section>
       </div>
-    </section>
+
+      <div class="space-y-6">
+        <section class="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_12px_36px_rgba(15,23,42,0.05)] sm:p-6">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Study journey</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-[-0.02em] text-slate-950">Your progress</h2>
+          <p class="mt-2 text-sm leading-6 text-slate-600">
+            Move from profile to shortlist, then use AI review to decide what to check before you apply.
+          </p>
+
+          <ol class="mt-5 space-y-3">
+            {progressSteps.map((step, index) => {
+              const toneClasses =
+                step.tone === 'complete'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : step.tone === 'next'
+                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                    : step.tone === 'coming-soon'
+                      ? 'border-purple-200 bg-purple-50 text-purple-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-500'
+              const statusLabel =
+                step.tone === 'complete'
+                  ? 'Complete'
+                  : step.tone === 'next'
+                    ? 'Next'
+                    : step.tone === 'coming-soon'
+                      ? 'Coming soon'
+                      : 'Locked'
+
+              return (
+                <li class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div class={`mt-0.5 inline-flex h-8 w-8 flex-none items-center justify-center rounded-full border text-xs font-semibold ${toneClasses}`}>
+                    {index + 1}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h3 class="text-sm font-semibold text-slate-900">{step.label}</h3>
+                      <span class={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneClasses}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                    <p class="mt-1 text-sm leading-6 text-slate-600">{step.description}</p>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        </section>
+
+        <section class="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_12px_36px_rgba(15,23,42,0.05)] sm:p-6">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Your shortlist</p>
+              <h2 class="mt-2 text-2xl font-semibold tracking-[-0.02em] text-slate-950">Saved programs</h2>
+            </div>
+            <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">
+              {savedProgramLabel}
+            </span>
+          </div>
+
+          {savedProgramPreviews.length > 0 ? (
+            <>
+              <ul class="mt-5 space-y-3">
+                {savedProgramPreviews.map((program) => {
+                  const location = [program.cityName, program.countryName].filter(Boolean).join(', ')
+                  return (
+                    <li>
+                      <a
+                        href={`/programs/${program.slug}`}
+                        class="block rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 transition-colors hover:border-slate-300 hover:bg-white"
+                      >
+                        <p class="text-sm font-semibold text-slate-900">{program.title}</p>
+                        <p class="mt-1 text-sm text-slate-600">
+                          {[program.universityName, location].filter(Boolean).join(' · ') || 'Program details available on the program page'}
+                        </p>
+                        <p class="mt-2 text-xs text-slate-500">Saved {formatShortDate(program.savedAt)}</p>
+                      </a>
+                    </li>
+                  )
+                })}
+              </ul>
+
+              <div class="mt-5 flex flex-wrap gap-3">
+                <a href="/account/saved-programs" class="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+                  View shortlist
+                </a>
+                <a href="/programs" class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50">
+                  Browse programs
+                </a>
+              </div>
+            </>
+          ) : (
+            <>
+              <div class="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
+                <h3 class="text-base font-semibold text-slate-900">No saved programs yet</h3>
+                <p class="mt-2 text-sm leading-6 text-slate-600">
+                  Save programs from your Fit Finder results to build your shortlist.
+                </p>
+              </div>
+
+              <div class="mt-5 flex flex-wrap gap-3">
+                <a href="/account/saved-programs" class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50">
+                  View shortlist
+                </a>
+                <a href="/programs" class="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                  Browse programs
+                </a>
+              </div>
+            </>
+          )}
+        </section>
+
+        <section class="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_12px_36px_rgba(15,23,42,0.05)] sm:p-6">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Continue exploring</p>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <a href="/programs" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-800 transition-colors hover:border-slate-300 hover:bg-white">
+              Browse programs
+            </a>
+            <a href="/universities" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-800 transition-colors hover:border-slate-300 hover:bg-white">
+              Universities
+            </a>
+            <a href="/scholarships" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-800 transition-colors hover:border-slate-300 hover:bg-white">
+              Scholarships
+            </a>
+            <a href="/guides" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-800 transition-colors hover:border-slate-300 hover:bg-white">
+              Study guides
+            </a>
+            <a href="/fit-finder" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-800 transition-colors hover:border-slate-300 hover:bg-white sm:col-span-2">
+              Fit Finder
+            </a>
+          </div>
+        </section>
+      </div>
+    </div>
   </div>
 </PublicLayout>
