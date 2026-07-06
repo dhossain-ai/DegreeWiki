@@ -130,10 +130,41 @@ Planned tables:
 MVP roles:
 
 - student
+- contributor
 - content_admin
 - reviewer
 - data_import_manager
 - super_admin
+
+## Contributor Foundation
+
+Phase 82B adds the contributor DB/RLS foundation without building the public or admin contributor UI yet.
+
+Implemented contributor tables:
+
+- contributor_applications
+- contributor_profiles
+- contributor_scopes
+- contributor_profile_subjects
+- contributor_submissions
+- contributor_submission_sources
+
+Implemented contributor rules:
+
+- contributors use the same shared auth system as students
+- new users remain non-admin by default
+- contributor remains a separate non-admin role with no seeded admin permissions
+- contributors never write directly to live public content tables
+- contributor submissions stay separate from production content until reviewer/admin action
+- private proof metadata stays in contributor applications only and is never publicly readable
+
+Contributor foundation notes:
+
+- `contributor_profiles` supports reviewed public-profile state, public avatar controls, and future attribution
+- `contributor_scopes` supports approved country, university, and subject scope rows
+- `contributor_submissions` stores future correction/confirmation proposals against live entities without changing those entities directly
+- direct public reads from `contributor_profiles` remain deferred until a later safe public view or route can enforce stricter field visibility
+- actual contributor application UI, dashboard UI, public contributor pages, avatar upload flow, and admin review UI remain deferred to later phases
 
 ## Student/AI Tables
 

@@ -5,12 +5,11 @@
 
 ## Current Project Status
 
-Phase 74 is complete. DegreeWiki now adds and wires university profile enrichment across schema,
-admin, and public university pages: additive university enrichment columns, grouped admin
-create/edit sections for existing and new profile fields, edit-only review/trust controls, richer
-public university sections, `seo_h1` support, and safe external ranking/application links while
-keeping university-wide tuition, application-fee, ranking-provider-specific fields, and indexing
-behavior deferred.
+Phase 82B is complete. DegreeWiki now adds the contributor DB/RLS foundation only: a seeded
+non-admin `contributor` role, contributor application/profile/scope/submission tables, ownership
+and reviewer/admin RLS policies, and minimal server-safe TypeScript helpers for contributor
+statuses and visibility rules, while keeping contributor UI, review screens, upload flows, and
+all live-content publishing or verification actions deferred.
 
 Current branch: `main`
 
@@ -29,6 +28,10 @@ Very short import pipeline summary:
 
 ## Critical Rules
 
+- Contributor Phase 82B stays foundation-only:
+  no public contributor pages, no contributor dashboard UI, no admin contributor review UI,
+  no contributor avatar upload endpoint/UI, and no contributor submission form UI yet.
+- Contributors must not directly publish or verify live public data.
 - Keep AI usage-limit rollout incremental: no seeded active policy rows in the migration.
 - Preserve legacy env fallback when no matching DB policy exists.
 - No new dependencies.
@@ -37,15 +40,15 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 74 checks run:
+- Phase 82B checks run:
   `npm run build`,
+  `npx tsc --noEmit`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
   `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
-- Phase 74 keeps scope tight:
-  no country changes, no import/staging changes, no new dependencies, no RLS changes, no
-  university-wide tuition/application-fee fields, no QS/THE/national ranking-specific fields, and
-  no indexing or sitemap enforcement changes.
+- Phase 82B keeps scope tight:
+  no contributor public pages, no contributor application/dashboard/admin UI, no Cloudinary
+  contributor upload endpoint, no live-content publishing by contributors, and no new dependencies.
 
 ## Known Open Notes
 
@@ -54,6 +57,10 @@ Very short import pipeline summary:
 - Astro's Cloudflare adapter expects a production KV binding named `SESSION`; the real namespace must be created and bound in Cloudflare before deploy.
 - Google OAuth remains configured in Supabase Auth, not in app runtime env vars.
 - Google-created users remain non-admin by default for launch.
+- The new `contributor` role is seeded with no admin permissions.
+- Contributor foundation tables now exist, but contributor application flows, contributor profile editing,
+  admin review UI, public contributor pages, direct public contributor-profile reads, and avatar
+  upload/review flows remain deferred.
 - A later follow-up may add explicit `student` role assignment on signup if future features require role membership beyond the current non-admin default.
 - Phase 70B kept the article workflow small and safe:
   no migration, no dependency changes, no schema changes, and no create/edit/save/publish contract

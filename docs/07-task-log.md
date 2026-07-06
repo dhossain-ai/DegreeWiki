@@ -5,6 +5,32 @@
 
 ## Recent Task Log
 
+### Phase 82B - Contributor DB/RLS Foundation
+
+- Added `029_contributor_foundation.sql` with a seeded non-admin `contributor` role and six new
+  contributor foundation tables:
+  `contributor_applications`, `contributor_profiles`, `contributor_scopes`,
+  `contributor_profile_subjects`, `contributor_submissions`, and
+  `contributor_submission_sources`.
+- Added additive contributor constraints and indexes for application status, public profile review
+  state, approved scope targets, normalized subject expertise, contributor submission ownership,
+  and submission-source linkage.
+- Added reviewer/admin contributor-management RLS plus owner-safe RLS across the new contributor
+  tables, while intentionally deferring direct public `contributor_profiles` reads until a later
+  safe public view or server-side route can gate row and field visibility more strictly.
+- Added owner-update trigger guards on contributor applications and contributor submissions so
+  future owner flows can edit draft or `needs_more_info` rows without letting owners self-review,
+  self-approve, or change protected review fields.
+- Added minimal contributor helper modules under `src/lib/contributors/` for shared status unions,
+  editability checks, and public profile/avatar visibility checks.
+- Updated the database plan and active status docs to record the new contributor foundation and to
+  note that UI, upload, and review workflows remain deferred.
+- Kept the phase intentionally narrow: no contributor public pages, no contributor dashboard or
+  admin review UI, no contributor submission form UI, no Cloudinary contributor upload flow, no
+  live-content publishing by contributors, and no new dependencies.
+- Ran `npm run build`, `npx tsc --noEmit`, and the existing safety greps for unsafe HTML,
+  service-role usage, and secret-key references in `src`.
+
 ### Phase 74 - University Profile Enrichment Bundle
 
 - Added `028_university_profile_enrichment.sql` with additive nullable columns on `public.universities`
