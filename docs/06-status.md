@@ -5,11 +5,12 @@
 
 ## Current Project Status
 
-Phase 82B is complete. DegreeWiki now adds the contributor DB/RLS foundation only: a seeded
-non-admin `contributor` role, contributor application/profile/scope/submission tables, ownership
-and reviewer/admin RLS policies, and minimal server-safe TypeScript helpers for contributor
-statuses and visibility rules, while keeping contributor UI, review screens, upload flows, and
-all live-content publishing or verification actions deferred.
+Phase 82C is complete. DegreeWiki now includes the contributor application and admin review bundle:
+public `/become-a-contributor`, account-level contributor status views, admin contributor queue and
+detail review pages, server-side contributor application submit/update handling, and a narrow DB
+review RPC that lets reviewer/admin users approve contributor applications, ensure
+`contributor_profiles` exists, grant the non-admin `contributor` role, and optionally persist
+approved country or university scopes without using service-role code in app pages.
 
 Current branch: `main`
 
@@ -28,9 +29,10 @@ Very short import pipeline summary:
 
 ## Critical Rules
 
-- Contributor Phase 82B stays foundation-only:
-  no public contributor pages, no contributor dashboard UI, no admin contributor review UI,
-  no contributor avatar upload endpoint/UI, and no contributor submission form UI yet.
+- Contributor Phase 82C stays review-workflow-only:
+  no public contributor directory, no public contributor profile pages, no contributor avatar
+  upload endpoint/UI, no contributor submission form UI yet, and no live-content publishing or
+  verification actions by contributors.
 - Contributors must not directly publish or verify live public data.
 - Keep AI usage-limit rollout incremental: no seeded active policy rows in the migration.
 - Preserve legacy env fallback when no matching DB policy exists.
@@ -40,15 +42,16 @@ Very short import pipeline summary:
 - No auto-overwrite of non-empty production fields.
 - No subject auto-creation and no intake/deadline import.
 - No unsafe HTML APIs such as `set:html` or `innerHTML`.
-- Phase 82B checks run:
+- Phase 82C checks run:
   `npm run build`,
   `npx tsc --noEmit`,
   `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
   and
   `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
-- Phase 82B keeps scope tight:
-  no contributor public pages, no contributor application/dashboard/admin UI, no Cloudinary
-  contributor upload endpoint, no live-content publishing by contributors, and no new dependencies.
+- Phase 82C keeps scope tight:
+  no public contributor directory/profile pages, no proof upload flow, no Cloudinary contributor
+  upload endpoint, no contributor content-submission UI, no admin-permission grant to contributors,
+  and no new dependencies.
 
 ## Known Open Notes
 
@@ -58,9 +61,13 @@ Very short import pipeline summary:
 - Google OAuth remains configured in Supabase Auth, not in app runtime env vars.
 - Google-created users remain non-admin by default for launch.
 - The new `contributor` role is seeded with no admin permissions.
-- Contributor foundation tables now exist, but contributor application flows, contributor profile editing,
-  admin review UI, public contributor pages, direct public contributor-profile reads, and avatar
-  upload/review flows remain deferred.
+- Contributor application submit/update flows and admin review UI now exist, but public contributor
+  directory/profile pages, contributor proof upload, contributor content-submission UI, direct
+  public contributor-profile reads, and avatar upload/review flows remain deferred.
+- `030_contributor_review_workflow.sql` must be applied before live admin contributor approvals can
+  grant the `contributor` role or create approved contributor profiles/scopes.
+- `npx tsc --noEmit` still reports pre-existing repo-wide type errors in older AI/import modules
+  outside Phase 82C contributor files.
 - A later follow-up may add explicit `student` role assignment on signup if future features require role membership beyond the current non-admin default.
 - Phase 70B kept the article workflow small and safe:
   no migration, no dependency changes, no schema changes, and no create/edit/save/publish contract

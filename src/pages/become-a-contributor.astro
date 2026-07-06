@@ -1,0 +1,557 @@
+---
+import PublicLayout from '../layouts/PublicLayout.astro'
+import { userHasAdminRole } from '../lib/auth/dashboard'
+import {
+  CONTRIBUTOR_STATUS_BADGES,
+  CONTRIBUTOR_STATUS_LABELS,
+  contributorApplicationToFormValues,
+  EMPTY_CONTRIBUTOR_APPLICATION_FORM,
+  getContributorStatusSummary,
+  normalizeContributorApplicationForm,
+  validateContributorApplicationForm,
+  type ContributorApplicationFormValues,
+  type ContributorApplicationRecord,
+  type ContributorDisplayStatus,
+  type ContributorProfileRecord,
+} from '../lib/contributors/application'
+import {
+  isContributorApplicationEditableByOwner,
+  isContributorProfileApproved,
+} from '../lib/contributors/status'
+import type { FormErrors } from '../lib/admin/validate'
+import { createClient } from '../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+const flash = Astro.url.searchParams.get('saved')
+const successMessage = flash === 'draft'
+  ? 'Contributor draft saved.'
+  : flash === 'submitted'
+    ? 'Contributor application submitted for review.'
+    : null
+
+const { data: { user } } = await supabase.auth.getUser()
+
+let isAdminUser = false
+let application: ContributorApplicationRecord | null = null
+let contributorProfile: ContributorProfileRecord | null = null
+
+if (user) {
+  isAdminUser = await userHasAdminRole(supabase)
+
+  const [applicationResult, contributorProfileResult] = await Promise.all([
+    supabase
+      .from('contributor_applications')
+      .select(`
+        id, user_id, status, requested_contributor_type, headline,
+        organization_name, role_title, country_expertise_text,
+        university_expertise_text, subject_expertise_text, bio_draft,
+        motivation, public_profile_requested, public_attribution_consent,
+        external_links, admin_notes, rejection_reason, reviewed_by_user_id,
+        reviewed_at, submitted_at, created_at, updated_at
+      `)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('contributor_profiles')
+      .select(`
+        user_id, profile_review_status, public_profile_enabled,
+        public_display_name, public_role_label, organization_name,
+        headline, joined_at, approved_at
+      `)
+      .eq('user_id', user.id)
+      .maybeSingle(),
+  ])
+
+  if (applicationResult.error) {
+    console.error('become-a-contributor: application query error:', applicationResult.error.message)
+  } else if (applicationResult.data) {
+    application = applicationResult.data as ContributorApplicationRecord
+  }
+
+  if (contributorProfileResult.error) {
+    console.error('become-a-contributor: contributor profile query error:', contributorProfileResult.error.message)
+  } else if (contributorProfileResult.data) {
+    contributorProfile = contributorProfileResult.data as ContributorProfileRecord
+  }
+}
+
+let values: ContributorApplicationFormValues = contributorApplicationToFormValues(application)
+let errors: FormErrors = {}
+let serverError = ''
+
+if (user && !isAdminUser && Astro.request.method === 'POST') {
+  if (application && !isContributorApplicationEditableByOwner(application.status)) {
+    serverError = 'This contributor application is locked and cannot be edited right now.'
+  } else {
+    const form = await Astro.request.formData()
+    const intent = String(form.get('intent') ?? '')
+    values = normalizeContributorApplicationForm(form)
+
+    if (intent !== 'save_draft' && intent !== 'submit_application') {
+      serverError = 'Invalid contributor application action.'
+    } else {
+      const mode = intent === 'save_draft' ? 'draft' : 'submit'
+      const validation = validateContributorApplicationForm(values, mode)
+      errors = validation.errors
+
+      if (Object.keys(errors).length === 0) {
+        const nextStatus = mode === 'draft' ? 'draft' : 'submitted'
+        const submittedAt = nextStatus === 'submitted' ? new Date().toISOString() : undefined
+        const payload = {
+          requested_contributor_type: values.requested_contributor_type || null,
+          headline: values.headline || null,
+          organization_name: values.organization_name || null,
+          role_title: values.role_title || null,
+          country_expertise_text: values.country_expertise_text || null,
+          university_expertise_text: values.university_expertise_text || null,
+          subject_expertise_text: values.subject_expertise_text || null,
+          bio_draft: values.bio_draft || null,
+          motivation: values.motivation || null,
+          public_profile_requested: values.public_profile_requested,
+          public_attribution_consent: values.public_attribution_consent,
+          external_links: validation.externalLinks,
+          status: nextStatus,
+          ...(submittedAt ? { submitted_at: submittedAt } : {}),
+        }
+
+        const result = application
+          ? await supabase
+            .from('contributor_applications')
+            .update(payload)
+            .eq('id', application.id)
+            .eq('user_id', user.id)
+          : await supabase
+            .from('contributor_applications')
+            .insert({
+              user_id: user.id,
+              ...payload,
+            })
+
+        if (result.error) {
+          console.error('become-a-contributor: submit/update error:', result.error.message)
+          serverError = 'Could not save your contributor application right now. Please try again.'
+        } else {
+          const redirectFlag = nextStatus === 'draft' ? 'draft' : 'submitted'
+          return Astro.redirect(`/become-a-contributor?saved=${redirectFlag}`)
+        }
+      }
+    }
+  }
+}
+
+function formatDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+const displayStatus: ContributorDisplayStatus = isContributorProfileApproved(
+  contributorProfile?.profile_review_status,
+)
+  ? 'approved'
+  : application?.status ?? 'not_started'
+
+const statusLabel = CONTRIBUTOR_STATUS_LABELS[displayStatus]
+const statusBadgeClass = CONTRIBUTOR_STATUS_BADGES[displayStatus]
+const statusSummary = getContributorStatusSummary(displayStatus)
+const showEditableForm = !!user && !isAdminUser && (
+  !application || isContributorApplicationEditableByOwner(application.status)
+)
+const submittedDate = formatDate(application?.submitted_at)
+const updatedDate = formatDate(application?.updated_at)
+const reviewedDate = formatDate(application?.reviewed_at)
+const approvedDate = formatDate(contributorProfile?.approved_at)
+---
+<PublicLayout
+  title="Become a contributor — DegreeWiki"
+  description="Apply to contribute reviewed, source-backed study-abroad knowledge to DegreeWiki."
+  noindex={true}
+>
+  <div class="bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_34%),linear-gradient(180deg,_#f8fbff_0%,_#ffffff_72%)]">
+    <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <section class="overflow-hidden rounded-[32px] border border-sky-100 bg-[linear-gradient(135deg,#0f172a_0%,#11284f_45%,#1d4ed8_100%)] text-white shadow-[0_22px_80px_rgba(15,23,42,0.22)]">
+        <div class="grid gap-8 px-5 py-7 sm:px-7 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)] lg:px-8 lg:py-8">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.16em] text-sky-200">Contributor Program</p>
+            <h1 class="mt-3 max-w-3xl text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">
+              Help DegreeWiki stay accurate, practical, and source-backed
+            </h1>
+            <p class="mt-4 max-w-3xl text-base leading-7 text-sky-50/92 sm:text-lg">
+              DegreeWiki contributors add reviewed expertise, context, and corrections for study-abroad content.
+              Applications are reviewed manually, and approval never grants admin access.
+            </p>
+            <div class="mt-6 flex flex-wrap gap-2.5 text-sm">
+              <span class="rounded-full border border-white/15 bg-white/10 px-3 py-1.5">Reviewed access only</span>
+              <span class="rounded-full border border-white/15 bg-white/10 px-3 py-1.5">No public profile required</span>
+              <span class="rounded-full border border-white/15 bg-white/10 px-3 py-1.5">No live publishing rights</span>
+            </div>
+          </div>
+
+          <div class="rounded-[28px] border border-white/10 bg-white/10 p-5 backdrop-blur-sm">
+            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-200">What reviewers look for</p>
+            <ul class="mt-4 space-y-3 text-sm leading-6 text-sky-50/90">
+              <li>Relevant experience with countries, universities, or subject areas students actually need help evaluating.</li>
+              <li>Clear, plain-language explanations that can be reviewed against reliable sources.</li>
+              <li>Willingness to work through a reviewed workflow instead of editing live public content directly.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <div class="space-y-6">
+          {successMessage && (
+            <div class="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+              {successMessage}
+            </div>
+          )}
+
+          {serverError && (
+            <div class="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
+              {serverError}
+            </div>
+          )}
+
+          {!user ? (
+            <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+              <h2 class="text-2xl font-semibold tracking-[-0.02em] text-slate-950">Sign in to apply</h2>
+              <p class="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                You need a DegreeWiki account before starting a contributor application. After signing in,
+                you can save a draft, submit it for review, and track the current status from your account.
+              </p>
+              <div class="mt-6 flex flex-wrap gap-3">
+                <a
+                  href="/login?redirect=/become-a-contributor"
+                  class="inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700"
+                >
+                  Log in
+                </a>
+                <a
+                  href="/signup?redirect=/become-a-contributor"
+                  class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Create account
+                </a>
+              </div>
+            </section>
+          ) : isAdminUser ? (
+            <section class="rounded-[28px] border border-indigo-200 bg-[linear-gradient(180deg,#ffffff_0%,#eef2ff_100%)] p-6 shadow-[0_12px_36px_rgba(79,70,229,0.08)]">
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">
+                  Admin account
+                </span>
+              </div>
+              <h2 class="mt-3 text-2xl font-semibold tracking-[-0.02em] text-slate-950">Admin access already exists on this account</h2>
+              <p class="mt-3 text-sm leading-7 text-slate-600">
+                Contributor applications are meant for standard authenticated users. If you need to review
+                contributor requests, use the admin contributor queue.
+              </p>
+              <div class="mt-6">
+                <a
+                  href="/admin/contributors"
+                  class="inline-flex items-center justify-center rounded-full bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  Open admin contributor queue
+                </a>
+              </div>
+            </section>
+          ) : (
+            <>
+              <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+                <div class="flex flex-wrap items-center gap-3">
+                  <span class={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${statusBadgeClass}`}>
+                    {statusLabel}
+                  </span>
+                  {submittedDate && (
+                    <span class="text-xs text-slate-500">Submitted {submittedDate}</span>
+                  )}
+                  {approvedDate && (
+                    <span class="text-xs text-slate-500">Approved {approvedDate}</span>
+                  )}
+                </div>
+                <h2 class="mt-3 text-2xl font-semibold tracking-[-0.02em] text-slate-950">Your contributor application</h2>
+                <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600">{statusSummary}</p>
+
+                {reviewedDate && (
+                  <p class="mt-4 text-sm text-slate-500">Last reviewed {reviewedDate}</p>
+                )}
+                {updatedDate && (
+                  <p class="mt-1 text-sm text-slate-500">Last updated {updatedDate}</p>
+                )}
+
+                {!showEditableForm && (
+                  <div class="mt-6 flex flex-wrap gap-3">
+                    <a
+                      href="/account/contributor"
+                      class="inline-flex items-center justify-center rounded-full bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+                    >
+                      Open contributor status
+                    </a>
+                    <a
+                      href="/account"
+                      class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      Back to account
+                    </a>
+                  </div>
+                )}
+              </section>
+
+              {(application?.admin_notes || application?.rejection_reason) && (
+                <section class="rounded-[28px] border border-amber-200 bg-amber-50 p-6 shadow-[0_12px_36px_rgba(180,83,9,0.08)]">
+                  <h2 class="text-xl font-semibold tracking-[-0.02em] text-amber-950">Reviewer notes</h2>
+                  {application?.admin_notes && (
+                    <p class="mt-3 whitespace-pre-wrap text-sm leading-7 text-amber-900">{application.admin_notes}</p>
+                  )}
+                  {application?.rejection_reason && (
+                    <p class="mt-3 whitespace-pre-wrap text-sm leading-7 text-amber-900">
+                      <span class="font-semibold">Decision note:</span> {application.rejection_reason}
+                    </p>
+                  )}
+                </section>
+              )}
+
+              {showEditableForm && (
+                <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+                  <div class="mb-6">
+                    <h2 class="text-2xl font-semibold tracking-[-0.02em] text-slate-950">
+                      {application ? 'Update your application' : 'Start your application'}
+                    </h2>
+                    <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
+                      Keep this focused on the areas where you can add reliable, reviewed context. No file upload is required in this phase.
+                    </p>
+                  </div>
+
+                  <form method="post" class="space-y-5">
+                    <div class="grid gap-5 md:grid-cols-2">
+                      <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-800">Contributor type</span>
+                        <select
+                          name="requested_contributor_type"
+                          class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                        >
+                          <option value="">Select one</option>
+                          <option value="student" selected={values.requested_contributor_type === 'student'}>Student</option>
+                          <option value="alumni" selected={values.requested_contributor_type === 'alumni'}>Alumni</option>
+                          <option value="professor" selected={values.requested_contributor_type === 'professor'}>Professor</option>
+                          <option value="university_staff" selected={values.requested_contributor_type === 'university_staff'}>University staff</option>
+                          <option value="counselor" selected={values.requested_contributor_type === 'counselor'}>Counselor</option>
+                          <option value="education_expert" selected={values.requested_contributor_type === 'education_expert'}>Education expert</option>
+                          <option value="other" selected={values.requested_contributor_type === 'other'}>Other</option>
+                        </select>
+                        {errors.requested_contributor_type && (
+                          <span class="mt-2 block text-sm text-rose-700">{errors.requested_contributor_type}</span>
+                        )}
+                      </label>
+
+                      <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-800">Headline</span>
+                        <input
+                          name="headline"
+                          value={values.headline}
+                          class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                          placeholder="Example: International admissions advisor focused on Germany and the Netherlands"
+                        />
+                        {errors.headline && (
+                          <span class="mt-2 block text-sm text-rose-700">{errors.headline}</span>
+                        )}
+                      </label>
+                    </div>
+
+                    <div class="grid gap-5 md:grid-cols-2">
+                      <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-800">Organization name</span>
+                        <input
+                          name="organization_name"
+                          value={values.organization_name}
+                          class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                          placeholder="University, consultancy, lab, or current affiliation"
+                        />
+                        {errors.organization_name && (
+                          <span class="mt-2 block text-sm text-rose-700">{errors.organization_name}</span>
+                        )}
+                      </label>
+
+                      <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-800">Role title</span>
+                        <input
+                          name="role_title"
+                          value={values.role_title}
+                          class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                          placeholder="Example: Admissions counselor"
+                        />
+                        {errors.role_title && (
+                          <span class="mt-2 block text-sm text-rose-700">{errors.role_title}</span>
+                        )}
+                      </label>
+                    </div>
+
+                    <label class="block">
+                      <span class="mb-2 block text-sm font-medium text-slate-800">Country expertise</span>
+                      <textarea
+                        name="country_expertise_text"
+                        rows="3"
+                        class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                        placeholder="Countries, visa systems, or destination-specific guidance you know well"
+                      >{values.country_expertise_text}</textarea>
+                      {errors.country_expertise_text && (
+                        <span class="mt-2 block text-sm text-rose-700">{errors.country_expertise_text}</span>
+                      )}
+                    </label>
+
+                    <div class="grid gap-5 md:grid-cols-2">
+                      <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-800">University expertise</span>
+                        <textarea
+                          name="university_expertise_text"
+                          rows="4"
+                          class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                          placeholder="Universities or institutional areas you can speak to"
+                        >{values.university_expertise_text}</textarea>
+                        {errors.university_expertise_text && (
+                          <span class="mt-2 block text-sm text-rose-700">{errors.university_expertise_text}</span>
+                        )}
+                      </label>
+
+                      <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-800">Subject expertise</span>
+                        <textarea
+                          name="subject_expertise_text"
+                          rows="4"
+                          class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                          placeholder="Subjects, departments, or academic pathways you can help verify"
+                        >{values.subject_expertise_text}</textarea>
+                        {errors.subject_expertise_text && (
+                          <span class="mt-2 block text-sm text-rose-700">{errors.subject_expertise_text}</span>
+                        )}
+                      </label>
+                    </div>
+
+                    <label class="block">
+                      <span class="mb-2 block text-sm font-medium text-slate-800">Short bio</span>
+                      <textarea
+                        name="bio_draft"
+                        rows="5"
+                        class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                        placeholder="Share the practical background that helps reviewers understand your perspective."
+                      >{values.bio_draft}</textarea>
+                      {errors.bio_draft && (
+                        <span class="mt-2 block text-sm text-rose-700">{errors.bio_draft}</span>
+                      )}
+                    </label>
+
+                    <label class="block">
+                      <span class="mb-2 block text-sm font-medium text-slate-800">Why do you want to contribute?</span>
+                      <textarea
+                        name="motivation"
+                        rows="5"
+                        class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                        placeholder="Explain how you would help students and what kinds of reviewed contributions you expect to make."
+                      >{values.motivation}</textarea>
+                      {errors.motivation && (
+                        <span class="mt-2 block text-sm text-rose-700">{errors.motivation}</span>
+                      )}
+                    </label>
+
+                    <label class="block">
+                      <span class="mb-2 block text-sm font-medium text-slate-800">External links</span>
+                      <textarea
+                        name="external_links_text"
+                        rows="4"
+                        class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                        placeholder="One http:// or https:// link per line"
+                      >{values.external_links_text}</textarea>
+                      <span class="mt-2 block text-xs leading-6 text-slate-500">
+                        Optional. Add professional profiles, faculty pages, official staff bios, or similar public references.
+                      </span>
+                      {errors.external_links_text && (
+                        <span class="mt-2 block text-sm text-rose-700">{errors.external_links_text}</span>
+                      )}
+                    </label>
+
+                    <div class="space-y-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+                      <label class="flex items-start gap-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          name="public_profile_requested"
+                          checked={values.public_profile_requested}
+                          class="mt-1 h-4 w-4 rounded border-slate-300"
+                        />
+                        <span>Request a future public contributor profile if the application is approved.</span>
+                      </label>
+
+                      <label class="flex items-start gap-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          name="public_attribution_consent"
+                          checked={values.public_attribution_consent}
+                          class="mt-1 h-4 w-4 rounded border-slate-300"
+                        />
+                        <span>I consent to future public attribution if DegreeWiki later enables approved contributor profiles.</span>
+                      </label>
+                      {errors.public_attribution_consent && (
+                        <span class="block text-sm text-rose-700">{errors.public_attribution_consent}</span>
+                      )}
+                    </div>
+
+                    <div class="flex flex-wrap gap-3">
+                      <button
+                        type="submit"
+                        name="intent"
+                        value="submit_application"
+                        class="inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700"
+                      >
+                        {application?.status === 'needs_more_info' ? 'Resubmit application' : 'Submit application'}
+                      </button>
+                      <button
+                        type="submit"
+                        name="intent"
+                        value="save_draft"
+                        class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        Save draft
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              )}
+            </>
+          )}
+        </div>
+
+        <div class="space-y-6">
+          <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">How this works</p>
+            <ol class="mt-4 space-y-3">
+              <li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-700">
+                <span class="font-semibold text-slate-900">1. Apply.</span> Tell DegreeWiki where your expertise is strongest and how you would contribute.
+              </li>
+              <li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-700">
+                <span class="font-semibold text-slate-900">2. Get reviewed.</span> An admin or reviewer checks fit, clarity, and whether your application supports a safe reviewed workflow.
+              </li>
+              <li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-700">
+                <span class="font-semibold text-slate-900">3. Contribute later.</span> Approved contributors get contributor role access only, not admin access or direct publishing rights.
+              </li>
+            </ol>
+          </section>
+
+          <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current phase limits</p>
+            <ul class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+              <li>No file or proof upload flow is included yet.</li>
+              <li>No public contributor directory or public profile page is live yet.</li>
+              <li>Contributor approval does not unlock admin pages or admin permissions.</li>
+              <li>Contributor submission tools for live content corrections arrive in a later phase.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</PublicLayout>
+

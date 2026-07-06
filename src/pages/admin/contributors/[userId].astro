@@ -1,0 +1,429 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro'
+import { forbiddenAdminResponse, requireAnyAdminPermission } from '../../../lib/admin/guard'
+import { validateIn, type FormErrors } from '../../../lib/admin/validate'
+import {
+  CONTRIBUTOR_REVIEW_ACTIONS,
+  CONTRIBUTOR_STATUS_BADGES,
+  CONTRIBUTOR_STATUS_LABELS,
+  type ContributorApplicationRecord,
+  type ContributorProfileRecord,
+  type ContributorReviewAction,
+  type ContributorScopeRecord,
+} from '../../../lib/contributors/application'
+import { isContributorProfileApproved } from '../../../lib/contributors/status'
+
+const guard = await requireAnyAdminPermission(
+  Astro.cookies,
+  Astro.request,
+  Astro.url.pathname,
+  ['edit_content', 'manage_users'],
+)
+if (guard.type === 'redirect') return Astro.redirect(guard.to)
+if (guard.type === 'forbidden') return forbiddenAdminResponse()
+
+const { user, supabase } = guard
+const targetUserId = Astro.params.userId ?? ''
+
+if (!/^[0-9a-fA-F-]{36}$/.test(targetUserId)) {
+  return new Response('Contributor application not found.', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  })
+}
+
+const reviewFlash = Astro.url.searchParams.get('reviewed')
+const successMessage = reviewFlash
+  ? `Contributor application updated: ${reviewFlash.replace(/_/g, ' ')}.`
+  : null
+
+const [
+  applicationResult,
+  userProfileResult,
+  contributorProfileResult,
+  scopesResult,
+  countriesResult,
+  universitiesResult,
+] = await Promise.all([
+  supabase
+    .from('contributor_applications')
+    .select(`
+      id, user_id, status, requested_contributor_type, headline,
+      organization_name, role_title, country_expertise_text,
+      university_expertise_text, subject_expertise_text, bio_draft,
+      motivation, public_profile_requested, public_attribution_consent,
+      external_links, admin_notes, rejection_reason, reviewed_by_user_id,
+      reviewed_at, submitted_at, created_at, updated_at
+    `)
+    .eq('user_id', targetUserId)
+    .order('created_at', { ascending: false })
+    .limit(1),
+  supabase.from('user_profiles').select('id, display_name, account_status, created_at').eq('id', targetUserId).maybeSingle(),
+  supabase
+    .from('contributor_profiles')
+    .select(`
+      user_id, profile_review_status, public_profile_enabled,
+      public_display_name, public_role_label, organization_name,
+      headline, joined_at, approved_at
+    `)
+    .eq('user_id', targetUserId)
+    .maybeSingle(),
+  supabase
+    .from('contributor_scopes')
+    .select('id, scope_type, country_id, university_id, subject_id, is_active, approved_at, created_at')
+    .eq('contributor_user_id', targetUserId)
+    .order('created_at', { ascending: true }),
+  supabase.from('countries').select('id, name').order('name'),
+  supabase.from('universities').select('id, name').order('name'),
+])
+
+const application = ((applicationResult.data ?? [])[0] ?? null) as ContributorApplicationRecord | null
+if (!application) {
+  return new Response('Contributor application not found.', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  })
+}
+
+const contributorProfile = (contributorProfileResult.data ?? null) as ContributorProfileRecord | null
+const scopes = (scopesResult.data ?? []) as ContributorScopeRecord[]
+const countries = ((countriesResult.data ?? []) as { id: string; name: string }[])
+const universities = ((universitiesResult.data ?? []) as { id: string; name: string }[])
+
+const countryNameById = new Map(countries.map(country => [country.id, country.name]))
+const universityNameById = new Map(universities.map(university => [university.id, university.name]))
+
+let reviewNotes = application.admin_notes ?? ''
+let rejectionReason = application.rejection_reason ?? ''
+let selectedCountryIds = scopes
+  .filter(scope => scope.scope_type === 'country' && scope.is_active && scope.country_id)
+  .map(scope => scope.country_id as string)
+let selectedUniversityIds = scopes
+  .filter(scope => scope.scope_type === 'university' && scope.is_active && scope.university_id)
+  .map(scope => scope.university_id as string)
+let formErrors: FormErrors = {}
+let serverError = ''
+let hasSubmittedReview = false
+
+if (Astro.request.method === 'POST') {
+  hasSubmittedReview = true
+  const form = await Astro.request.formData()
+  const reviewAction = String(form.get('review_action') ?? '') as ContributorReviewAction
+  reviewNotes = String(form.get('review_notes') ?? '').trim()
+  rejectionReason = String(form.get('rejection_reason') ?? '').trim()
+  selectedCountryIds = Array.from(new Set(form.getAll('scope_country_ids').map(value => String(value).trim()).filter(Boolean)))
+  selectedUniversityIds = Array.from(new Set(form.getAll('scope_university_ids').map(value => String(value).trim()).filter(Boolean)))
+
+  const reviewActionError = validateIn(reviewAction, CONTRIBUTOR_REVIEW_ACTIONS, 'Review action')
+  if (reviewActionError) {
+    formErrors.review_action = reviewActionError
+  }
+
+  if (reviewAction === 'needs_more_info' && !reviewNotes) {
+    formErrors.review_notes = 'Review notes are required when requesting more information.'
+  }
+
+  if (reviewAction === 'rejected' && !rejectionReason && !reviewNotes) {
+    formErrors.rejection_reason = 'Add a rejection reason or review note before rejecting this application.'
+  }
+
+  if (reviewAction === 'approved') {
+    const validCountryIds = new Set(countries.map(country => country.id))
+    const validUniversityIds = new Set(universities.map(university => university.id))
+
+    if (selectedCountryIds.some(id => !validCountryIds.has(id))) {
+      formErrors.scope_country_ids = 'One or more selected countries are invalid.'
+    }
+
+    if (selectedUniversityIds.some(id => !validUniversityIds.has(id))) {
+      formErrors.scope_university_ids = 'One or more selected universities are invalid.'
+    }
+  }
+
+  if (Object.keys(formErrors).length === 0) {
+    const { error } = await supabase.rpc('review_contributor_application', {
+      target_application_id: application.id,
+      next_status: reviewAction,
+      review_note: reviewNotes || null,
+      rejection_note: rejectionReason || null,
+      scope_country_ids: reviewAction === 'approved' ? selectedCountryIds : [],
+      scope_university_ids: reviewAction === 'approved' ? selectedUniversityIds : [],
+    })
+
+    if (error) {
+      console.error('admin/contributors detail: review rpc error:', error.message)
+      serverError = error.message || 'Could not update this contributor application.'
+    } else {
+      return Astro.redirect(`/admin/contributors/${targetUserId}?reviewed=${encodeURIComponent(reviewAction)}`)
+    }
+  }
+}
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+const displayName = (userProfileResult.data as any)?.display_name as string | null
+const approvedContributor = isContributorProfileApproved(contributorProfile?.profile_review_status)
+const externalLinks = Array.isArray(application.external_links)
+  ? application.external_links.flatMap((value) => typeof value === 'string' ? [value] : [])
+  : []
+const currentCountryScopes = scopes
+  .filter(scope => scope.scope_type === 'country' && scope.is_active && scope.country_id)
+  .map(scope => countryNameById.get(scope.country_id as string))
+  .filter((value): value is string => !!value)
+const currentUniversityScopes = scopes
+  .filter(scope => scope.scope_type === 'university' && scope.is_active && scope.university_id)
+  .map(scope => universityNameById.get(scope.university_id as string))
+  .filter((value): value is string => !!value)
+---
+<AdminLayout title="Contributor Review — DegreeWiki Admin" activePath="/admin/contributors" userEmail={user.email ?? ''}>
+  <div class="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <a href="/admin/contributors" class="text-sm text-gray-500 hover:underline">← Back to Contributors</a>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">Contributor review</h1>
+      <p class="mt-1 text-sm text-gray-500">
+        Review this application, request more information, or approve contributor access.
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <span class={`inline-flex items-center rounded border px-2.5 py-1 text-xs font-medium ${CONTRIBUTOR_STATUS_BADGES[application.status]}`}>
+        {CONTRIBUTOR_STATUS_LABELS[application.status]}
+      </span>
+      {approvedContributor && (
+        <span class="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+          contributor active
+        </span>
+      )}
+    </div>
+  </div>
+
+  {successMessage && (
+    <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+      {successMessage}
+    </div>
+  )}
+
+  {serverError && (
+    <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {serverError}
+    </div>
+  )}
+
+  <div class="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+    <div class="space-y-6">
+      <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Applicant</p>
+            <p class="mt-2 text-base font-semibold text-gray-900">{displayName ?? 'Unnamed applicant'}</p>
+            <p class="mt-1 font-mono text-xs text-gray-400">{application.user_id}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Timeline</p>
+            <p class="mt-2 text-sm text-gray-700">Submitted: {formatDate(application.submitted_at)}</p>
+            <p class="mt-1 text-sm text-gray-700">Reviewed: {formatDate(application.reviewed_at)}</p>
+            <p class="mt-1 text-sm text-gray-700">Updated: {formatDate(application.updated_at)}</p>
+          </div>
+        </div>
+
+        <dl class="mt-5 grid gap-4 sm:grid-cols-2">
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">Contributor type</dt>
+            <dd class="mt-2 text-sm text-gray-800">{application.requested_contributor_type ?? '—'}</dd>
+          </div>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">Role title</dt>
+            <dd class="mt-2 text-sm text-gray-800">{application.role_title ?? '—'}</dd>
+          </div>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">Organization</dt>
+            <dd class="mt-2 text-sm text-gray-800">{application.organization_name ?? '—'}</dd>
+          </div>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">Public profile requested</dt>
+            <dd class="mt-2 text-sm text-gray-800">{application.public_profile_requested ? 'Yes' : 'No'}</dd>
+          </div>
+        </dl>
+
+        <div class="mt-5 rounded-lg border border-gray-200 px-4 py-4">
+          <h2 class="text-base font-semibold text-gray-900">Headline</h2>
+          <p class="mt-2 text-sm leading-7 text-gray-700">{application.headline ?? 'No headline provided.'}</p>
+        </div>
+
+        <div class="mt-4 rounded-lg border border-gray-200 px-4 py-4">
+          <h2 class="text-base font-semibold text-gray-900">Bio draft</h2>
+          <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-700">{application.bio_draft ?? 'No bio provided.'}</p>
+        </div>
+
+        <div class="mt-4 rounded-lg border border-gray-200 px-4 py-4">
+          <h2 class="text-base font-semibold text-gray-900">Motivation</h2>
+          <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-700">{application.motivation ?? 'No motivation provided.'}</p>
+        </div>
+
+        <div class="mt-4 grid gap-4 lg:grid-cols-3">
+          <div class="rounded-lg border border-gray-200 px-4 py-4">
+            <h2 class="text-sm font-semibold text-gray-900">Country expertise</h2>
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-700">{application.country_expertise_text ?? '—'}</p>
+          </div>
+          <div class="rounded-lg border border-gray-200 px-4 py-4">
+            <h2 class="text-sm font-semibold text-gray-900">University expertise</h2>
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-700">{application.university_expertise_text ?? '—'}</p>
+          </div>
+          <div class="rounded-lg border border-gray-200 px-4 py-4">
+            <h2 class="text-sm font-semibold text-gray-900">Subject expertise</h2>
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-700">{application.subject_expertise_text ?? '—'}</p>
+          </div>
+        </div>
+
+        {externalLinks.length > 0 && (
+          <div class="mt-4 rounded-lg border border-gray-200 px-4 py-4">
+            <h2 class="text-base font-semibold text-gray-900">External links</h2>
+            <ul class="mt-3 space-y-2">
+              {externalLinks.map(link => (
+                <li>
+                  <a href={link} target="_blank" rel="noreferrer" class="text-sm text-blue-700 underline break-all">
+                    {link}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+    </div>
+
+    <div class="space-y-6">
+      <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <h2 class="text-base font-semibold text-gray-900">Contributor profile state</h2>
+        {!contributorProfile ? (
+          <p class="mt-3 text-sm text-gray-600">No contributor profile row exists yet.</p>
+        ) : (
+          <div class="mt-4 space-y-3 text-sm text-gray-700">
+            <p><span class="font-semibold text-gray-900">Review status:</span> {contributorProfile.profile_review_status}</p>
+            <p><span class="font-semibold text-gray-900">Public profile enabled:</span> {contributorProfile.public_profile_enabled ? 'Yes' : 'No'}</p>
+            <p><span class="font-semibold text-gray-900">Joined:</span> {formatDate(contributorProfile.joined_at)}</p>
+            <p><span class="font-semibold text-gray-900">Approved:</span> {formatDate(contributorProfile.approved_at)}</p>
+          </div>
+        )}
+      </section>
+
+      <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <h2 class="text-base font-semibold text-gray-900">Approved scopes</h2>
+        <div class="mt-4 space-y-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Countries</p>
+            <p class="mt-2 text-sm text-gray-700">{currentCountryScopes.length > 0 ? currentCountryScopes.join(', ') : 'None yet'}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Universities</p>
+            <p class="mt-2 text-sm text-gray-700">{currentUniversityScopes.length > 0 ? currentUniversityScopes.join(', ') : 'None yet'}</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <h2 class="text-base font-semibold text-gray-900">Review action</h2>
+        <form method="post" class="mt-4 space-y-4">
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-800" for="review_action">Action</label>
+            <select
+              id="review_action"
+              name="review_action"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="pending_review">Mark pending review</option>
+              <option value="needs_more_info">Needs more info</option>
+              <option value="approved">Approve contributor</option>
+              <option value="rejected">Reject application</option>
+            </select>
+            {formErrors.review_action && (
+              <p class="mt-2 text-sm text-red-600">{formErrors.review_action}</p>
+            )}
+          </div>
+
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-800" for="review_notes">Review notes</label>
+            <textarea
+              id="review_notes"
+              name="review_notes"
+              rows="4"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
+            >{reviewNotes}</textarea>
+            {formErrors.review_notes && (
+              <p class="mt-2 text-sm text-red-600">{formErrors.review_notes}</p>
+            )}
+          </div>
+
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-800" for="rejection_reason">Rejection reason</label>
+            <textarea
+              id="rejection_reason"
+              name="rejection_reason"
+              rows="3"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
+            >{rejectionReason}</textarea>
+            <p class="mt-2 text-xs text-gray-500">Used when rejecting an application. Review notes remain the general admin note field.</p>
+            {formErrors.rejection_reason && (
+              <p class="mt-2 text-sm text-red-600">{formErrors.rejection_reason}</p>
+            )}
+          </div>
+
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-800" for="scope_country_ids">Country scopes for approval</label>
+            <select
+              id="scope_country_ids"
+              name="scope_country_ids"
+              multiple
+              size="6"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
+            >
+              {countries.map(country => (
+                <option value={country.id} selected={selectedCountryIds.includes(country.id)}>
+                  {country.name}
+                </option>
+              ))}
+            </select>
+            <p class="mt-2 text-xs text-gray-500">Optional. These are applied only when the action is Approve contributor.</p>
+            {formErrors.scope_country_ids && (
+              <p class="mt-2 text-sm text-red-600">{formErrors.scope_country_ids}</p>
+            )}
+          </div>
+
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-800" for="scope_university_ids">University scopes for approval</label>
+            <select
+              id="scope_university_ids"
+              name="scope_university_ids"
+              multiple
+              size="8"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
+            >
+              {universities.map(university => (
+                <option value={university.id} selected={selectedUniversityIds.includes(university.id)}>
+                  {university.name}
+                </option>
+              ))}
+            </select>
+            <p class="mt-2 text-xs text-gray-500">Optional. Existing active scopes remain selected by default.</p>
+            {formErrors.scope_university_ids && (
+              <p class="mt-2 text-sm text-red-600">{formErrors.scope_university_ids}</p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            class="inline-flex items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            Save review action
+          </button>
+        </form>
+      </section>
+    </div>
+  </div>
+</AdminLayout>

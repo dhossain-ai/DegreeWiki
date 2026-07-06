@@ -21,6 +21,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: '/admin/ai-knowledge', label: 'AI Knowledge', requiredPermissions: ['manage_ai_settings'] },
   { href: '/admin/data-quality', label: 'Data Quality', requiredPermissions: ['view_data_quality', 'manage_data_sources'] },
   { href: '/admin/imports', label: 'Imports', requiredPermissions: ['manage_imports', 'approve_import', 'reject_import'] },
+  { href: '/admin/contributors', label: 'Contributors', requiredPermissions: ['edit_content', 'manage_users'] },
   { href: '/admin/users', label: 'Users', requiredPermissions: ['manage_users', 'manage_roles'] },
   { href: '/admin/system', label: 'System', requiredPermissions: ['manage_roles', 'manage_settings'] },
 ]

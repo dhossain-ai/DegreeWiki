@@ -5,6 +5,35 @@
 
 ## Recent Task Log
 
+### Phase 82C - Contributor Application + Admin Review Bundle
+
+- Added `030_contributor_review_workflow.sql` with a narrow authenticated
+  `review_contributor_application()` RPC so reviewer/admin users can move contributor applications
+  through review, block self-review, ensure `contributor_profiles` exists on approval, grant the
+  non-admin `contributor` role via `user_roles`, and optionally create approved country/university
+  contributor scopes without using service-role code in app pages.
+- Added `src/lib/contributors/application.ts` for contributor form normalization, server-side
+  validation, external-link parsing, and shared contributor status labels/badges/summaries.
+- Added public `/become-a-contributor` with contributor-program explainer copy, login/signup CTA
+  for signed-out users, draft/save + submit handling for authenticated users, owner-safe status
+  display, and `needs_more_info` review-note feedback.
+- Added `/account/contributor` plus a new contributor status card on `/account` so authenticated
+  users can track application state, reviewer notes, approved contributor placeholder state, and
+  resume editable draft or `needs_more_info` applications.
+- Added `/admin/contributors` and `/admin/contributors/[userId]`, linked the queue in admin
+  navigation, and protected both routes with the existing admin permission guard using the same
+  reviewer/admin permission family already recognized by `can_manage_contributor_records()`.
+- Added admin review actions for `pending_review`, `needs_more_info`, `approved`, and `rejected`,
+  including optional scope assignment on approval and a visible approved-contributor state when a
+  matching `contributor_profiles` row already exists.
+- Kept scope intentionally tight: no public contributor directory or profile pages, no proof/file
+  upload flow, no Cloudinary contributor avatar work, no contributor content-submission UI, no new
+  dependencies, and no admin-permission grant to contributor users.
+- Ran `npm run build`, `rg -n "innerHTML|set:html|service_role|SERVICE_ROLE|createServiceClient" src`,
+  and `rg -n "AI_GATEWAY_MASTER_KEY|GEMINI_API_KEY|OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY" src`.
+- Ran `npx tsc --noEmit`; it still fails on pre-existing repo-wide AI/import typing issues outside
+  the Phase 82C contributor files.
+
 ### Phase 82B - Contributor DB/RLS Foundation
 
 - Added `029_contributor_foundation.sql` with a seeded non-admin `contributor` role and six new

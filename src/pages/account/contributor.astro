@@ -1,0 +1,238 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro'
+import { userHasAdminRole } from '../../lib/auth/dashboard'
+import {
+  CONTRIBUTOR_STATUS_BADGES,
+  CONTRIBUTOR_STATUS_LABELS,
+  getContributorStatusSummary,
+  type ContributorApplicationRecord,
+  type ContributorDisplayStatus,
+  type ContributorProfileRecord,
+} from '../../lib/contributors/application'
+import {
+  isContributorApplicationEditableByOwner,
+  isContributorProfileApproved,
+} from '../../lib/contributors/status'
+import { createClient } from '../../lib/supabase/server'
+
+const supabase = createClient(Astro.cookies, Astro.request)
+
+const { data: { user } } = await supabase.auth.getUser()
+if (!user) {
+  return Astro.redirect('/login?redirect=/account/contributor')
+}
+
+if (await userHasAdminRole(supabase)) {
+  return Astro.redirect('/admin/contributors')
+}
+
+const [applicationResult, contributorProfileResult] = await Promise.all([
+  supabase
+    .from('contributor_applications')
+    .select(`
+      id, user_id, status, requested_contributor_type, headline,
+      organization_name, role_title, country_expertise_text,
+      university_expertise_text, subject_expertise_text, bio_draft,
+      motivation, public_profile_requested, public_attribution_consent,
+      external_links, admin_notes, rejection_reason, reviewed_by_user_id,
+      reviewed_at, submitted_at, created_at, updated_at
+    `)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle(),
+  supabase
+    .from('contributor_profiles')
+    .select(`
+      user_id, profile_review_status, public_profile_enabled,
+      public_display_name, public_role_label, organization_name,
+      headline, joined_at, approved_at
+    `)
+    .eq('user_id', user.id)
+    .maybeSingle(),
+])
+
+let application: ContributorApplicationRecord | null = null
+let contributorProfile: ContributorProfileRecord | null = null
+
+if (applicationResult.error) {
+  console.error('account/contributor: application query error:', applicationResult.error.message)
+} else if (applicationResult.data) {
+  application = applicationResult.data as ContributorApplicationRecord
+}
+
+if (contributorProfileResult.error) {
+  console.error('account/contributor: contributor profile query error:', contributorProfileResult.error.message)
+} else if (contributorProfileResult.data) {
+  contributorProfile = contributorProfileResult.data as ContributorProfileRecord
+}
+
+function formatDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+const displayStatus: ContributorDisplayStatus = isContributorProfileApproved(
+  contributorProfile?.profile_review_status,
+)
+  ? 'approved'
+  : application?.status ?? 'not_started'
+
+const statusLabel = CONTRIBUTOR_STATUS_LABELS[displayStatus]
+const statusBadgeClass = CONTRIBUTOR_STATUS_BADGES[displayStatus]
+const statusSummary = getContributorStatusSummary(displayStatus)
+const canEdit = !!application && isContributorApplicationEditableByOwner(application.status)
+const submittedDate = formatDate(application?.submitted_at)
+const reviewedDate = formatDate(application?.reviewed_at)
+const approvedDate = formatDate(contributorProfile?.approved_at)
+const joinedDate = formatDate(contributorProfile?.joined_at)
+---
+<PublicLayout title="Contributor status — DegreeWiki" noindex={true}>
+  <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+    <section class="overflow-hidden rounded-[30px] border border-slate-200 bg-[linear-gradient(140deg,#f8fbff_0%,#eef4ff_52%,#ffffff_100%)] shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+      <div class="grid gap-6 px-5 py-6 sm:px-7 lg:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)] lg:px-8 lg:py-8">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Account / Contributor</p>
+          <h1 class="mt-3 text-3xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-4xl">Contributor application status</h1>
+          <p class="mt-4 max-w-3xl text-base leading-7 text-slate-650">
+            Track your contributor application, review notes, and approval state here.
+          </p>
+          <div class="mt-5 flex flex-wrap items-center gap-3">
+            <span class={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${statusBadgeClass}`}>
+              {statusLabel}
+            </span>
+            {submittedDate && <span class="text-sm text-slate-500">Submitted {submittedDate}</span>}
+            {approvedDate && <span class="text-sm text-slate-500">Approved {approvedDate}</span>}
+          </div>
+        </div>
+
+        <div class="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_12px_30px_rgba(37,99,235,0.08)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">Current state</p>
+          <p class="mt-3 text-sm leading-7 text-slate-600">{statusSummary}</p>
+          <div class="mt-5 flex flex-wrap gap-3">
+            <a
+              href={canEdit || displayStatus === 'not_started' ? '/become-a-contributor' : '/account'}
+              class="inline-flex items-center justify-center rounded-full bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              {canEdit || displayStatus === 'not_started' ? 'Open application' : 'Back to account'}
+            </a>
+            <a
+              href="/account"
+              class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+            >
+              Account home
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)]">
+      <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+        <h2 class="text-2xl font-semibold tracking-[-0.02em] text-slate-950">Application details</h2>
+        {!application ? (
+          <>
+            <p class="mt-3 text-sm leading-7 text-slate-600">
+              You have not started a contributor application yet.
+            </p>
+            <div class="mt-6">
+              <a
+                href="/become-a-contributor"
+                class="inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700"
+              >
+                Start application
+              </a>
+            </div>
+          </>
+        ) : (
+          <dl class="mt-5 grid gap-4 sm:grid-cols-2">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <dt class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Contributor type</dt>
+              <dd class="mt-2 text-sm text-slate-800">{application.requested_contributor_type ?? 'Not provided'}</dd>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <dt class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Headline</dt>
+              <dd class="mt-2 text-sm text-slate-800">{application.headline ?? 'Not provided'}</dd>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <dt class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Role title</dt>
+              <dd class="mt-2 text-sm text-slate-800">{application.role_title ?? 'Not provided'}</dd>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <dt class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Organization</dt>
+              <dd class="mt-2 text-sm text-slate-800">{application.organization_name ?? 'Not provided'}</dd>
+            </div>
+          </dl>
+        )}
+
+        {application?.country_expertise_text && (
+          <div class="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <h3 class="text-sm font-semibold text-slate-900">Country expertise</h3>
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{application.country_expertise_text}</p>
+          </div>
+        )}
+
+        {application?.university_expertise_text && (
+          <div class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <h3 class="text-sm font-semibold text-slate-900">University expertise</h3>
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{application.university_expertise_text}</p>
+          </div>
+        )}
+
+        {application?.subject_expertise_text && (
+          <div class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <h3 class="text-sm font-semibold text-slate-900">Subject expertise</h3>
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{application.subject_expertise_text}</p>
+          </div>
+        )}
+      </section>
+
+      <div class="space-y-6">
+        <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_36px_rgba(15,23,42,0.05)]">
+          <h2 class="text-xl font-semibold tracking-[-0.02em] text-slate-950">Review timeline</h2>
+          <ul class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+            <li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <span class="font-semibold text-slate-900">Last review:</span> {reviewedDate ?? 'Not reviewed yet'}
+            </li>
+            <li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <span class="font-semibold text-slate-900">Contributor joined:</span> {joinedDate ?? 'Pending approval'}
+            </li>
+            <li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <span class="font-semibold text-slate-900">Public profile requested:</span> {application?.public_profile_requested ? 'Yes' : 'No'}
+            </li>
+          </ul>
+        </section>
+
+        {(application?.admin_notes || application?.rejection_reason) && (
+          <section class="rounded-[28px] border border-amber-200 bg-amber-50 p-6 shadow-[0_12px_36px_rgba(180,83,9,0.08)]">
+            <h2 class="text-xl font-semibold tracking-[-0.02em] text-amber-950">Reviewer notes</h2>
+            {application?.admin_notes && (
+              <p class="mt-3 whitespace-pre-wrap text-sm leading-7 text-amber-900">{application.admin_notes}</p>
+            )}
+            {application?.rejection_reason && (
+              <p class="mt-3 whitespace-pre-wrap text-sm leading-7 text-amber-900">
+                <span class="font-semibold">Decision note:</span> {application.rejection_reason}
+              </p>
+            )}
+          </section>
+        )}
+
+        {displayStatus === 'approved' && (
+          <section class="rounded-[28px] border border-emerald-200 bg-[linear-gradient(180deg,#ffffff_0%,#ecfdf5_100%)] p-6 shadow-[0_12px_36px_rgba(16,185,129,0.08)]">
+            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Future contributor dashboard</p>
+            <h2 class="mt-2 text-2xl font-semibold tracking-[-0.02em] text-slate-950">Contributor tools placeholder</h2>
+            <p class="mt-3 text-sm leading-7 text-slate-600">
+              This account is approved as a contributor. A later phase will add reviewed submission
+              tools, contributor scopes management, and public-profile controls here.
+            </p>
+          </section>
+        )}
+      </div>
+    </div>
+  </div>
+</PublicLayout>
+

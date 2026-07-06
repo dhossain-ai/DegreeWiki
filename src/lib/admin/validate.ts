@@ -34,6 +34,15 @@ export function validateNumeric(
   return null
 }
 
+export function validateMaxLength(
+  value: string | null | undefined,
+  max: number,
+  label: string,
+): string | null {
+  if (value && value.trim().length > max) return `${label} must be ${max} characters or fewer.`
+  return null
+}
+
 export function validateUrl(value: string, label: string): string | null {
   if (!value || value.trim() === '') return null
   try {
