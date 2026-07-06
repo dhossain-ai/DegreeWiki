@@ -6,17 +6,15 @@ main = "./dist/_worker.js/index.js"
 [assets]
 directory = "./dist"
 
+[[kv_namespaces]]
+binding = "SESSION"
+id = "07b8425fdb724cd6bd01c75e0d107151"
+
 # Local dev secrets go in .dev.vars (never commit that file).
 # See .dev.vars.example for the required keys.
 # Astro's Cloudflare adapter enables sessions and expects a KV binding named SESSION.
-# Create a real KV namespace in Cloudflare and bind it as SESSION before production deploys.
-# Do not commit real namespace IDs to this repository.
+# Production uses the real Cloudflare KV namespace bound above as SESSION.
 # Manual setup lives in docs/08-ai-deployment-checklist.md.
-#
-# Example binding shape after manual setup:
-# [[kv_namespaces]]
-# binding = "SESSION"
-# add the real namespace id only after creating the namespace in Cloudflare
 #
 # Cloudflare production secrets are set via:
 #   npx wrangler pages secret put GEMINI_API_KEY
