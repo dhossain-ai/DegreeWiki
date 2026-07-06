@@ -603,7 +603,7 @@ const matchLegend: Array<{ label: string; tone: FitMatchTone }> = [
         )}
         {showDevPersistWarning && (
           <div class="max-w-3xl mb-5 px-4 py-3 rounded-md bg-yellow-50 border border-yellow-300 text-sm text-yellow-900">
-            <strong>Developer note:</strong> this result displayed but was not saved. Check that <code class="font-mono bg-yellow-100 px-1 rounded">SUPABASE_SERVICE_ROLE_KEY</code> is set in the server/runtime environment.
+            <strong>Developer note:</strong> this result displayed but was not saved. Check that the required server-side persistence key is set in the runtime environment.
           </div>
         )}
         {showAISummaryCard && (

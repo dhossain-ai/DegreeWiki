@@ -1,50 +1,63 @@
 # DegreeWiki AI Deployment Checklist
 
-Use this checklist before and after deploying any build that includes AI Finder functionality.
+Use this checklist before and after deploying any Cloudflare-first production build that includes
+AI Finder, Google sign-in, or admin AI/media functionality.
 
 ---
 
 ## 1. Purpose
 
-The AI Finder depends on two server-only secrets and several optional env vars. If either
-required secret is absent, all AI calls fail closed — rule-based matches still render, but
-the AI summary section is not shown. This checklist confirms the secrets are set, the build
-is clean, and AI behavior is working as expected in production.
+DegreeWiki's production launch target is `https://degreewiki.com` on Astro SSR with the
+Cloudflare adapter. The launch-critical repo hardening items are:
+
+- Cloudflare must provide a KV binding named `SESSION`
+- production env names must match the current runtime
+- Supabase Auth and Google OAuth must point at the apex domain
+- `www.degreewiki.com` should redirect to `https://degreewiki.com`
+- Google-created users must remain non-admin by default
+
+For AI specifically, if the required server-only secrets are absent, all AI calls fail closed.
+Rule-based matches still render, but the AI summary section is not shown.
 
 ---
 
-## 2. Required Secrets
+## 2. Server-Only Secrets
 
 These must be set as encrypted Cloudflare secrets, not plain environment variables.
 They must never use the `PUBLIC_` prefix. Never commit real values to the repository.
 
-| Secret | Purpose |
-|---|---|
-| `AI_GATEWAY_MASTER_KEY` | Base64-encoded 32-byte AES key used to decrypt DB-stored provider API keys |
-| `AI_GATEWAY_ACTIVE_KEY_VERSION` | Active encryption key version label used for DB-stored provider credentials |
-| `GEMINI_API_KEY` | Authenticates calls to the Gemini REST API (when `AI_PROVIDER=gemini`) |
-| `OPENROUTER_API_KEY` | Authenticates calls to OpenRouter (when `AI_PROVIDER=openrouter`) — local AI testing |
-| `SUPABASE_SERVICE_ROLE_KEY` | Rate-limit checks, AI usage logging, saved-result persistence |
+| Secret | Required | Purpose |
+|---|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes for AI persistence/quota | Rate-limit checks, AI usage logging, saved-result persistence |
+| `GEMINI_API_KEY` | Yes when `AI_PROVIDER=gemini` | Authenticates calls to the Gemini REST API |
+| `OPENROUTER_API_KEY` | Yes when `AI_PROVIDER=openrouter` | Authenticates calls to OpenRouter |
+| `AI_GATEWAY_MASTER_KEY` | Required only for DB-managed AI Gateway provider accounts | Base64-encoded 32-byte AES key used to decrypt DB-stored provider API keys |
+| `AI_GATEWAY_ACTIVE_KEY_VERSION` | Required only for DB-managed AI Gateway provider accounts | Active encryption key version label used for DB-stored provider credentials |
+| `CLOUDINARY_API_KEY` | Required only if admin media upload/import is enabled | Cloudinary server-side signing/auth |
+| `CLOUDINARY_API_SECRET` | Required only if admin media upload/import is enabled | Cloudinary server-side signing secret |
 
-Only the API key for the active env fallback `AI_PROVIDER` is required. All secrets above are server-only and
-must never use the `PUBLIC_` prefix.
+Google OAuth client credentials belong in the Supabase Auth Google provider configuration, not in
+the app runtime env examples.
 
 ---
 
-## 3. Required Environment Variables
+## 3. Runtime Environment Variables
 
-Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets.
+Set public/runtime vars in the Cloudflare Pages dashboard. Keep secrets in Cloudflare secrets.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `PUBLIC_SUPABASE_URL` | Yes | — | Supabase project URL |
 | `PUBLIC_SUPABASE_ANON_KEY` | Yes | — | Supabase anon key |
-| `PUBLIC_SITE_URL` | No | `https://degreewiki.com` | Canonical site URL |
+| `PUBLIC_SITE_URL` | Yes for production | `https://degreewiki.com` | Canonical site URL. Production should use the apex domain. |
+| `PUBLIC_CLOUDINARY_CLOUD_NAME` | Optional / conditional | — | Needed only when Cloudinary-backed media flows are enabled |
 | `AI_PROVIDER` | No | `gemini` | Active provider name: `gemini` or `openrouter` |
 | `AI_MODEL` | No | `gemini-2.5-flash` | Model string passed to provider |
 | `AI_GATEWAY_ENV_FALLBACK_ENABLED` | No | `false` | Enables env-based provider fallback when DB routing fails |
 | `AI_RATE_LIMIT_USER_DAILY` | No | `20` | Legacy combined daily fallback for logged-in successful AI calls when no matching DB policy exists |
 | `AI_RATE_LIMIT_ANON_DAILY` | No | `5` | Legacy combined daily fallback for future anonymous provider-backed AI when no matching DB policy exists |
+| `CLOUDINARY_UPLOAD_FOLDER` | Optional / conditional | `degreewiki` | Root upload folder for Cloudinary admin flows |
+| `CLOUDINARY_SIGNATURE_ALGORITHM` | Optional / conditional | `sha256` | Use `sha1` only if the Cloudinary account still requires it |
 
 ---
 
@@ -66,19 +79,25 @@ Set these in the Cloudflare Pages dashboard (or `wrangler.toml`), not as secrets
 
 Use **both** `.env.local` and `.dev.vars` so all three sources are covered:
 
-- `.env.local` — all vars including `PUBLIC_*` keys (for Vite/Astro dev server)
-- `.dev.vars` — private secrets only, no `PUBLIC_*` keys (for wrangler's `getPlatformProxy`)
+- `.env.local` — public/runtime values such as `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_ANON_KEY`,
+  `PUBLIC_SITE_URL`, and optional public Cloudinary name
+- `.dev.vars` — server-only keys only, with no `PUBLIC_*` entries
 
 See `.dev.vars.example` for the full list of required keys.
 
 ```bash
-# .dev.vars (git-ignored — copy from .dev.vars.example and fill in real values)
-GEMINI_API_KEY=your_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_service_key_here
+# .env.local
+PUBLIC_SUPABASE_URL=...
+PUBLIC_SUPABASE_ANON_KEY=...
+PUBLIC_SITE_URL=http://localhost:4321
+
+# .dev.vars
+SUPABASE_SERVICE_ROLE_KEY=...
+GEMINI_API_KEY=...
 AI_PROVIDER=gemini
 AI_MODEL=gemini-2.5-flash
-AI_RATE_LIMIT_ANON_DAILY=3
-AI_RATE_LIMIT_USER_DAILY=10
+AI_RATE_LIMIT_ANON_DAILY=5
+AI_RATE_LIMIT_USER_DAILY=20
 ```
 
 ### Local AI testing with OpenRouter
@@ -127,32 +146,116 @@ row will be created and `/fit-finder/results` will appear empty.
 
 ---
 
-## 4. Cloudflare Setup Commands
+## 4. Cloudflare Runtime Setup
 
-Use the command matching your deployment target. Enter the real value when prompted.
-Do not pass values as command-line arguments.
+DegreeWiki is Cloudflare-first for launch. Keep the Cloudflare adapter and server output.
+
+### 4A. Required `SESSION` KV binding
+
+Astro's Cloudflare adapter enables sessions and expects a KV binding named `SESSION`.
+The build can succeed without it, but production must provide a real KV namespace binding with
+that exact variable name.
+
+Cloudflare Pages dashboard steps:
+
+1. In Cloudflare, go to Workers & Pages.
+2. Open the DegreeWiki Pages project.
+3. Go to Settings > Bindings.
+4. Add a KV namespace binding.
+5. Set Variable name to `SESSION`.
+6. Select the real KV namespace to use for Astro sessions.
+7. Save the binding and redeploy the project.
+
+Wrangler/CLI-assisted namespace creation:
+
+```bash
+npx wrangler kv namespace create SESSION
+npx wrangler kv namespace create SESSION --preview
+```
+
+Those commands create real namespaces and return real IDs. Do not commit those IDs to git until
+you intentionally decide to manage Cloudflare bindings in `wrangler.toml`.
+
+### 4B. Secrets and vars
+
+Use the command matching your deployment target. Enter the real value when prompted. Do not pass
+secret values as command-line arguments.
 
 **Cloudflare Pages:**
 ```bash
-npx wrangler pages secret put GEMINI_API_KEY
 npx wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler pages secret put GEMINI_API_KEY
+npx wrangler pages secret put OPENROUTER_API_KEY
+npx wrangler pages secret put AI_GATEWAY_MASTER_KEY
+npx wrangler pages secret put AI_GATEWAY_ACTIVE_KEY_VERSION
+npx wrangler pages secret put CLOUDINARY_API_KEY
+npx wrangler pages secret put CLOUDINARY_API_SECRET
 ```
 
-**Cloudflare Workers:**
+List configured secret names only:
 ```bash
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler pages secret list
 ```
 
-To list currently set secrets (values are not shown):
-```bash
-npx wrangler pages secret list   # Pages
-npx wrangler secret list         # Workers
-```
+Set public/runtime vars in the Cloudflare Pages dashboard for the production environment:
+
+- `PUBLIC_SUPABASE_URL`
+- `PUBLIC_SUPABASE_ANON_KEY`
+- `PUBLIC_SITE_URL`
+- `PUBLIC_CLOUDINARY_CLOUD_NAME`
+- `AI_PROVIDER`
+- `AI_MODEL`
+- `AI_RATE_LIMIT_USER_DAILY`
+- `AI_RATE_LIMIT_ANON_DAILY`
+- `AI_GATEWAY_ENV_FALLBACK_ENABLED`
+- `CLOUDINARY_UPLOAD_FOLDER`
+- `CLOUDINARY_SIGNATURE_ALGORITHM`
+
+## 5. Auth and Domain Setup
+
+Production auth host policy for first launch:
+
+- canonical site URL: `https://degreewiki.com`
+- `https://www.degreewiki.com` should redirect to `https://degreewiki.com`
+- do not introduce `auth.degreewiki.com` for first launch
+- keep localhost auth working for development
+
+Supabase Auth settings:
+
+- Site URL: `https://degreewiki.com`
+- Redirect URLs:
+  - `http://localhost:4321/**`
+  - `https://degreewiki.com/**`
+
+Only add `https://www.degreewiki.com/**` if you intentionally decide to serve auth from `www`
+instead of redirecting it to the apex domain.
+
+Because login/signup build the callback URL from the current request host, every hostname that
+serves `/login`, `/signup`, or `/auth/callback` must also be allowlisted in Supabase Redirect URLs.
+
+## 6. Google OAuth Production Checklist
+
+Google remains configured through Supabase Auth, not the app runtime env.
+
+- Authorized JavaScript origins:
+  - `http://localhost:4321`
+  - `https://degreewiki.com`
+- Authorized redirect URI:
+  - `https://<supabase-project-ref>.supabase.co/auth/v1/callback`
+- Rotate the Google OAuth client secret before production launch if an older secret was exposed in
+  a screenshot or other non-secret-safe context.
+
+Launch policy note:
+
+- Google-created users must remain non-admin by default.
+- The app audit found no app-side admin grant path.
+- Non-admin default is acceptable for launch.
+- If future features require explicit role membership instead of non-admin default behavior, add a
+  follow-up task for explicit `student` role assignment on signup.
 
 ---
 
-## 5. Supabase Prerequisites
+## 7. Supabase Prerequisites
 
 Confirm these exist before deploying AI features.
 
@@ -180,20 +283,21 @@ Confirm these exist before deploying AI features.
 
 ---
 
-## 6. Build Verification
+## 8. Build Verification
 
 - [ ] `npm run build` passes with zero errors
 - [ ] Output is a Cloudflare server (SSR) build, not static
+- [ ] Cloudflare production has a KV binding named `SESSION`
 - [ ] No `PUBLIC_` prefix on `GEMINI_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY` anywhere in source
 
 ---
 
-## 7. Security Grep Checks
+## 9. Security Grep Checks
 
 Run these in PowerShell from the project root before deploying. All checks must pass.
 
 ```powershell
-# Must return 0 matches
+# Browser-facing files should return 0 matches
 Get-ChildItem -Path src/pages,src/components,src/layouts -Recurse -File |
   Select-String -Pattern "service_role|SERVICE_ROLE|SUPABASE_SERVICE"
 
@@ -218,7 +322,7 @@ Get-ChildItem -Path src/pages/fit-finder/results -Recurse -File |
 
 ---
 
-## 8. Post-Deploy Smoke Tests
+## 10. Post-Deploy Smoke Tests
 
 Run these manually after deployment. Requires at least one published program in the database.
 
@@ -288,7 +392,7 @@ Run these manually after deployment. Requires at least one published program in 
 
 ---
 
-## 9. Rate-Limit Test
+## 11. Rate-Limit Test
 
 To verify the legacy env fallback without waiting for the daily window:
 
@@ -312,7 +416,7 @@ To verify a DB-backed policy:
 
 ---
 
-## 10. AI Usage Log Verification
+## 12. AI Usage Log Verification
 
 After a successful AI summary run, check the Supabase dashboard:
 
@@ -339,7 +443,7 @@ Static/preset note:
 - Hardcoded site-chat responses and reviewed preset `ai_static_answers` responses do not create
   quota rows because they do not call providers.
 
-## 10A. Gateway Call Log Verification
+## 12A. Gateway Call Log Verification
 
 After a successful routed AI call, verify `ai_gateway_call_logs` contains an attempt row for:
 
@@ -355,7 +459,7 @@ Expected:
 
 ---
 
-## 10B. Admin AI Gateway Setup Checklist
+## 12B. Admin AI Gateway Setup Checklist
 
 Use `/admin/ai-gateway` for routine AI Gateway configuration after deployment.
 
@@ -389,7 +493,7 @@ Article assistant note:
 
 ---
 
-## 11. Saved-Result Persistence Verification
+## 13. Saved-Result Persistence Verification
 
 After a Fit Finder run with a valid profile:
 
@@ -420,7 +524,7 @@ Check server logs for `ai_finder_program_matches insert failed`.
 
 ---
 
-## 12. Expected Behavior by Failure Mode
+## 14. Expected Behavior by Failure Mode
 
 | Failure mode | AI summary | Rule-based matches | Persistence | User sees |
 |---|---|---|---|---|
@@ -439,7 +543,7 @@ Check server logs for `ai_finder_program_matches insert failed`.
 
 ---
 
-## 13. Rollback Notes
+## 15. Rollback Notes
 
 The AI Finder feature degrades gracefully — removing or invalidating either AI secret
 immediately disables AI summaries without breaking rule-based matches or saved-result pages.
@@ -456,7 +560,7 @@ No migrations are required to enable or disable AI. No code changes are needed.
 
 ---
 
-## 14. Phase 69D Public Chatbot Verification
+## 16. Phase 69D Public Chatbot Verification
 
 - [ ] Public chatbot launcher appears on `/`, `/programs*`, `/universities*`,
       `/scholarships*`, and `/guides*`

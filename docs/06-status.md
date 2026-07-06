@@ -49,6 +49,12 @@ Very short import pipeline summary:
 
 ## Known Open Notes
 
+- Phase 80B production-hardening target is Cloudflare-first launch on `https://degreewiki.com`.
+- `www.degreewiki.com` should redirect to the apex domain and should not be treated as a first-launch auth hostname.
+- Astro's Cloudflare adapter expects a production KV binding named `SESSION`; the real namespace must be created and bound in Cloudflare before deploy.
+- Google OAuth remains configured in Supabase Auth, not in app runtime env vars.
+- Google-created users remain non-admin by default for launch.
+- A later follow-up may add explicit `student` role assignment on signup if future features require role membership beyond the current non-admin default.
 - Phase 70B kept the article workflow small and safe:
   no migration, no dependency changes, no schema changes, and no create/edit/save/publish contract
   changes.
