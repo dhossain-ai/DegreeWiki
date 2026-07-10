@@ -5,6 +5,84 @@
 
 ## Recent Task Log
 
+### Bundle 6 - Public Mobile API Expansion for Browse Details
+
+- Expanded the existing public mobile list routes under `src/pages/api/mobile/` without breaking
+  the current raw-array list contract shape used by Android.
+- Added a shared `src/lib/mobile/public.ts` helper for public mobile JSON responses, anon Supabase
+  client creation, safe Cloudinary URL building, shared date/money/duration formatting, intake
+  labels, FAQ normalization, and safe mobile-only response helpers.
+- Expanded `GET /api/mobile/programs` with additive public-safe browse fields including university
+  ids/slugs, country id/code, city/location, degree metadata, structured tuition metadata,
+  language, study mode, delivery mode, official URL, verification status, last verified date, and
+  image URL.
+- Added `GET /api/mobile/programs/[slug]` returning a published-only normalized detail payload with
+  university/country/city summaries, degree/subject metadata, duration, language, study and
+  delivery mode, tuition/application fee fields, intake/deadline rows, requirements, curriculum,
+  career outcomes, public URLs, verification metadata, and public-safe media URLs.
+- Expanded `GET /api/mobile/universities` with additive short/native naming, country name/code,
+  official URL, verification metadata, ranking summary, and teaser-friendly list fields.
+- Added `GET /api/mobile/universities/[slug]` returning a published-only normalized detail payload
+  with admissions/application/support summaries plus a small related-program summary.
+- Expanded `GET /api/mobile/countries` to destination-enabled published countries only and added
+  ISO code, continent, currency, tuition/living overview, and verification fields.
+- Added `GET /api/mobile/countries/[slug]` returning a published-only normalized destination detail
+  payload with enriched study-abroad guidance, structured cost ranges, work/post-study fields,
+  official URLs, FAQ entries, verification metadata, and small related university/program
+  summaries.
+- Hardened the mobile routes so database errors no longer return raw Supabase error messages in the
+  JSON body.
+- Kept scope intentionally narrow: no Android changes, no scholarships/guides mobile endpoints, no
+  auth saved-items changes, no Fit Finder/chat changes, no schema changes, and no new dependencies.
+- Ran `npm run build`, `npx tsc --noEmit`, and local API QA against the new list/detail routes.
+
+#### Files Created
+
+- `src/lib/mobile/public.ts`
+- `src/pages/api/mobile/programs/[slug].ts`
+- `src/pages/api/mobile/universities/[slug].ts`
+- `src/pages/api/mobile/countries/[slug].ts`
+
+#### Files Modified
+
+- `src/pages/api/mobile/programs.ts`
+- `src/pages/api/mobile/universities.ts`
+- `src/pages/api/mobile/countries.ts`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+#### Files Deleted
+
+- none
+
+#### Validation And API QA
+
+- `npm run build` passed
+- `npx tsc --noEmit` still fails on pre-existing repo-wide AI/import typing issues outside Bundle 6
+- Local dev server API checks passed:
+  - `GET /api/mobile/programs`
+  - `GET /api/mobile/programs/accounting-and-management-information-systems`
+  - `GET /api/mobile/universities`
+  - `GET /api/mobile/universities/aalto-university`
+  - `GET /api/mobile/countries`
+  - `GET /api/mobile/countries/bulgaria`
+  - missing program/university/country slugs returned `404`
+
+#### Known Issues
+
+- `npx tsc --noEmit` remains red because of older repo-wide AI/import typing problems unrelated to
+  this mobile API bundle
+- The existing mobile list routes still use raw arrays, while the new detail routes use
+  `{ ok: true, item }`
+- Program list routes intentionally do not include intake/deadline fields yet because that would
+  require a broader cross-row intake query than this low-risk bundle allowed
+
+#### Next Recommended Bundle
+
+- Update Android DTOs/cache/detail flows to consume the new public mobile detail endpoints and
+  additive list fields
+- Design scholarships and guides mobile endpoints only as a separate explicit bundle
+
 ### Phase 82C - Contributor Application + Admin Review Bundle
 
 - Added `030_contributor_review_workflow.sql` with a narrow authenticated

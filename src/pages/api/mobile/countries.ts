@@ -1,22 +1,19 @@
 import type { APIRoute } from 'astro'
-import { createClient } from '@supabase/supabase-js'
-import { cloudinaryUrl } from '../../../lib/cloudinary/url'
+import {
+  buildCloudinaryImageUrl,
+  createPublicMobileClient,
+  credentialsErrorResponse,
+  internalErrorResponse,
+  jsonResponse,
+} from '../../../lib/mobile/public'
 
 export const GET: APIRoute = async () => {
-  const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY
-  const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return new Response(JSON.stringify({ error: 'Supabase credentials not configured' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    })
+  const supabase = createPublicMobileClient()
+  if (!supabase) {
+    return credentialsErrorResponse()
   }
 
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false },
-  })
+  const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME
 
   const { data, error } = await supabase
     .from('countries')
@@ -24,37 +21,46 @@ export const GET: APIRoute = async () => {
       id,
       slug,
       name,
+      iso2,
+      continent,
       overview,
+      currency_code,
+      currency_name,
+      tuition_overview,
+      living_cost_overview,
+      verification_status,
+      last_verified_at,
       cover_image:media_assets!countries_cover_image_id_fkey(cloudinary_public_id),
       og_image:media_assets!countries_og_image_id_fkey(cloudinary_public_id)
     `)
     .eq('content_status', 'published')
+    .eq('is_destination_enabled', true)
+    .order('name')
 
   if (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    console.error('mobile countries list error:', error.message)
+    return internalErrorResponse()
   }
 
-  const payload = (data ?? []).map((c: any) => {
-    let imageUrl = null
-    const publicId = c.cover_image?.cloudinary_public_id ?? c.og_image?.cloudinary_public_id
-    if (cloudName && publicId) {
-      imageUrl = cloudinaryUrl(cloudName, publicId)
-    }
+  const payload = (data ?? []).map((country: any) => {
+    const publicId = country.cover_image?.cloudinary_public_id ?? country.og_image?.cloudinary_public_id
 
     return {
-      id: c.id,
-      slug: c.slug,
-      name: c.name,
-      summary: c.overview ?? null,
-      imageUrl
+      id: country.id,
+      slug: country.slug,
+      name: country.name,
+      iso2: country.iso2 ?? null,
+      continent: country.continent ?? null,
+      summary: country.overview ?? null,
+      imageUrl: buildCloudinaryImageUrl(cloudName, publicId),
+      currencyCode: country.currency_code ?? null,
+      currencyName: country.currency_name ?? null,
+      tuitionOverview: country.tuition_overview ?? null,
+      livingCostOverview: country.living_cost_overview ?? null,
+      verificationStatus: country.verification_status ?? null,
+      lastVerifiedAt: country.last_verified_at ?? null,
     }
   })
 
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+  return jsonResponse(200, payload)
 }

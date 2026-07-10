@@ -5,12 +5,39 @@
 
 ## Current Project Status
 
-Phase 82C is complete. DegreeWiki now includes the contributor application and admin review bundle:
-public `/become-a-contributor`, account-level contributor status views, admin contributor queue and
-detail review pages, server-side contributor application submit/update handling, and a narrow DB
-review RPC that lets reviewer/admin users approve contributor applications, ensure
-`contributor_profiles` exists, grant the non-admin `contributor` role, and optionally persist
-approved country or university scopes without using service-role code in app pages.
+Bundle 6 is complete. DegreeWiki now exposes an expanded public mobile browse API for Android-safe
+program, university, and destination data without changing Android code or exposing private/admin
+fields.
+
+Mobile endpoints now available:
+
+- `GET /api/mobile/programs`
+- `GET /api/mobile/programs/[slug]`
+- `GET /api/mobile/universities`
+- `GET /api/mobile/universities/[slug]`
+- `GET /api/mobile/countries`
+- `GET /api/mobile/countries/[slug]`
+
+Bundle 6 payload highlights:
+
+- Programs list now includes additive public-safe browse fields such as university/country ids and
+  slugs, country code, city/location, degree code/short label, structured tuition metadata,
+  language, study mode, delivery mode, official URL, verification status, last verified date, and
+  image URL.
+- Program detail now returns a normalized published-only payload with university/country/city
+  summaries, degree/subject metadata, duration, language, study/delivery mode, tuition and
+  application fee fields, intake/deadline data, requirements summaries, curriculum/career content,
+  public URLs, verification metadata, and public-safe media URLs.
+- Universities list now includes short/native names, country name/code, official URL, verification
+  metadata, ranking summary, and teaser-friendly additive fields alongside the existing overview
+  and logo data.
+- University detail now returns admissions/application/support sections plus a small related
+  programs summary.
+- Countries list is now destination-only and includes ISO code, continent, currency fields,
+  tuition/living-overview text, verification status, and last verified date.
+- Country detail now returns enriched destination guidance, structured tuition/living-cost ranges,
+  work/post-study fields, official URLs, FAQ entries, verification metadata, and small related
+  university/program summaries.
 
 Current branch: `main`
 
@@ -19,6 +46,25 @@ Very short import pipeline summary:
 - General Batch Creation stays Advanced / Legacy.
 - Review rows first, then choose the production action, then publish only if needed.
 - Cleanup is super-admin only and limited to import/staging records.
+
+## Bundle 6 Validation
+
+- `npm run build` passed
+- `npx tsc --noEmit` still fails on pre-existing repo-wide AI/import typing issues outside Bundle 6
+- Local API QA passed for:
+  - `GET /api/mobile/programs`
+  - `GET /api/mobile/programs/[known-slug]`
+  - `GET /api/mobile/universities`
+  - `GET /api/mobile/universities/[known-slug]`
+  - `GET /api/mobile/countries`
+  - `GET /api/mobile/countries/[known-slug]`
+  - missing program/university/country slugs returning safe `404`
+
+## Next Recommended Bundle
+
+- Update Android to consume the new public detail endpoints and additive list fields without
+  inventing data.
+- Keep scholarships and guides deferred until dedicated mobile endpoints are deliberately designed.
 
 ## Current Import Workflows
 
@@ -33,6 +79,9 @@ Very short import pipeline summary:
   no public contributor directory, no public contributor profile pages, no contributor avatar
   upload endpoint/UI, no contributor submission form UI yet, and no live-content publishing or
   verification actions by contributors.
+- Bundle 6 stays public-mobile-only:
+  no Android app changes, no scholarships/guides mobile endpoints, no auth saved-items changes,
+  no Fit Finder/chat changes, no schema changes, and no new dependencies.
 - Contributors must not directly publish or verify live public data.
 - Keep AI usage-limit rollout incremental: no seeded active policy rows in the migration.
 - Preserve legacy env fallback when no matching DB policy exists.
@@ -122,6 +171,10 @@ Very short import pipeline summary:
 - After creating the university enrichment migration, it must be applied to Supabase before live
   testing or deployment of admin/public code that queries the new university columns.
 - `program_intakes` import remains intentionally deferred.
+- Mobile list routes still preserve the existing raw-array response shape for backward
+  compatibility, while the new slug detail routes use `{ ok: true, item }`.
+- Public mobile routes use the anon Supabase client plus published-only filters, and destination
+  country routes additionally require `is_destination_enabled = true`.
 
 ## Archive Index
 

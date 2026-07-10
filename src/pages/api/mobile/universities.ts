@@ -1,22 +1,20 @@
 import type { APIRoute } from 'astro'
-import { createClient } from '@supabase/supabase-js'
-import { cloudinaryUrl } from '../../../lib/cloudinary/url'
+import {
+  buildCloudinaryImageUrl,
+  createPublicMobileClient,
+  credentialsErrorResponse,
+  internalErrorResponse,
+  jsonResponse,
+  teaserFromText,
+} from '../../../lib/mobile/public'
 
 export const GET: APIRoute = async () => {
-  const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY
-  const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return new Response(JSON.stringify({ error: 'Supabase credentials not configured' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    })
+  const supabase = createPublicMobileClient()
+  if (!supabase) {
+    return credentialsErrorResponse()
   }
 
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false },
-  })
+  const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME
 
   const { data, error } = await supabase
     .from('universities')
@@ -24,39 +22,50 @@ export const GET: APIRoute = async () => {
       id,
       slug,
       name,
+      short_name,
+      native_name,
       country_id,
-      cities(name),
+      official_url,
+      ranking_summary,
       overview,
+      verification_status,
+      last_verified_at,
+      countries(name, iso2),
+      cities(name),
       logo:media_assets!universities_logo_id_fkey(cloudinary_public_id)
     `)
     .eq('content_status', 'published')
+    .order('name')
 
   if (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    console.error('mobile universities list error:', error.message)
+    return internalErrorResponse()
   }
 
-  const payload = (data ?? []).map((u: any) => {
-    let logoUrl = null
-    if (cloudName && u.logo?.cloudinary_public_id) {
-      logoUrl = cloudinaryUrl(cloudName, u.logo.cloudinary_public_id)
-    }
+  const payload = (data ?? []).map((university: any) => {
+    const logoUrl = buildCloudinaryImageUrl(cloudName, university.logo?.cloudinary_public_id)
 
     return {
-      id: u.id,
-      slug: u.slug,
-      name: u.name,
-      countryId: u.country_id ?? null,
-      city: u.cities?.name ?? null,
+      id: university.id,
+      slug: university.slug,
+      name: university.name,
+      shortName: university.short_name ?? null,
+      nativeName: university.native_name ?? null,
+      countryId: university.country_id ?? null,
+      countryName: university.countries?.name ?? null,
+      countryCode: university.countries?.iso2 ?? null,
+      city: university.cities?.name ?? null,
       logoUrl,
-      overview: u.overview ?? null
+      imageUrl: logoUrl,
+      overview: university.overview ?? null,
+      overviewTeaser: teaserFromText(university.overview, 180),
+      officialUrl: university.official_url ?? null,
+      verificationStatus: university.verification_status ?? null,
+      lastVerifiedAt: university.last_verified_at ?? null,
+      rankingSummary: university.ranking_summary ?? null,
+      rankingSummaryTeaser: teaserFromText(university.ranking_summary, 180),
     }
   })
 
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+  return jsonResponse(200, payload)
 }
