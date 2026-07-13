@@ -5,6 +5,78 @@
 
 ## Recent Task Log
 
+### Bundle 12 - Scholarships + Guides Public Mobile API
+
+- Added raw-array `GET /api/mobile/scholarships` and `{ ok: true, item }`
+  `GET /api/mobile/scholarships/[slug]` routes using the established anon Supabase mobile helper.
+- Confirmed scholarship public visibility is `content_status = 'published'`; expired records are
+  not automatically hidden. Responses expose the stored ISO deadline, free-text deadline context,
+  and display value without inventing active/expired/closing-soon status.
+- Scholarship list fields cover id/slug/name, provider and classification values/labels, teaser,
+  numeric/display amounts, deadline values, study countries, degree levels, subjects, safe public
+  URLs, verification metadata, update date, and Cloudinary image URL.
+- Scholarship detail adds plain-text overview/eligibility/coverage, structured nationality,
+  country, degree, subject, published university/program relationships, provider URL,
+  source-confidence metadata, and separate logo/cover URLs.
+- Added raw-array `GET /api/mobile/guides` and `{ ok: true, item }`
+  `GET /api/mobile/guides/[slug]` routes for published articles only.
+- Guide list fields cover id/slug/title, summary, category, modeled country/subject/degree-level
+  relationships, publication/update dates, and Cloudinary cover URL. Full content is omitted from
+  the list query, so read time is not generated there.
+- Guide detail converts the stored Markdown-like text with the existing public-page parser into
+  `structured_blocks_v1` JSON blocks, returns derived section headings and detail-only reading time,
+  and includes up to three cheap same-category published related guides.
+- Content safety: no raw HTML rendering contract; only headings, paragraphs, lists, emphasis, and
+  safe HTTP(S) links are represented. Invalid link schemes become plain text. Public outbound
+  scholarship URLs are also restricted to HTTP(S).
+- Security: all four routes use the anon client plus explicit published filters and RLS; there is no
+  service role, schema change, auth requirement, private/student/admin/import data, raw database
+  error, stack trace, dependency, Android change, public-page design change, or personalized feature.
+- Exact response shapes and nullable behavior are documented in `docs/11-mobile-api.md`.
+
+#### Files Created
+
+- `src/pages/api/mobile/scholarships.ts`
+- `src/pages/api/mobile/scholarships/[slug].ts`
+- `src/pages/api/mobile/guides.ts`
+- `src/pages/api/mobile/guides/[slug].ts`
+- `docs/11-mobile-api.md`
+
+#### Files Modified
+
+- `src/lib/mobile/public.ts`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+#### Files Deleted
+
+- none
+
+#### Validation And API QA
+
+- `npm run build` passed.
+- Local configured-environment QA returned 1 published scholarship and 3 published guides.
+- `GET /api/mobile/scholarships/romanian-government-scholarship` returned `{ ok, item }`.
+- `GET /api/mobile/guides/erasmus-mundus-scholarship-for-non-eu-students-complete-guide-20252026`
+  returned `{ ok, item }` with `structured_blocks_v1` and 36 body blocks.
+- `GET /api/mobile/scholarships/does-not-exist` returned
+  `404 { "ok": false, "error": "scholarship_not_found" }`.
+- `GET /api/mobile/guides/does-not-exist` returned
+  `404 { "ok": false, "error": "guide_not_found" }`.
+
+#### Known Issues
+
+- The current scholarship schema has no structured opening date, required-document, application
+  process, selection-process, or public-contact fields; those values were not invented.
+- The current guide schema has no tags or featured flag. Public guide pages do not expose authors,
+  so mobile guide author data remains deliberately omitted.
+
+#### Next Recommended Bundle
+
+- Implement Android scholarship/guide DTOs, repositories and cache behavior, then public list/detail
+  UI against these documented contracts. Keep Saved, Compare, Fit Finder, Chat, and personalization
+  out of that browse integration unless separately authorized.
+
 ### Bundle 6 - Public Mobile API Expansion for Browse Details
 
 - Expanded the existing public mobile list routes under `src/pages/api/mobile/` without breaking
