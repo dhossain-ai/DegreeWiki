@@ -59,6 +59,22 @@ export function formatLongDate(value: string | null | undefined): string | null 
   })
 }
 
+export function formatEnumLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+export function safeExternalUrl(value: string | null | undefined): string | null {
+  if (!value) return null
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
 export function formatDuration(months: number | null | undefined): string | null {
   if (!months) return null
   if (months === 12) return '1 year'
@@ -115,12 +131,12 @@ export function formatRange(
   const formatAmount = (value: number) => `${prefix}${Number(value).toLocaleString()}`
 
   if (min != null && max != null) {
-    if (min === max) return `${formatAmount(min)} ${suffix}`
-    return `${formatAmount(min)} - ${formatAmount(max)} ${suffix}`
+    if (min === max) return `${formatAmount(min)} ${suffix}`.trimEnd()
+    return `${formatAmount(min)} - ${formatAmount(max)} ${suffix}`.trimEnd()
   }
 
-  if (min != null) return `From ${formatAmount(min)} ${suffix}`
-  return `Up to ${formatAmount(max!)} ${suffix}`
+  if (min != null) return `From ${formatAmount(min)} ${suffix}`.trimEnd()
+  return `Up to ${formatAmount(max!)} ${suffix}`.trimEnd()
 }
 
 export function formatTuitionSummary(
