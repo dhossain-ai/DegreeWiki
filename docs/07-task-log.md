@@ -21,6 +21,8 @@
   content transformation pass locally, the production failure is a stale/bad deployed Worker
   version, not an application runtime defect. No code contract redesign or runtime code change was
   required.
+- Merged Bundle 12 into `main` as `cec2e5b` and pushed it to `origin/main`, then deployed the
+  verified Worker. After rollout propagation, all six production route checks passed.
 - Kept raw arrays for lists, `{ ok: true, item }` for details, published-only visibility, anon/RLS
   access, safe errors, and no service role.
 
@@ -35,6 +37,9 @@
   - `GET /api/mobile/guides/erasmus-mundus-scholarship-for-non-eu-students-complete-guide-20252026`
     -> `200 { ok, item }`.
   - `GET /api/mobile/guides/does-not-exist` -> safe JSON `404`.
+- Production QA after deployment passed with the same expected statuses and shapes: lists are raw
+  arrays, known details are `{ ok: true, item }`, and missing slugs are safe JSON `404`s. No response
+  exposed raw database errors or stack details.
 
 #### Files Modified
 

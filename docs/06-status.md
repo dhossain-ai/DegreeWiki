@@ -5,11 +5,11 @@
 
 ## Current Project Status
 
-Bundle 13.1 verified the scholarship/guide mobile APIs in the configured local Cloudflare runtime.
-The production HTTP 500s were caused by a stale/bad deployed Worker version, not a Supabase query,
-RLS, data-shape, serialization, or content-transformation error. The Bundle 12 branch is ready to
-merge and deploy; no application runtime code change was required. No Android code, public page
-design, database schema, or personalized feature was changed.
+Bundle 13.1 fixed the scholarship/guide production API availability by merging Bundle 12 into
+`main` and deploying the verified Worker version. The HTTP 500s were caused by the stale/bad
+deployed Worker version, not a Supabase query, RLS, data-shape, serialization, or
+content-transformation error. No application runtime code change was required. No Android code,
+public page design, database schema, or personalized feature was changed.
 
 Mobile endpoints now available:
 
@@ -40,7 +40,7 @@ Bundle 12 payload highlights:
   related guides are included.
 - Exact fields and nullable contracts are documented in `docs/11-mobile-api.md`.
 
-Current branch: `codex/bundle-12-scholarships-guides-api` (pending merge into `main` and deployment)
+Current branch: `main` (Bundle 12 merged and deployed)
 
 Very short import pipeline summary:
 - Program Import Staging is the primary path.
@@ -64,14 +64,16 @@ Very short import pipeline summary:
 - Live `https://degreewiki.com/api/mobile/programs`, `/universities`, and `/countries` returned
   `200`, while all scholarship/guide list and detail patterns returned Cloudflare `1101` before the
   route handlers could return their safe JSON responses.
-- `origin/main` does not contain the Bundle 12 commits; the feature branch contains the completed
-  implementation. Cloudflare deployment history also predates the verified Bundle 12 build.
+- Before this fix, `origin/main` did not contain the Bundle 12 commits and the deployed Worker was
+  behind the verified Bundle 12 build. Bundle 12 is now merged into `main` and deployed.
 - The configured local Astro server and `wrangler dev --local` worker both returned `200` for the
   known scholarship/guide routes and safe JSON `404` for missing slugs. This rules out the Supabase
   queries, table/relationship names, anonymous RLS, nullable rows, serialization, and Markdown
   transformation as the source of the production 500s.
 - `npm run build` passed. No raw database error, stack trace, or internal error detail was exposed
   by the verified local routes.
+- Production retest after deploy passed: both lists and known details returned `200`; missing
+  scholarship and guide slugs returned the safe JSON `404` bodies.
 
 ## Next Recommended Bundle
 
