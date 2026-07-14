@@ -5,9 +5,11 @@
 
 ## Current Project Status
 
-Bundle 12 is complete. DegreeWiki now exposes public Android-safe scholarship and guide list/detail
-APIs alongside the existing program, university, and destination routes. No Android code, public
-page design, database schema, or personalized feature was changed.
+Bundle 13.1 verified the scholarship/guide mobile APIs in the configured local Cloudflare runtime.
+The production HTTP 500s were caused by a stale/bad deployed Worker version, not a Supabase query,
+RLS, data-shape, serialization, or content-transformation error. The Bundle 12 branch is ready to
+merge and deploy; no application runtime code change was required. No Android code, public page
+design, database schema, or personalized feature was changed.
 
 Mobile endpoints now available:
 
@@ -38,7 +40,7 @@ Bundle 12 payload highlights:
   related guides are included.
 - Exact fields and nullable contracts are documented in `docs/11-mobile-api.md`.
 
-Current branch: `codex/bundle-12-scholarships-guides-api`
+Current branch: `codex/bundle-12-scholarships-guides-api` (pending merge into `main` and deployment)
 
 Very short import pipeline summary:
 - Program Import Staging is the primary path.
@@ -56,6 +58,20 @@ Very short import pipeline summary:
   - `GET /api/mobile/guides/erasmus-mundus-scholarship-for-non-eu-students-complete-guide-20252026`
     returned `{ ok, item }` with 36 structured body blocks
   - missing scholarship and guide slugs returned safe JSON `404` responses
+
+## Bundle 13.1 Runtime Verification
+
+- Live `https://degreewiki.com/api/mobile/programs`, `/universities`, and `/countries` returned
+  `200`, while all scholarship/guide list and detail patterns returned Cloudflare `1101` before the
+  route handlers could return their safe JSON responses.
+- `origin/main` does not contain the Bundle 12 commits; the feature branch contains the completed
+  implementation. Cloudflare deployment history also predates the verified Bundle 12 build.
+- The configured local Astro server and `wrangler dev --local` worker both returned `200` for the
+  known scholarship/guide routes and safe JSON `404` for missing slugs. This rules out the Supabase
+  queries, table/relationship names, anonymous RLS, nullable rows, serialization, and Markdown
+  transformation as the source of the production 500s.
+- `npm run build` passed. No raw database error, stack trace, or internal error detail was exposed
+  by the verified local routes.
 
 ## Next Recommended Bundle
 

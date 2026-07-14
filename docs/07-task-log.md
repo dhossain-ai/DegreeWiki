@@ -5,6 +5,42 @@
 
 ## Recent Task Log
 
+### Bundle 13.1 - Scholarship/Guide API Runtime Fix
+
+- Diagnosed production `500 error code: 1101` responses from the scholarship and guide list/detail
+  route patterns. Existing mobile browse routes (`programs`, `universities`, and `countries`) still
+  returned `200` in production.
+- Confirmed `origin/main` is behind: it does not include Bundle 12 commits `623cf93`, `d2e46dc`, or
+  `883c5a8`. The completed implementation is on
+  `codex/bundle-12-scholarships-guides-api`.
+- Reproduced the intended routes using the configured local environment in both Astro dev and the
+  Cloudflare-compatible `wrangler dev --local` worker. Scholarship/guide lists and known details
+  returned `200`; missing slugs returned the existing safe JSON `404` bodies.
+- The local Worker emitted no server error for any focused request. Because the same live Supabase
+  configuration, anon client, queries, relationships, published-only filters, null handling, and
+  content transformation pass locally, the production failure is a stale/bad deployed Worker
+  version, not an application runtime defect. No code contract redesign or runtime code change was
+  required.
+- Kept raw arrays for lists, `{ ok: true, item }` for details, published-only visibility, anon/RLS
+  access, safe errors, and no service role.
+
+#### Validation And API QA
+
+- `npm run build` passed.
+- Local Astro and local Worker QA each passed:
+  - `GET /api/mobile/scholarships` -> `200` raw array.
+  - `GET /api/mobile/scholarships/romanian-government-scholarship` -> `200 { ok, item }`.
+  - `GET /api/mobile/scholarships/does-not-exist` -> safe JSON `404`.
+  - `GET /api/mobile/guides` -> `200` raw array.
+  - `GET /api/mobile/guides/erasmus-mundus-scholarship-for-non-eu-students-complete-guide-20252026`
+    -> `200 { ok, item }`.
+  - `GET /api/mobile/guides/does-not-exist` -> safe JSON `404`.
+
+#### Files Modified
+
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
 ### Bundle 12 - Scholarships + Guides Public Mobile API
 
 - Added raw-array `GET /api/mobile/scholarships` and `{ ok: true, item }`
