@@ -5,9 +5,11 @@
 
 ## Current Project Status
 
-Bundle 6 is complete. DegreeWiki now exposes an expanded public mobile browse API for Android-safe
-program, university, and destination data without changing Android code or exposing private/admin
-fields.
+Bundle 13.1 verified the scholarship/guide mobile APIs in the configured local Cloudflare runtime.
+The production HTTP 500s were caused by a stale/bad deployed Worker version, not a Supabase query,
+RLS, data-shape, serialization, or content-transformation error. The Bundle 12 branch is ready to
+merge and deploy; no application runtime code change was required. No Android code, public page
+design, database schema, or personalized feature was changed.
 
 Mobile endpoints now available:
 
@@ -17,29 +19,28 @@ Mobile endpoints now available:
 - `GET /api/mobile/universities/[slug]`
 - `GET /api/mobile/countries`
 - `GET /api/mobile/countries/[slug]`
+- `GET /api/mobile/scholarships`
+- `GET /api/mobile/scholarships/[slug]`
+- `GET /api/mobile/guides`
+- `GET /api/mobile/guides/[slug]`
 
-Bundle 6 payload highlights:
+Bundle 12 payload highlights:
 
-- Programs list now includes additive public-safe browse fields such as university/country ids and
-  slugs, country code, city/location, degree code/short label, structured tuition metadata,
-  language, study mode, delivery mode, official URL, verification status, last verified date, and
-  image URL.
-- Program detail now returns a normalized published-only payload with university/country/city
-  summaries, degree/subject metadata, duration, language, study/delivery mode, tuition and
-  application fee fields, intake/deadline data, requirements summaries, curriculum/career content,
-  public URLs, verification metadata, and public-safe media URLs.
-- Universities list now includes short/native names, country name/code, official URL, verification
-  metadata, ranking summary, and teaser-friendly additive fields alongside the existing overview
-  and logo data.
-- University detail now returns admissions/application/support sections plus a small related
-  programs summary.
-- Countries list is now destination-only and includes ISO code, continent, currency fields,
-  tuition/living-overview text, verification status, and last verified date.
-- Country detail now returns enriched destination guidance, structured tuition/living-cost ranges,
-  work/post-study fields, official URLs, FAQ entries, verification metadata, and small related
-  university/program summaries.
+- Scholarship lists are raw arrays of published records with real provider/classification, amount,
+  deadline, eligibility relationship, public URL, verification, media, and update fields.
+- Scholarship details use `{ ok: true, item }` and add plain-text overview/eligibility/coverage,
+  structured country/nationality/degree/subject/university/program relationships, provider URL,
+  and source-confidence metadata.
+- Published scholarships remain visible after their deadline; no active/expired status is invented.
+  Consumers receive the stored ISO `deadline`, free-text `deadlineText`, and formatted display value.
+- Guide lists are raw arrays of published articles with summary, category, modeled relationships,
+  publication/update dates, and public Cloudinary cover URL.
+- Guide details use `{ ok: true, item }`; Markdown-like source content is converted to
+  `structured_blocks_v1` safe blocks plus section headings, and up to three same-category published
+  related guides are included.
+- Exact fields and nullable contracts are documented in `docs/11-mobile-api.md`.
 
-Current branch: `main`
+Current branch: `codex/bundle-12-scholarships-guides-api` (pending merge into `main` and deployment)
 
 Very short import pipeline summary:
 - Program Import Staging is the primary path.
@@ -47,24 +48,35 @@ Very short import pipeline summary:
 - Review rows first, then choose the production action, then publish only if needed.
 - Cleanup is super-admin only and limited to import/staging records.
 
-## Bundle 6 Validation
+## Bundle 12 Validation
 
 - `npm run build` passed
-- `npx tsc --noEmit` still fails on pre-existing repo-wide AI/import typing issues outside Bundle 6
 - Local API QA passed for:
-  - `GET /api/mobile/programs`
-  - `GET /api/mobile/programs/[known-slug]`
-  - `GET /api/mobile/universities`
-  - `GET /api/mobile/universities/[known-slug]`
-  - `GET /api/mobile/countries`
-  - `GET /api/mobile/countries/[known-slug]`
-  - missing program/university/country slugs returning safe `404`
+  - `GET /api/mobile/scholarships` returned 1 published record
+  - `GET /api/mobile/scholarships/romanian-government-scholarship` returned `{ ok, item }`
+  - `GET /api/mobile/guides` returned 3 published records
+  - `GET /api/mobile/guides/erasmus-mundus-scholarship-for-non-eu-students-complete-guide-20252026`
+    returned `{ ok, item }` with 36 structured body blocks
+  - missing scholarship and guide slugs returned safe JSON `404` responses
+
+## Bundle 13.1 Runtime Verification
+
+- Live `https://degreewiki.com/api/mobile/programs`, `/universities`, and `/countries` returned
+  `200`, while all scholarship/guide list and detail patterns returned Cloudflare `1101` before the
+  route handlers could return their safe JSON responses.
+- `origin/main` does not contain the Bundle 12 commits; the feature branch contains the completed
+  implementation. Cloudflare deployment history also predates the verified Bundle 12 build.
+- The configured local Astro server and `wrangler dev --local` worker both returned `200` for the
+  known scholarship/guide routes and safe JSON `404` for missing slugs. This rules out the Supabase
+  queries, table/relationship names, anonymous RLS, nullable rows, serialization, and Markdown
+  transformation as the source of the production 500s.
+- `npm run build` passed. No raw database error, stack trace, or internal error detail was exposed
+  by the verified local routes.
 
 ## Next Recommended Bundle
 
-- Update Android to consume the new public detail endpoints and additive list fields without
-  inventing data.
-- Keep scholarships and guides deferred until dedicated mobile endpoints are deliberately designed.
+- Add Android scholarship and guide DTOs, repositories/cache integration, and public browse/detail
+  screens against these contracts without inventing data or adding personalized features.
 
 ## Current Import Workflows
 
@@ -79,8 +91,8 @@ Very short import pipeline summary:
   no public contributor directory, no public contributor profile pages, no contributor avatar
   upload endpoint/UI, no contributor submission form UI yet, and no live-content publishing or
   verification actions by contributors.
-- Bundle 6 stays public-mobile-only:
-  no Android app changes, no scholarships/guides mobile endpoints, no auth saved-items changes,
+- Bundle 12 stays public-mobile-only:
+  no Android app changes, no public-page design changes, no auth/saved-items/compare changes,
   no Fit Finder/chat changes, no schema changes, and no new dependencies.
 - Contributors must not directly publish or verify live public data.
 - Keep AI usage-limit rollout incremental: no seeded active policy rows in the migration.
