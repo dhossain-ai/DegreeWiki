@@ -1,7 +1,9 @@
-# Public Mobile API Contracts
+# Mobile API Contracts
 
-All routes are unauthenticated, read-only JSON endpoints backed by the Supabase anon client and
-database RLS. List routes return raw arrays. Detail routes return `{ "ok": true, "item": ... }`.
+## Public Endpoints
+
+All public routes are unauthenticated, read-only JSON endpoints backed by the Supabase anon client
+and database RLS. List routes return raw arrays. Detail routes return `{ "ok": true, "item": ... }`.
 Missing or non-public detail records return `404` with `{ "ok": false, "error": "..._not_found" }`.
 Database failures return a generic error body and never include raw database messages.
 
@@ -190,3 +192,173 @@ Only HTTP(S) Markdown links become link nodes. Unsafe or invalid link destinatio
 plain text. Raw HTML is never executed or returned as an HTML rendering contract. Related guides
 contain `id`, `slug`, `title`, nullable `summary`, nullable `category`, nullable `publishedAt`, and
 nullable `coverImageUrl`.
+
+## Authenticated Endpoints
+
+Authenticated mobile routes require a bearer token and use the Supabase anon client with the
+token injected as an Authorization header. This preserves Row Level Security without cookies or
+the service-role key. All queries are scoped to the authenticated user.
+
+### Authentication
+
+All authenticated mobile endpoints require:
+
+```text
+Authorization: Bearer <access_token>
+```
+
+The access token is a Supabase Auth JWT obtained via the standard sign-in flow. The server
+validates it through `supabase.auth.getUser()` — it does not trust the token signature alone.
+
+Error responses:
+
+- Missing or malformed header → `401 { "ok": false, "error": "sign_in_required" }`
+- Invalid or expired token → `401 { "ok": false, "error": "sign_in_required" }`
+
+No raw Supabase error messages, tokens, stack traces, or internal details are included in error
+responses.
+
+### `GET /api/mobile/me`
+
+Returns the authenticated user's identity, optional profile, and saved-item summary.
+
+```text
+{
+  "ok": true,
+  "user": {
+    "id": string,
+    "email": string | null,
+    "displayName": string | null,
+    "createdAt": string | null
+  },
+  "profile": {
+    "displayName": string | null,
+    "avatarUrl": string | null,
+    "accountStatus": string | null
+  } | null,
+  "savedSummary": {
+    "programCount": number
+  }
+}
+```
+
+A missing `user_profiles` row does not fail the endpoint — `profile` is `null` in that case.
+The `user.email` and `user.createdAt` come from the validated auth token.
+No admin fields, auth-provider metadata, tokens, internal roles, or student profile data are
+exposed.
+
+### `GET /api/mobile/me/saved-items`
+
+Returns the authenticated user's saved programs, newest first.
+
+```text
+{
+  "ok": true,
+  "items": [
+    {
+      "savedItemId": string,
+      "entityType": "program",
+      "entityId": string,
+      "savedAt": string,
+      "program": {
+        "id": string,
+        "slug": string,
+        "title": string,
+        "universityName": string | null,
+        "countryName": string | null,
+        "degreeLevel": string | null,
+        "subject": string | null,
+        "tuitionDisplay": string | null,
+        "durationMonths": number | null,
+        "duration": string | null
+      }
+    }
+  ]
+}
+```
+
+Programs that are no longer published are excluded from the list. An empty `items` array is a
+valid `200` response.
+
+### `POST /api/mobile/me/saved-items`
+
+Saves a program for the authenticated user.
+
+Request body:
+
+```json
+{
+  "entityType": "program",
+  "entityId": "<program-uuid>"
+}
+```
+
+Rules:
+
+- Only `entityType: "program"` is accepted.
+- `entityId` must be a valid UUID.
+- The program must exist and have `content_status = 'published'`.
+- Saving is idempotent — repeated requests do not create duplicate rows.
+
+Success response:
+
+```text
+{
+  "ok": true,
+  "saved": true,
+  "item": {
+    "savedItemId": string,
+    "entityType": "program",
+    "entityId": string,
+    "savedAt": string
+  }
+}
+```
+
+Error responses:
+
+- Invalid JSON → `400 { "ok": false, "error": "invalid_json" }`
+- Unsupported entity type → `400 { "ok": false, "error": "unsupported_entity_type" }`
+- Missing or invalid entity ID → `400 { "ok": false, "error": "invalid_entity_id" }`
+- Program not found or not published → `404 { "ok": false, "error": "program_not_found" }`
+- Missing/invalid token → `401 { "ok": false, "error": "sign_in_required" }`
+
+### `DELETE /api/mobile/me/saved-items/[savedItemId]`
+
+Removes a saved item belonging to the authenticated user.
+
+- `savedItemId` must be a valid UUID.
+- RLS ensures only the owner's row can be deleted.
+- Idempotent: missing or foreign IDs return success without revealing ownership.
+
+Success response:
+
+```text
+{
+  "ok": true,
+  "saved": false
+}
+```
+
+Error responses:
+
+- Invalid saved item ID format → `400 { "ok": false, "error": "invalid_saved_item_id" }`
+- Missing/invalid token → `401 { "ok": false, "error": "sign_in_required" }`
+
+### Security Rules
+
+- No service-role key is used. All queries run through the anon client with the user's token.
+- User identity is derived solely from the validated bearer token, never from query parameters
+  or request bodies.
+- RLS on `saved_items` enforces `user_id = auth.uid()` for all operations.
+- RLS on `user_profiles` enforces `id = auth.uid()` for SELECT.
+- Unpublished programs cannot be saved.
+- Tokens are never logged or returned in responses.
+- Cross-user access is not possible.
+- Malformed JSON is caught safely and returns `400`.
+- Raw database errors never reach clients.
+
+### Supported Entity Types
+
+Only `program` is supported in Bundle 14. Future bundles may add universities, scholarships,
+guides, or countries.

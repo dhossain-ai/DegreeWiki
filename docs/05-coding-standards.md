@@ -113,6 +113,14 @@ Direct browser Supabase writes are allowed only when RLS fully protects the acti
 
 Sensitive actions must use server endpoints.
 
+## Mobile Bearer Auth
+
+Mobile API endpoints under `/api/mobile/me` use bearer-token authentication instead of cookies.
+The pattern creates a Supabase anon client with the user's access token injected as an
+Authorization header, preserving RLS without the service-role key. The helper is in
+`src/lib/mobile/auth.ts`. Public mobile endpoints continue to use the unauthenticated anon
+client in `src/lib/mobile/public.ts`.
+
 ## Migrations
 
 Every schema change must be a migration.

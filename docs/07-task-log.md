@@ -5,6 +5,45 @@
 
 ## Recent Task Log
 
+
+### Bundle 14 - Mobile Profile + Saved Programs API
+
+- Added secure bearer-token mobile endpoints for the authenticated user profile and Saved Programs.
+- Created `src/lib/mobile/auth.ts` — reusable bearer-token authentication helper that validates
+  tokens through Supabase Auth, creates an authenticated anon client with the token injected as
+  an Authorization header, and preserves RLS without cookies or the service-role key.
+- Created `GET /api/mobile/me` — returns the authenticated user identity, optional profile,
+  and saved-item summary. A missing `user_profiles` row returns `profile: null` without error.
+- Created `GET /api/mobile/me/saved-items` — returns saved programs newest first with joined
+  program details. Excludes unpublished programs. Empty list is valid `200`.
+- Created `POST /api/mobile/me/saved-items` — validates JSON body, verifies published program,
+  idempotent upsert via `onConflict` unique constraint. Returns saved item details.
+- Created `DELETE /api/mobile/me/saved-items/[savedItemId]` — RLS-scoped deletion, idempotent.
+- No service-role key. No client-provided user ID. RLS enforces `user_id = auth.uid()`.
+- No schema changes. No new dependencies. No Android modifications. No public web UI changes.
+- Only `program` entity type supported.
+
+#### Files Created
+
+- `src/lib/mobile/auth.ts`
+- `src/pages/api/mobile/me/index.ts`
+- `src/pages/api/mobile/me/saved-items/index.ts`
+- `src/pages/api/mobile/me/saved-items/[savedItemId].ts`
+
+#### Files Modified
+
+- `docs/11-mobile-api.md`
+- `docs/05-coding-standards.md`
+- `docs/06-status.md`
+- `docs/07-task-log.md`
+
+#### Validation
+
+- `npm run build` passed.
+- Security grep checks passed.
+- Unauthenticated QA: all four endpoints return `401`.
+- Authenticated QA marked as pending.
+
 ### Bundle 13.1 - Scholarship/Guide API Runtime Fix
 
 - Diagnosed production `500 error code: 1101` responses from the scholarship and guide list/detail
