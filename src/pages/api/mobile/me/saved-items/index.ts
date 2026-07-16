@@ -31,46 +31,66 @@ export const GET: APIRoute = async ({ request }) => {
   const { supabase } = auth
 
   // RLS on saved_items ensures only the authenticated user's rows are returned.
-  const { data, error } = await supabase
+  // saved_items uses a generic entity_id column with no FK to programs, so we
+  // cannot use PostgREST embedded joins. Fetch saved items first, then batch-
+  // fetch the corresponding programs in a separate query.
+  const { data: savedRows, error: savedError } = await supabase
     .from('saved_items')
-    .select(`
-      id,
-      entity_type,
-      entity_id,
-      created_at,
-      programs!inner(
-        id,
-        slug,
-        title,
-        content_status,
-        duration_months,
-        tuition_min_amount,
-        tuition_max_amount,
-        tuition_currency,
-        tuition_period,
-        universities(name),
-        countries(name),
-        degree_levels(name),
-        subjects!programs_primary_subject_id_fkey(name)
-      )
-    `)
+    .select('id, entity_type, entity_id, created_at')
     .eq('entity_type', 'program')
     .order('created_at', { ascending: false })
 
-  if (error) {
-    console.error('mobile saved-items GET: list failed:', error.message)
+  if (savedError) {
+    console.error('mobile saved-items GET: list failed:', savedError.message)
     return credentialsErrorResponse()
   }
 
-  // Filter out saved items whose programs are no longer published,
-  // and normalise the response shape.
-  const items = (data ?? [])
-    .filter((row: any) => {
-      const program = row.programs
-      return program && program.content_status === 'published'
-    })
+  const rows = savedRows ?? []
+
+  // Early return when there are no saved programs.
+  if (rows.length === 0) {
+    return jsonResponse(200, { ok: true, items: [] })
+  }
+
+  // Batch-fetch the programs referenced by saved items.
+  const programIds = rows.map((r: any) => r.entity_id)
+  const { data: programs, error: programError } = await supabase
+    .from('programs')
+    .select(`
+      id,
+      slug,
+      title,
+      content_status,
+      duration_months,
+      tuition_min_amount,
+      tuition_max_amount,
+      tuition_currency,
+      tuition_period,
+      universities(name),
+      countries(name),
+      degree_levels(name),
+      subjects!programs_primary_subject_id_fkey(name)
+    `)
+    .in('id', programIds)
+    .eq('content_status', 'published')
+
+  if (programError) {
+    console.error('mobile saved-items GET: program fetch failed:', programError.message)
+    return credentialsErrorResponse()
+  }
+
+  // Index programs by ID for fast lookup.
+  const programMap = new Map<string, any>()
+  for (const p of programs ?? []) {
+    programMap.set(p.id, p)
+  }
+
+  // Build the response, excluding saved items whose programs are no longer
+  // published or missing.
+  const items = rows
+    .filter((row: any) => programMap.has(row.entity_id))
     .map((row: any) => {
-      const program = row.programs
+      const program = programMap.get(row.entity_id)
       const tuition = formatTuitionSummary(
         program.tuition_min_amount,
         program.tuition_max_amount,
